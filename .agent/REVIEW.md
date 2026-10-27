@@ -4,7 +4,7 @@
 
 VERIFIED WITH LIMITATIONS
 
-Latest review: **round 6**, `93f14f3..db1fb7b`; round 5 P1 resolved, round 4 reads preserved. No new in-scope regression found. Preexisting heuristic gaps remain assigned to the separate server-side read-only task. See appended review.
+Latest review: **round 7**, `db1fb7b..d52a06d`; standard-comment regression resolved, PostgreSQL/MySQL behavior and round 4 reads preserved. No additional executable-write regression against main found. Preexisting heuristic gaps remain assigned to the separate server-side read-only task. See appended review.
 
 Reviewed `main..6f853c31b22f76672db0dace4a6d10adf8152533` on `fix/backup-restore-safety`, against the human-approved batch 1 requirements. No application source changed.
 
@@ -303,3 +303,30 @@ Keep engine-specific comment/dollar-quote rules, but conservatively consider the
 - Reviewer differential probes transpiled the actual classifier at `93f14f3` and `db1fb7b`: **11 cases / 22 assertions passed**. Three reported writes changed false → true; seven round 4 engine-specific reads and one explicit E-string read stayed false. No probe files retained.
 - Classification remains a heuristic, not server-side read-only authorization. Preexisting side-effect-function gaps, other/unknown dialect mismatches, and editor live-mode/authentication races remain limitations for the separate task, not new blockers. Considering both unknown session settings can conservatively flag ambiguous ordinary strings; this follows the agreed fix and does not reblock the named round 4 reads.
 - No live database execution, native dialogs/Touch ID, desktop UI or Rust checks performed. Hook tests mock native validation, execution and authentication. No Rust files changed. Only `.agent/REVIEW.md` changed; unrelated `.claude/launch.json` preserved. No source edits, commit, push or merge.
+
+
+## Re-review (round 7)
+
+**Status: VERIFIED WITH LIMITATIONS.** Reviewed `db1fb7b..d52a06d` on `fix/backup-restore-safety` (2026-10-27), including the comparison against main requested for rounds 4–6. Checkout HEAD `1ab1043` differs from `d52a06d` only in review documentation; application code tested matches the requested commit. Main reference: `aa4d22d`. No new in-scope findings requiring changes. No source code modified.
+
+### Regression disposition and refactor assessment
+
+- **Reported standard-comment regression — resolved.** `src/lib/sql/detect.ts:122` defines flat block comments, unconditional dash comments and no hash comments; `:289` adds this reading for every engine other than PostgreSQL/MySQL/MariaDB, including unknown or omitted engines. For `--x\n/* /* */ DELETE FROM t`, main returns true, `db1fb7b` returns false on these routes, and `d52a06d` returns true. Reviewer checked every declared engine key plus an unknown key and undefined. SQLite execution was independently confirmed using a disposable Python SQLite `:memory:` database: one inserted row, statement executed, zero remaining rows. No customer or disk database accessed.
+- **PostgreSQL/MySQL rules — unchanged.** Table entries at `src/lib/sql/detect.ts:104` and `:111` preserve each former boolean predicate: nested comments, dash/hash comments, dollar quotes, E-string escapes and double-quote escapes. The quote rewrite at `:192` is equivalent for single, double and backtick quotes under both escape settings. Known-engine routing at `:287`–`:288` and both session readings at `:301` are retained. Other/unknown engines retain both former readings and add a third; no former positive can become negative through this addition.
+- **Round 4 reads and round 5 writes — preserved.** Classifier tests at `src/lib/sql/detect.test.ts:103`, `:117` and `:141` pass, including dollar-string reads, PostgreSQL no-space dash comments, MySQL/MariaDB hash-comment reads and session string-mode writes. No incompatible reading was added to known PostgreSQL/MySQL routes.
+- **Comparison with main — no additional executable-write regression found.** Main skips only leading whitespace, unconditional dash comments and flat block comments, then checks the same DDL/DML/transaction head regexes retained here. For other/unknown engines, the added standard reading preserves that leading-comment interpretation and those initial write keywords. For PostgreSQL/MySQL, reviewed main-positive/current-negative cases against their actual comment rules rather than treating every classifier difference as an executable write. In the generated corpus, all 292 such engine/case differences were confined to PostgreSQL nested comments hiding the apparent write, or MySQL/MariaDB inputs beginning with an incompatible no-whitespace dash prefix (`--x`). They do not establish executable writes on those selected engines. No such differences occurred for other/unknown engines.
+- **Both restricted gates consume the fix.** `src/screens/connection/hooks/useSqlRunner.ts:651` (Production) and `:671` (Lock) call the same classifier with the connection engine; neither changed. Dump restrictions remain independent of this classifier.
+
+### Tests and verification
+
+- `src/lib/sql/detect.test.ts:156` adds DELETE and DROP reproductions for SQLite, Oracle, D1, Turso, SQL Server and omitted engine. The committed array omits a literal unknown engine and other declared engine keys; reviewer differential probes cover their shared fallback route. Nonblocking coverage improvement.
+- `src/screens/connection/hooks/useSqlRunner.safety.test.ts:63` adds the real-hook SQLite Lock reproduction. Assertions at `:66`–`:68` require both no execution and the actual Lock error, preventing unrelated early exits from passing. Paired allowed-read cases remain at `:71`. Production is still covered by static shared-classifier tracing rather than a committed Production hook regression; nonblocking coverage limitation.
+- `npm run build`: **passed**, TypeScript and production Vite build. Existing warnings: browser externalization of `node:zlib`, ineffective dynamic imports and large chunks.
+- `npm run test:run -- --exclude '**/.claude/**' src/lib/sql src/lib/dump src/screens/connection/hooks/useDatabaseBackup.restore.test.ts src/screens/connection/hooks/useDatabaseBackup.free.test.ts src/screens/connection/hooks/useSqlRunner.sequential.test.ts src/screens/connection/hooks/useSqlRunner.explainAnalyze.test.ts src/screens/connection/hooks/useSqlRunner.safety.test.ts src/screens/connection/hooks/useSqlHistoryRunner.test.ts src/lib/ai-assistant/agent.test.ts`: **17 files / 288 tests passed**.
+- Reviewer differential probes transpiled actual classifiers from main, `db1fb7b` and `d52a06d`: **17,586 distinct inputs**, generated from comment/quote/write combinations plus deterministic token fuzzing; **70,344 exact executable-text comparisons** across PostgreSQL/MySQL and both escape settings; **298,962 engine/case comparisons** across all 15 declared engines, an unknown engine and undefined. All known-engine results equal `db1fb7b`; every old positive remains positive for fallback engines. Main differences inspected as described above. This corpus is evidence, not an exhaustive proof over all SQL grammars. Probe artifacts stayed under `/tmp`.
+
+### Limitations
+
+Classifier remains heuristic. Preexisting gaps also missed by main, including side-effect functions, remain for the separate server-side read-only enforcement task. No new requirement to close those gaps in this round. Conservative fallback readings may still reject valid reads. Existing editor live-mode/authentication races remain outside scope.
+
+No external/live database, native dialogs/Touch ID, desktop UI or Rust checks performed; only isolated in-memory SQLite execution. Hook tests mock native execution, validation and authentication. Only `.agent/REVIEW.md` changed; unrelated `.claude/launch.json` preserved. No source edits, commit, push or merge.
