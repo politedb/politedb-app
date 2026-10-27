@@ -213,7 +213,6 @@ export function NavigationTabs({
         {
           type: "item",
           label: "Close All",
-          shortcut: "⌘⇧W",
           onClick: () => closeMany(openWindows.map((w) => w.id)),
         },
       ]

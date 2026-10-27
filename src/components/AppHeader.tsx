@@ -1,7 +1,14 @@
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { XIcon, DatabaseIcon } from "./icons";
 import { ReactNode } from "preact/compat";
-import { useMemo, useRef, useCallback, useState } from "preact/hooks";
+import {
+  useMemo,
+  useRef,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useState,
+} from "preact/hooks";
 
 import { ProfileTab, useScreenStore } from "../stores/screen";
 import { Button } from "./common/Button";
@@ -9,6 +16,7 @@ import { requestCloseConnectionTab } from "src/screens/connection/lib/connection
 import { DbIcon } from "./icons/DbIcon";
 import { ContextMenu, type MenuItem } from "./common/ContextMenu";
 import { cn } from "../utils/cn";
+import { normalizeEngineName } from "../utils/convert";
 import {
   formatShortcutLabel,
   useKeyboardShortcutsStore,
@@ -100,6 +108,42 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
     [win]
   );
 
+  // The tab strip scrolls sideways without a scrollbar: keep the active tab
+  // in view and fade the edges that hide more tabs.
+  const stripRef = useRef<HTMLDivElement>(null);
+  const [hidden, setHidden] = useState({ left: false, right: false });
+  const updateHidden = useCallback(() => {
+    const el = stripRef.current;
+    if (!el) return;
+    const left = el.scrollLeft > 1;
+    const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+    setHidden((prev) =>
+      prev.left === left && prev.right === right ? prev : { left, right }
+    );
+  }, []);
+
+  useLayoutEffect(() => {
+    const el = stripRef.current;
+    const active = el?.querySelector<HTMLElement>('[aria-selected="true"]');
+    active?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    updateHidden();
+  }, [activeProfileScreen, profileTabs.length, updateHidden]);
+
+  useEffect(() => {
+    const el = stripRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(updateHidden);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [updateHidden]);
+
+  const handleStripWheel = useCallback((e: WheelEvent) => {
+    const el = stripRef.current;
+    // A plain mouse wheel only scrolls vertically: move the tabs sideways.
+    if (!el || e.deltaX !== 0 || e.deltaY === 0) return;
+    el.scrollLeft += e.deltaY;
+  }, []);
+
   const handleTabSelect = useCallback(
     (tabId: string) => {
       setActiveProfileScreen(tabId);
@@ -152,7 +196,6 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
         {
           type: "item",
           label: "Close All",
-          shortcut: "⌘⇧W",
           disabled: profileTabs.length === 0,
           onClick: () => void closeTabs(profileTabs.map((tab) => tab.id)),
         },
@@ -213,8 +256,13 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
           })}
         </div>
 
-        <div class="flex min-w-0 flex-1 items-center">
-          <div class="no-scrollbar flex items-center gap-1 overflow-x-auto rounded-lg py-1 pr-2 pl-0">
+        <div class="relative flex min-w-0 flex-1 items-center">
+          <div
+            ref={stripRef}
+            onScroll={updateHidden}
+            onWheel={handleStripWheel}
+            class="no-scrollbar flex items-center gap-1 overflow-x-auto rounded-lg py-1 pr-2 pl-0"
+          >
             {profileTabs.map((tab, tabIndex) => {
               const isActive = activeProfileScreen === tab.id;
 
@@ -223,6 +271,7 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
                   key={tab.id}
                   role="tab"
                   aria-selected={isActive}
+                  title={`${tab.label} · ${normalizeEngineName(tab.engine)}`}
                   onClick={(e) => {
                     e.stopPropagation();
                     handleTabSelect(tab.id);
@@ -277,6 +326,20 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
               );
             })}
           </div>
+          {hidden.left ? (
+            <div
+              aria-hidden="true"
+              data-testid="tabs-fade-left"
+              class="pointer-events-none absolute inset-y-0 left-0 w-8 bg-linear-to-r from-white to-transparent dark:from-[#181818]"
+            />
+          ) : null}
+          {hidden.right ? (
+            <div
+              aria-hidden="true"
+              data-testid="tabs-fade-right"
+              class="pointer-events-none absolute inset-y-0 right-0 w-8 bg-linear-to-l from-white to-transparent dark:from-[#181818]"
+            />
+          ) : null}
         </div>
       </div>
 

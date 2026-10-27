@@ -189,4 +189,21 @@ describe("FloatingAssistantLauncher", () => {
     expect(root.style.right).toBe("124px");
     expect(root.style.bottom).toBe("124px");
   });
+
+  it("returns to its spot after the window was briefly tiny", () => {
+    const size = { w: window.innerWidth, h: window.innerHeight };
+    const resize = (w: number, height: number) => {
+      Object.assign(window, { innerWidth: w, innerHeight: height });
+      fireEvent(window, new Event("resize"));
+    };
+    try {
+      resize(0, 0);
+      const { root } = setup();
+      resize(1280, 800);
+      expect(root.style.right).toBe("24px");
+      expect(root.style.bottom).toBe("36px");
+    } finally {
+      resize(size.w, size.h);
+    }
+  });
 });

@@ -26,7 +26,7 @@ describe("clampLauncherPosition", () => {
     ).toEqual({ right: 8, bottom: 700 - 40 - 8 });
     expect(
       clampLauncherPosition({ right: 5000, bottom: -3 }, viewport, 40)
-    ).toEqual({ right: 1000 - 40 - 8, bottom: 8 });
+    ).toEqual({ right: 1000 - 40 - 8, bottom: 36 });
   });
 
   it("stays at the edge gap in a window smaller than the button", () => {
@@ -36,7 +36,13 @@ describe("clampLauncherPosition", () => {
         { width: 20, height: 20 },
         40
       )
-    ).toEqual({ right: 8, bottom: 8 });
+    ).toEqual({ right: 8, bottom: 36 });
+  });
+
+  it("never lets the button cover the status bar", () => {
+    expect(
+      clampLauncherPosition({ right: 24, bottom: 8 }, viewport, 40)
+    ).toEqual({ right: 24, bottom: 36 });
   });
 });
 

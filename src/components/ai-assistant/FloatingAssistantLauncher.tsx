@@ -54,31 +54,35 @@ export function FloatingAssistantLauncher() {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   // The button can be dragged anywhere so it never covers what the user needs
-  // to see; the chosen spot is remembered on this device.
-  const [position, setPosition] = useState<LauncherPosition>(() =>
+  // to see; the chosen spot is remembered on this device. It is only fitted
+  // into the window when shown, so a window that is briefly tiny (or reports
+  // no size while starting) never moves the chosen spot for good.
+  const [preferred, setPreferred] = useState<LauncherPosition>(() =>
     loadLauncherPosition()
   );
+  const [viewport, setViewport] = useState(() => ({
+    width: window.innerWidth,
+    height: window.innerHeight,
+  }));
   const suppressClick = useRef(false);
 
   const fit = useCallback(
     (next: LauncherPosition) => {
       // While closed the root holds only the button.
       const size = (!open && rootRef.current?.offsetWidth) || 40;
-      return clampLauncherPosition(
-        next,
-        { width: window.innerWidth, height: window.innerHeight },
-        size
-      );
+      return clampLauncherPosition(next, viewport, size);
     },
-    [open]
+    [open, viewport]
   );
+  const position = fit(preferred);
 
   useEffect(() => {
-    const onResize = () => setPosition((current) => fit(current));
+    const onResize = () =>
+      setViewport({ width: window.innerWidth, height: window.innerHeight });
     onResize();
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, [fit]);
+  }, []);
 
   // Latest values for the window listeners of a drag in progress.
   const positionRef = useRef(position);
@@ -114,7 +118,7 @@ export function FloatingAssistantLauncher() {
         right: start.right - dx,
         bottom: start.bottom - dy,
       });
-      setPosition(last);
+      setPreferred(last);
     };
     const finish = (e: PointerEvent) => {
       if (e.pointerId !== pointerId) return;
@@ -157,7 +161,7 @@ export function FloatingAssistantLauncher() {
       right: position.right + step[0],
       bottom: position.bottom + step[1],
     });
-    setPosition(next);
+    setPreferred(next);
     saveLauncherPosition(next);
   };
   const activeProfileScreen = useScreenStore(
