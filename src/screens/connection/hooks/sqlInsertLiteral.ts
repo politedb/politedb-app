@@ -94,7 +94,16 @@ export function formatSqlInsertValue(
   }
 
   if (obj?.t === "Str") {
-    return sqlQuoteString(String(obj.v ?? ""), engine);
+    const quoted = sqlQuoteString(String(obj.v ?? ""), engine);
+    // A typed numeric: assigned to a money column it converts as a number,
+    // not through money's locale-dependent text input.
+    if (
+      engine === "postgres" &&
+      (dbType === "numeric" || dbType === "numeric[]")
+    ) {
+      return `${quoted}::${dbType}`;
+    }
+    return quoted;
   }
 
   if (typeof cell === "boolean") return cell ? "TRUE" : "FALSE";

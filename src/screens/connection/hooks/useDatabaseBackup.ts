@@ -419,52 +419,101 @@ async function sortTablesByForeignKeys(args: {
  *   from a composite whose fields are all NULL.
  * - The stream runs with fixed text formats (canonicalTextOutput): ISO
  *   dates, ISO 8601 intervals and exact floats, read the same anywhere.
- * - money is written as its numeric amount: its text form follows the
- *   server's currency locale.
+ * - money follows the server's currency locale in text, and restoring
+ *   money text reads it in the target's locale: money (and money[]) is
+ *   read as numeric and written as a typed numeric, which converts to
+ *   money as a number. Money inside a composite or range type cannot be
+ *   written that way, so its backup stops (postgresMoneyColumns).
  */
 export function postgresBackupRowsQuery(
   schema: string,
   tableName: string,
   columns: string[],
-  /** Columns of type money (or a domain over it). */
-  moneyColumns: ReadonlySet<string> = new Set()
+  /** Columns of type money or money[] (or domains over them). */
+  money: PostgresMoneyColumns = { scalar: new Set(), array: new Set() }
 ): string {
   const cols = columns
     .map((c) => {
       const id = qIdent(c, "postgres");
-      const value = moneyColumns.has(c)
+      const value = money.scalar.has(c)
         ? `(${id})::numeric::text`
-        : `format('%s', ${id})`;
+        : money.array.has(c)
+          ? `(${id})::numeric[]::text`
+          : `format('%s', ${id})`;
       return `CASE WHEN num_nulls(${id}) = 1 THEN NULL ELSE ${value} END AS ${id}`;
     })
     .join(", ");
   return `SELECT ${cols} FROM ${qIdent(schema, "postgres")}.${qIdent(tableName, "postgres")};`;
 }
 
-/** The table's columns of type money, or a domain over it. */
-async function postgresMoneyColumns(
+export type PostgresMoneyColumns = {
+  scalar: ReadonlySet<string>;
+  array: ReadonlySet<string>;
+};
+
+/**
+ * The table's columns holding money: as the column's type (or a domain
+ * over it), as the element of its array type, or deeper. Deeper (in a
+ * composite, a range, an array of arrays' domains…) throws: that text
+ * would restore differently under another currency locale.
+ */
+export async function postgresMoneyColumns(
   connectionId: string,
   schema: string,
   tableName: string
-): Promise<Set<string>> {
+): Promise<PostgresMoneyColumns> {
+  // Walks each column's type: domains (no step), arrays ("a"), composite
+  // fields ("c"), ranges and multiranges ("r"), down to money.
   const res = await runSqlQuery(
     connectionId,
     `
-      SELECT a.attname
-      FROM pg_attribute a
-      JOIN pg_class c ON c.oid = a.attrelid
-      JOIN pg_namespace n ON n.oid = c.relnamespace
-      JOIN pg_type t ON t.oid = a.atttypid
-      WHERE n.nspname = ${qLiteral(schema)}
-        AND c.relname = ${qLiteral(tableName)}
-        AND a.attnum > 0
-        AND NOT a.attisdropped
-        AND (t.oid = 'money'::regtype OR t.typbasetype = 'money'::regtype);
+      WITH RECURSIVE walk(attname, oid, steps) AS (
+        SELECT a.attname, a.atttypid, ''::text
+        FROM pg_attribute a
+        JOIN pg_class c ON c.oid = a.attrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = ${qLiteral(schema)}
+          AND c.relname = ${qLiteral(tableName)}
+          AND a.attnum > 0
+          AND NOT a.attisdropped
+        UNION
+        SELECT w.attname, nxt.oid, w.steps || nxt.step
+        FROM walk w
+        JOIN pg_type t ON t.oid = w.oid
+        CROSS JOIN LATERAL (
+          SELECT t.typbasetype, '' WHERE t.typtype = 'd'
+          UNION ALL
+          SELECT t.typelem, 'a' WHERE t.typcategory = 'A' AND t.typelem <> 0
+          UNION ALL
+          SELECT f.atttypid, 'c'
+          FROM pg_attribute f
+          WHERE t.typtype = 'c' AND f.attrelid = t.typrelid
+            AND f.attnum > 0 AND NOT f.attisdropped
+          UNION ALL
+          SELECT r.rngsubtype, 'r' FROM pg_range r WHERE r.rngtypid = t.oid
+          UNION ALL
+          SELECT r.rngtypid, 'r' FROM pg_range r WHERE r.rngmultitypid = t.oid
+        ) nxt(oid, step)
+        WHERE length(w.steps) < 16
+      )
+      SELECT attname, steps FROM walk WHERE oid = 'money'::regtype;
     `
   );
-  return new Set(
-    (res.rows ?? []).map((r: any) => cellToString(r?.[0]) ?? "").filter(Boolean)
-  );
+  const scalar = new Set<string>();
+  const array = new Set<string>();
+  for (const r of (res.rows ?? []) as any[]) {
+    const name = cellToString(r?.[0]) ?? "";
+    const steps = cellToString(r?.[1], true) ?? "";
+    if (!name) continue;
+    if (steps === "") scalar.add(name);
+    else if (steps === "a") array.add(name);
+    else {
+      throw new Error(
+        `The column "${name}" of ${schema}.${tableName} holds money inside another type. Money text depends on the server's currency locale and might restore as another amount, so nothing was backed up. Change the column to numeric, or back it up with pg_dump.`
+      );
+    }
+  }
+  return { scalar, array };
 }
 
 async function exportTableToSqlParts(args: {
@@ -477,15 +526,13 @@ async function exportTableToSqlParts(args: {
 }) {
   const { append, connectionId, engine, schema, tableName, columns } = args;
 
-  const query =
+  const money =
     engine === "postgres"
-      ? postgresBackupRowsQuery(
-          schema,
-          tableName,
-          columns,
-          await postgresMoneyColumns(connectionId, schema, tableName)
-        )
-      : tableExportQuery(schema, tableName, columns, undefined, "AND", engine);
+      ? await postgresMoneyColumns(connectionId, schema, tableName)
+      : null;
+  const query = money
+    ? postgresBackupRowsQuery(schema, tableName, columns, money)
+    : tableExportQuery(schema, tableName, columns, undefined, "AND", engine);
   const opId = await startSqlQueryStream(connectionId, query, {
     batchSize: 250,
     maxRows: 10_000_000,
@@ -517,6 +564,16 @@ async function exportTableToSqlParts(args: {
         if (chunk.columns?.length) {
           columnNames = chunk.columns.map((c) => c.name).filter(Boolean);
           columnTypes = chunk.columns.map((c) => String(c.db_type ?? ""));
+          // Money read as numeric is written as a typed numeric.
+          if (money) {
+            columnTypes = columnTypes.map((type, i) =>
+              money.scalar.has(columnNames[i]!)
+                ? "numeric"
+                : money.array.has(columnNames[i]!)
+                  ? "numeric[]"
+                  : type
+            );
+          }
         }
 
         const content = formatSqlInsertChunk({

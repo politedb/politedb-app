@@ -13,6 +13,7 @@ import {
   buildPostgresTypesSql,
   dumpCommentName,
   postgresBackupRowsQuery,
+  postgresMoneyColumns,
 } from "./useDatabaseBackup";
 import { formatSqlInsertChunk } from "./sqlInsertLiteral";
 import { splitSqlStatements } from "src/components/editor/splitSqlStatements";
@@ -345,9 +346,66 @@ describe("postgresBackupRowsQuery", () => {
     );
   });
 
-  it("reads money as its numeric amount", () => {
-    expect(postgresBackupRowsQuery("s", "t", ["m"], new Set(["m"]))).toBe(
-      'SELECT CASE WHEN num_nulls("m") = 1 THEN NULL ELSE ("m")::numeric::text END AS "m" FROM "s"."t";'
+  it("reads money and money[] as numeric", () => {
+    expect(
+      postgresBackupRowsQuery("s", "t", ["m", "ms"], {
+        scalar: new Set(["m"]),
+        array: new Set(["ms"]),
+      })
+    ).toBe(
+      'SELECT CASE WHEN num_nulls("m") = 1 THEN NULL ELSE ("m")::numeric::text END AS "m", ' +
+        'CASE WHEN num_nulls("ms") = 1 THEN NULL ELSE ("ms")::numeric[]::text END AS "ms" FROM "s"."t";'
+    );
+  });
+
+  it("writes money read as numeric as a typed numeric", () => {
+    const sql = formatSqlInsertChunk({
+      engine: "postgres",
+      schema: "s",
+      tableName: "t",
+      columnNames: ["m", "ms", "x"],
+      columnTypes: ["numeric", "numeric[]", "text"],
+      rows: [
+        [
+          { t: "Str", v: "-1234.56" },
+          { t: "Str", v: "[0:1]={1.5,NULL}" },
+          { t: "Str", v: "1234.56" },
+        ],
+      ],
+      qIdent: (name) => `"${name}"`,
+    });
+    expect(sql).toContain(
+      "('-1234.56'::numeric, '[0:1]={1.5,NULL}'::numeric[], '1234.56')"
+    );
+  });
+
+  it("stops at money inside another type, and reads where money is", async () => {
+    m.runSqlQuery.mockResolvedValueOnce({
+      rows: [
+        [
+          { t: "Str", v: "m" },
+          { t: "Str", v: "" },
+        ],
+        [
+          { t: "Str", v: "ms" },
+          { t: "Str", v: "a" },
+        ],
+      ],
+    });
+    expect(await postgresMoneyColumns("c1", "s", "t")).toEqual({
+      scalar: new Set(["m"]),
+      array: new Set(["ms"]),
+    });
+    m.runSqlQuery.mockResolvedValueOnce({
+      rows: [
+        [
+          { t: "Str", v: "addr" },
+          { t: "Str", v: "c" },
+        ],
+      ],
+    });
+    await expect(postgresMoneyColumns("c1", "s", "t")).rejects.toThrow(
+      /"addr" .* holds money inside another type/
     );
   });
 
