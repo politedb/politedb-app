@@ -4,6 +4,8 @@
 
 CHANGES REQUIRED
 
+Latest review: **round 3**, `b21d19f..95674cf`; see appended findings and verification.
+
 Reviewed `main..6f853c31b22f76672db0dace4a6d10adf8152533` on `fix/backup-restore-safety`, against the human-approved batch 1 requirements. No application source changed.
 
 ## Findings
@@ -101,3 +103,69 @@ WITH t AS (SELECT 1 /* DELETE */) SELECT * FROM t;
 - Temporary reviewer suites: **2 files, 40 tests passed**, comprising 29 copied baseline cases plus 11 additional cases. Six verify deferred authentication/constraint races and partial restore/import refresh callbacks; five assert the observed SQL runner false negative/false positives above. Passing reproduction assertions demonstrate defects, not correct authorization. Initial Production probe lacked a native-auth mock; corrected the harness and reran successfully. Direct classifier probes also reproduced both commented SET forms. All temporary fixtures/config removed.
 - Committed tests now cover the original authentication transitions, a mid-run lock, Safe authentication once per run, and import refusal. However, `src/screens/connection/hooks/useDatabaseBackup.restore.test.ts:175` checks partial-stop messages without asserting schema refresh/callback behavior; no committed deferred constraint-lookup case exists. Preserve the reviewer-proven behavior with these focused regressions. Classifier tests need WITH-prefixed SELECT INTO, inter-token comments, dollar quotes and keyword-bearing inline comments.
 - No live database writes, native Touch ID/dialog interaction, or desktop UI session exercised. Dispatch behavior verified with mocks; database effects assessed from SQL/source. No Rust changes/checks. Only this review document retained as a change; unrelated `.claude/launch.json` preserved. No source edits or commit.
+
+
+## Re-review (round 3)
+
+**Status: CHANGES REQUIRED.** Reviewed `b21d19f..95674cf` on `fix/backup-restore-safety` (2026-10-27). HEAD `8fc2606` differs from `95674cf` only in review documentation; application source matches the requested fix. No application source modified.
+
+### Round 2 findings and test fixes
+
+- **P1 named reproductions resolved:** WITH-prefixed SELECT INTO, commented SET GLOBAL, commented @@global, and GLOBAL later in a SET list now classify as writes. Reviewer runner tests confirm all four are blocked in both Lock and Production.
+- **P2 named reproductions resolved:** `SELECT $$into$$`, `SELECT 1 /* INTO */`, and a read-only WITH containing a DELETE comment now classify as reads and reach dispatch in both modes. Executable MySQL/MariaDB comments remain writes. However, additional false negatives and false positives below prevent closing either classifier finding as fully resolved.
+- **Partial authorization-stop refresh regression covered:** `src/screens/connection/hooks/useDatabaseBackup.restore.test.ts:179` now asserts one query dispatched, schema refresh once, callback once, and partial-progress wording. The new test at `:243` asserts no refresh/callback if authorization stops before any dispatch. Both pass. Deferred constraint-lookup and table-import callback regression coverage remain absent; no new defect in those unchanged implementations was identified in this round.
+
+### P1 — Dialect-specific line comments hide executable writes
+
+**Locations:** `src/lib/sql/detect.ts:89`, `:174`; consumers `src/screens/connection/hooks/useSqlRunner.ts:651`, `:671`.
+
+Every lexer reading treats `#` and every `--` as a line comment. PostgreSQL uses `#` for XOR and JSON operators; MySQL requires whitespace/control after the second dash for a comment. Consequently these executable writes return `false`:
+
+```sql
+-- PostgreSQL: each creates a table, or deletes rows.
+SELECT 1 # 2 INTO backup_x;
+SELECT '{"a":1}'::jsonb #>> '{a}' INTO backup_json;
+WITH t AS (SELECT 1 # 2) DELETE FROM a;
+-- MySQL: subtracting negative one, then writing a file.
+SELECT 1--1 INTO OUTFILE '/tmp/reviewer-probe';
+```
+
+Reviewer hook probes confirm all four pass client validation and reach `onRunSql` in **both Lock and Production**, with Production authentication mocked successful. Backend syntax validation is mocked in these probes; its real request (`src/lib/tauri/queryValidate.ts:160`) supplies no safety/read-only enforcement. The unconditional dump refusal remains unaffected.
+
+The PostgreSQL `#` cases regress from `b21d19f`, whose keyword scan retained inline operators; the MySQL dash case is a remaining earlier gap. Extend dialect readings to line-comment rules too, preserving operator tokens in the PostgreSQL/MySQL arithmetic reading. Add classifier and runner regressions for operators before INTO and before writable CTE/final DML. Syntax basis: [PostgreSQL math operators](https://www.postgresql.org/docs/current/functions-math.html), [JSON operators](https://www.postgresql.org/docs/current/functions-json.html), [MySQL comments](https://dev.mysql.com/doc/refman/8.4/en/comments.html).
+
+### P2 — The no-escape reading exposes keywords inside explicit escape strings
+
+**Locations:** `src/lib/sql/detect.ts:112`, `:115`, `:175`.
+
+```sql
+SELECT E'it\'s INTO text';
+```
+
+This valid PostgreSQL read returns `true` and is blocked before dispatch in both Lock and Production. The no-backslash reading closes the string at the escaped quote and sees INTO as executable text; the valid escape-aware reading cannot override that result. Recognize explicit `E'…'` strings and always apply their escape rules rather than considering an invalid alternate interpretation. Add escaped-quote/keyword read regressions. [PostgreSQL escape-string rules](https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-SYNTAX-STRINGS-ESCAPE) explicitly require backslash handling for E strings. This false positive remains despite the quoted-text rewrite; do not treat all dialect unions as valid readings for every token.
+
+### P2 — JavaScript word boundaries split valid SQL identifiers at dollar signs
+
+**Locations:** `src/lib/sql/detect.ts:67`, `:68`, `:161`, `:164`.
+
+```sql
+SELECT cost$into FROM a;
+WITH t AS (SELECT cost$delete FROM a) SELECT * FROM t;
+```
+
+Both return `true` and are blocked in both restricted modes. These are valid unquoted PostgreSQL identifiers, not INTO/DELETE tokens. The dollar-quote guard at `:133` avoids stripping an identifier as a string, but the subsequent `\b` regexes still split it at `$`. Match complete SQL identifier/keyword tokens (including dollar signs and supported non-ASCII identifier characters), then compare keyword tokens. Add these reads alongside actual INTO/DELETE write cases. [PostgreSQL identifier rules](https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-SYNTAX-IDENTIFIERS) permit dollar signs after the first character. This is a remaining classifier gap, not a newly introduced dollar-quote bypass.
+
+### Additional preexisting P1 limitation — typed EXPLAIN ANALYZE writes bypass the editor gate
+
+**Locations:** `src/lib/sql/detect.ts:148`, `:165`; `src/screens/connection/hooks/useSqlRunner.ts:651`, `:671`.
+
+`EXPLAIN ANALYZE DELETE FROM a;` returns `false` and reaches `onRunSql` in both restricted modes in reviewer probes. `codeIsWrite` has no EXPLAIN handling and defaults to read. PostgreSQL [executes the underlying statement when ANALYZE is enabled](https://www.postgresql.org/docs/current/sql-explain.html); this can delete rows. This predates the reviewed fix and is separate from the dedicated Explain Analyze UI's guards: typing SQL and pressing Run uses `startRun`. Track/fix explicit ANALYZE options and classify the underlying statement, retaining ordinary EXPLAIN and `ANALYZE FALSE` as non-executing plans. Not attributed as a regression of `95674cf`; included because this review explicitly probes remaining SQL editor false negatives.
+
+### Verification and limits
+
+- `npm run build`: **passed**, TypeScript plus production Vite build. Existing warnings: `node:zlib` browser externalization, ineffective dynamic imports, large chunks, plugin timings.
+- Focused committed Vitest suites: **13 files / 232 tests passed** across two runs. Includes classifier, both dump suites, both backup hook suites, sequential SQL runner, Explain Analyze runner, SQL splitter, analyze classifier, query safety, SQL history runner, agent and assistant-submit agent coverage.
+- Temporary reviewer suite: **60 tests passed**. Includes all seven round 2 reproductions directly and through both restricted runner modes; executable comments; four comment/operator write bypasses; three read false positives; typed EXPLAIN ANALYZE; ordinary XOR/JSON reads, dollar quotes/identifiers, and unterminated single/double/dollar strings plus block/line comments. Reproduction assertions intentionally expect the observed defects; passing does **not** validate their authorization behavior. Temporary suite removed after execution.
+- Ordinary tested XOR/JSON reads return false; the operator problem is hidden writes later on the same line. Unterminated quoted/comment tails containing write keywords return false without crashing; malformed SQL remains the backend validator's responsibility. No claim that malformed SQL is valid or that heuristic classification is a complete database write boundary (e.g. side effects in called functions).
+- Committed classifier tests cover the previous named failures but lack E escape strings, dollar-sign keyword substrings, PostgreSQL operator-before-write cases, MySQL non-comment dashes, and typed EXPLAIN ANALYZE. Restore refresh assertions address the requested partial-stop gap.
+- No live database execution, native Touch ID/dialog session, or desktop UI exercised. Dispatch tested with mocks; SQL semantics checked against official documentation. No Rust changes/checks. SQL editor's previously documented live-mode/authentication race remains outside this fix. Only `.agent/REVIEW.md` retained as a change; unrelated `.claude/launch.json` preserved. No source edits, commit, push or merge.
