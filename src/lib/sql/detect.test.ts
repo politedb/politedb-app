@@ -101,6 +101,60 @@ describe("isMutatingStatement", () => {
   });
 });
 
+describe("isMutatingStatement for a known engine", () => {
+  it.each([
+    // Dollar quotes are PostgreSQL strings, whatever they hold.
+    "SELECT $$ put into box $$;",
+    "SELECT $tag$ put INTO box $tag$;",
+    "WITH t AS (SELECT $$ delete from a $$ AS txt) SELECT * FROM t;",
+    "SELECT $$ /*! text */ $$;",
+    // "--" starts a PostgreSQL comment without a space after it.
+    "SELECT 1 --note INTO backup\n;",
+  ])("reads %s as PostgreSQL", (sql) => {
+    expect(isMutatingStatement(sql, "postgres")).toBe(false);
+  });
+
+  it.each(["mysql", "mariadb"])("reads a # comment as %s", (engine) => {
+    expect(isMutatingStatement("SELECT 1 # note INTO backup\n;", engine)).toBe(
+      false
+    );
+  });
+
+  it("still catches each dialect's own hidden writes", () => {
+    expect(isMutatingStatement("SELECT 1 # 2 INTO backup_x;", "postgres")).toBe(
+      true
+    );
+    expect(
+      isMutatingStatement("SELECT 1--1 INTO OUTFILE '/tmp/x';", "mysql")
+    ).toBe(true);
+    expect(isMutatingStatement("/*!50000 DROP TABLE a */;", "mysql")).toBe(
+      true
+    );
+    expect(
+      isMutatingStatement(
+        "WITH t AS (SELECT 1) SELECT * INTO backup_a FROM t;",
+        "postgres"
+      )
+    ).toBe(true);
+  });
+
+  it("reads other or unknown engines both ways, erring towards a write", () => {
+    expect(isMutatingStatement("SELECT 1 # note INTO backup\n;")).toBe(true);
+    expect(
+      isMutatingStatement("SELECT 1 # note INTO backup\n;", "sqlite")
+    ).toBe(true);
+  });
+
+  it.each([
+    ["EXPLAIN (ANALYZE OFF) DELETE FROM a;", false],
+    ["EXPLAIN (ANALYZE 0) DELETE FROM a;", false],
+    ["EXPLAIN (ANALYZE ON) DELETE FROM a;", true],
+    ["EXPLAIN (ANALYZE 1) DELETE FROM a;", true],
+  ])("treats %s by its ANALYZE option", (sql, write) => {
+    expect(isMutatingStatement(sql, "postgres")).toBe(write);
+  });
+});
+
 describe("isDDLStatement", () => {
   it("still recognises DDL after comments", () => {
     expect(isDDLStatement("-- x\nCREATE TABLE a (id int)")).toBe(true);

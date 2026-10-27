@@ -648,7 +648,7 @@ export function useSqlRunner(args: {
 
         if (effectiveMode === "production") {
           const blockedIndex = list.findIndex((stmt) =>
-            isMutatingStatement(stmt)
+            isMutatingStatement(stmt, engine)
           );
           if (blockedIndex >= 0) {
             appendRun(
@@ -668,7 +668,7 @@ export function useSqlRunner(args: {
 
         if (effectiveMode === "lock") {
           const blockedIndex = list.findIndex((stmt) =>
-            isMutatingStatement(stmt)
+            isMutatingStatement(stmt, engine)
           );
           if (blockedIndex >= 0) {
             appendRun(
@@ -724,6 +724,7 @@ export function useSqlRunner(args: {
     [
       appendRun,
       bumpRunId,
+      engine,
       isProfileLocked,
       runStatements,
       runtimeConnectionId,

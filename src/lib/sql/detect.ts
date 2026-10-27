@@ -216,13 +216,24 @@ function codeIsWrite(code: string): boolean {
 }
 
 /**
- * Whether a statement may change the database (best effort, erring towards
- * yes): Lock and Production block these. The statement is read as
- * PostgreSQL and as MySQL would read it; a write seen by either counts.
+ * How to read a statement for an engine: by its own dialect when it is
+ * PostgreSQL or MySQL/MariaDB, else (other or unknown engines) both ways,
+ * counting a write seen by either.
  */
-export function isMutatingStatement(sql: string) {
+function dialectsFor(engine?: string): readonly Dialect[] {
+  if (engine === "postgres") return ["postgres"];
+  if (engine === "mysql" || engine === "mariadb") return ["mysql"];
+  return ["postgres", "mysql"];
+}
+
+/**
+ * Whether a statement may change the database (best effort, erring towards
+ * yes): Lock and Production block these. Pass the connection's engine so
+ * the statement is read by its dialect's comment and quoting rules.
+ */
+export function isMutatingStatement(sql: string, engine?: string) {
   if (!sql) return false;
-  for (const dialect of ["postgres", "mysql"] as const) {
+  for (const dialect of dialectsFor(engine)) {
     const text = executableText(sql, dialect);
     if (text === null) return true;
     if (codeIsWrite(text.replace(/\s+/g, " ").trim())) return true;
