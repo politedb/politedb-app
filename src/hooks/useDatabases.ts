@@ -34,12 +34,20 @@ interface UseDatabasesParams {
   engine?: DatabaseEngine;
   runtimeConnectionId?: string;
   onOpenDatabase?: (dbName: string) => Promise<void>;
-  /**
-   * Asked before creating, renaming or dropping a database: why it may not
-   * happen now (shown as the error), or null to go ahead.
-   */
-  beforeChange?: (change: DatabaseChange) => Promise<string | null>;
+  /** Checks around creating, renaming or dropping a database. */
+  beforeChange?: (change: DatabaseChange) => DatabaseChangeCheck;
 }
+
+/**
+ * Checks around a database change. Each returns why it may not happen
+ * (shown as the error), or null to go ahead.
+ */
+export type DatabaseChangeCheck = {
+  /** Waits that come first (Touch ID, closing tabs). */
+  prepare: () => Promise<string | null>;
+  /** Run with nothing awaited, right before the SQL is sent. */
+  checkNow: () => string | null;
+};
 
 export type DatabaseChange =
   | { kind: "create"; name: string }
@@ -112,11 +120,14 @@ export function useDatabases({
       setBusy(true);
       setError("");
       try {
-        const blocked = beforeChange ? await beforeChange(change) : null;
-        if (blocked) {
-          setError(blocked);
+        const check = beforeChange?.(change);
+        const refused =
+          (check ? await check.prepare() : null) ?? check?.checkNow() ?? null;
+        if (refused) {
+          setError(refused);
           return false;
         }
+        // Sent in the same turn as checkNow: nothing can change in between.
         await runSqlQuery(runtimeConnectionId, sql);
         await loadDatabases();
         return true;

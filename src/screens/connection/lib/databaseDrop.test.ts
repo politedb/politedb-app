@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useProfileStore } from "src/stores/profile";
 import { useScreenStore } from "src/stores/screen";
+import type { DatabaseChange } from "src/hooks/useDatabases";
 import {
-  beforeDatabaseChange,
+  databaseChangeCheck,
   describeDropError,
   dropFromOwnDatabase,
   tabDatabase,
@@ -24,6 +25,24 @@ vi.mock("./connectionTabClose", () => ({
 vi.mock("src/stores/persistentStore", () => ({
   usePersistentStore: { getState: () => ({ scheduleSave: () => {} }) },
 }));
+
+/** Prepare, then the final check, as the caller runs them. */
+async function beforeDatabaseChange(
+  tabId: string,
+  profileId: string,
+  engine: "postgres" | "mysql",
+  change: DatabaseChange,
+  runtimeConnectionId?: string
+) {
+  const check = databaseChangeCheck(
+    tabId,
+    profileId,
+    engine,
+    change,
+    runtimeConnectionId
+  );
+  return (await check.prepare()) ?? check.checkNow();
+}
 
 function setTabs(tabs: Array<Record<string, unknown>>) {
   useScreenStore.setState({ profileTabs: tabs as never });
@@ -272,5 +291,48 @@ describe("changes while the tabs close", () => {
     expect(
       await beforeDatabaseChange("home", "p1", "postgres", drop)
     ).toContain("is still open");
+  });
+});
+
+describe("changes after each wait", () => {
+  const drop = { kind: "drop", name: "test1" } as const;
+
+  it("closes nothing more once the tab switched to Production", async () => {
+    m.close.mockImplementationOnce(async (id: string) => {
+      setTabs(
+        useScreenStore
+          .getState()
+          .profileTabs.filter((tab) => tab.id !== id)
+          .map((tab) =>
+            tab.id === "home" ? { ...tab, querySafetyMode: "production" } : tab
+          ) as never
+      );
+    });
+    expect(
+      await beforeDatabaseChange("home", "p1", "postgres", drop)
+    ).toContain("Production mode");
+    // t1 closed, t1b left open.
+    expect(m.close.mock.calls.map((call) => call[0])).toEqual(["t1"]);
+  });
+
+  it("checks the state again right before the SQL, with nothing awaited", async () => {
+    const check = databaseChangeCheck("home", "p1", "postgres", drop);
+    expect(await check.prepare()).toBeNull();
+    // A change after preparing (queued work, another event).
+    setTabs(
+      useScreenStore
+        .getState()
+        .profileTabs.map((tab) =>
+          tab.id === "home" ? { ...tab, querySafetyMode: "safe" } : tab
+        ) as never
+    );
+    expect(check.checkNow()).toContain("switched to Safe mode");
+    setTabs([{ id: "home", profileId: "p1", label: "Athena", isLocked: true }]);
+    expect(check.checkNow()).toContain("locked");
+    setTabs([
+      { id: "home", profileId: "p1", label: "Athena" },
+      { id: "late", profileId: "p1", databaseOverride: "test1" },
+    ]);
+    expect(check.checkNow()).toContain("is still open");
   });
 });

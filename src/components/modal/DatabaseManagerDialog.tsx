@@ -21,12 +21,15 @@ import { DatabaseEditorDialog } from "./DatabaseEditorDialog";
 import { ContextMenu, MenuItem } from "src/components/common/ContextMenu";
 import { showMessage } from "src/lib/system-dialog";
 import {
-  beforeDatabaseChange,
+  databaseChangeCheck,
   describeDropError,
   dropFromOwnDatabase,
   tabsOnDatabase,
 } from "src/screens/connection/lib/databaseDrop";
-import type { DatabaseChange } from "src/hooks/useDatabases";
+import type {
+  DatabaseChange,
+  DatabaseChangeCheck,
+} from "src/hooks/useDatabases";
 
 type MenuState = {
   x: number;
@@ -81,16 +84,16 @@ export function DatabaseManagerDialog({
     runtimeConnectionId,
     onOpenDatabase,
     beforeChange: useCallback(
-      (change: DatabaseChange) =>
+      (change: DatabaseChange): DatabaseChangeCheck =>
         tabId && profileId
-          ? beforeDatabaseChange(
+          ? databaseChangeCheck(
               tabId,
               profileId,
               engine,
               change,
               runtimeConnectionId
             )
-          : Promise.resolve(null),
+          : { prepare: async () => null, checkNow: () => null },
       [tabId, profileId, engine, runtimeConnectionId]
     ),
   });

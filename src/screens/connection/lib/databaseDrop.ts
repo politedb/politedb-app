@@ -7,7 +7,10 @@ import { readNeedsTouchId } from "src/lib/queries/querySafety";
 import { securityTouchIdAuthenticate } from "src/lib/tauri/security";
 import { useProfileStore } from "src/stores/profile";
 import { useScreenStore } from "src/stores/screen";
-import type { DatabaseChange } from "src/hooks/useDatabases";
+import type {
+  DatabaseChange,
+  DatabaseChangeCheck,
+} from "src/hooks/useDatabases";
 import type { DatabaseEngine } from "src/types";
 import { requestCloseConnectionTab } from "./connectionTabClose";
 import { connectionTabHasChanges } from "./tabDirty";
@@ -78,32 +81,55 @@ function otherTabsOnDatabase(
 }
 
 /**
- * The check before a database change from a tab. Lock and Production
+ * The checks around a database change from a tab. Lock and Production
  * refuse it, Safe asks for Touch ID (once). A drop also refuses the tab's
  * own database and closes the connection's other tabs using it.
  *
- * Closing tabs and Touch ID wait, and the tab may be switched to another
- * mode, closed or reconnected meanwhile, or a tab opened on the database:
- * everything is checked again after the last wait, so the SQL is sent
- * right after a passing check.
+ * `prepare` waits (Touch ID, closing tabs), and the tab may be switched to
+ * another mode, closed or reconnected meanwhile, or a tab opened on the
+ * database: the state is checked again after every wait, and `checkNow`
+ * checks everything with nothing awaited, for the caller to run right
+ * before sending the SQL.
  */
-export async function beforeDatabaseChange(
+export function databaseChangeCheck(
   tabId: string,
   profileId: string,
   engine: DatabaseEngine | undefined,
   change: DatabaseChange,
   /** The connection the SQL will run on: the tab must still use it. */
   runtimeConnectionId?: string
-): Promise<string | null> {
+): DatabaseChangeCheck {
   let authenticated = false;
 
-  /** The live mode allows the change; asks for Touch ID when Safe. */
-  const modeAllows = async (): Promise<string | null> => {
+  /** The live state allows the change, Touch ID aside. */
+  const stateRefusal = (): string | null => {
+    const tab = useScreenStore
+      .getState()
+      .profileTabs.find((item) => item.id === tabId);
+    if (!tab) return "The connection tab was closed.";
+    const refusal = modeRefusal(tabSafetyModeNow(tabId));
+    if (refusal) return refusal;
+    if (
+      runtimeConnectionId &&
+      tab.runtimeConnectionId !== runtimeConnectionId
+    ) {
+      return "The connection tab reconnected meanwhile, so nothing was changed. Try again.";
+    }
+    if (change.kind === "drop") {
+      return dropFromOwnDatabase(tabId, engine, change.name);
+    }
+    return null;
+  };
+
+  const needsTouchId = () =>
+    !authenticated && readNeedsTouchId(tabSafetyModeNow(tabId)!);
+
+  /** The live state allows the change; asks for Touch ID when Safe. */
+  const ensureAllowed = async (): Promise<string | null> => {
     for (;;) {
-      const mode = tabSafetyModeNow(tabId);
-      const refusal = modeRefusal(mode);
+      const refusal = stateRefusal();
       if (refusal) return refusal;
-      if (authenticated || !readNeedsTouchId(mode!)) return null;
+      if (!needsTouchId()) return null;
       try {
         await securityTouchIdAuthenticate(
           "Authenticate with Touch ID to change databases on this connection."
@@ -112,48 +138,37 @@ export async function beforeDatabaseChange(
         return "Touch ID was not confirmed, so nothing was changed.";
       }
       authenticated = true;
-      // Read the mode again: it may have changed during Touch ID.
+      // Check again: anything may have changed during Touch ID.
     }
   };
 
-  /** Checks with nothing awaited, run last. */
-  const stillValid = (): string | null => {
-    const tab = useScreenStore
-      .getState()
-      .profileTabs.find((item) => item.id === tabId);
-    if (!tab) return "The connection tab was closed.";
-    if (
-      runtimeConnectionId &&
-      tab.runtimeConnectionId !== runtimeConnectionId
-    ) {
-      return "The connection tab reconnected meanwhile, so nothing was changed. Try again.";
-    }
-    if (change.kind !== "drop") return null;
-    const own = dropFromOwnDatabase(tabId, engine, change.name);
-    if (own) return own;
-    const remaining = otherTabsOnDatabase(profileId, change.name, tabId);
-    if (remaining.length === 0) return null;
-    return remaining.some((id) => connectionTabHasChanges(id))
-      ? `A tab using "${change.name}" has unsaved changes. Save or discard them, then drop the database.`
-      : `A tab using "${change.name}" is still open. Close it, then drop the database.`;
+  return {
+    prepare: async () => {
+      const refused = await ensureAllowed();
+      if (refused) return refused;
+      if (change.kind !== "drop") return null;
+      for (const id of otherTabsOnDatabase(profileId, change.name, tabId)) {
+        await requestCloseConnectionTab(id);
+        // Nothing more is closed once the change is no longer allowed.
+        const after = await ensureAllowed();
+        if (after) return after;
+      }
+      return ensureAllowed();
+    },
+    checkNow: () => {
+      const refusal = stateRefusal();
+      if (refusal) return refusal;
+      if (needsTouchId()) {
+        return "This tab was switched to Safe mode meanwhile, so nothing was changed. Try again.";
+      }
+      if (change.kind !== "drop") return null;
+      const remaining = otherTabsOnDatabase(profileId, change.name, tabId);
+      if (remaining.length === 0) return null;
+      return remaining.some((id) => connectionTabHasChanges(id))
+        ? `A tab using "${change.name}" has unsaved changes. Save or discard them, then drop the database.`
+        : `A tab using "${change.name}" is still open. Close it, then drop the database.`;
+    },
   };
-
-  if (change.kind === "drop") {
-    const own = dropFromOwnDatabase(tabId, engine, change.name);
-    if (own) return own;
-  }
-  const refused = await modeAllows();
-  if (refused) return refused;
-
-  if (change.kind === "drop") {
-    for (const id of otherTabsOnDatabase(profileId, change.name, tabId)) {
-      await requestCloseConnectionTab(id);
-    }
-    // The mode may have changed while tabs were closing.
-    const after = await modeAllows();
-    if (after) return after;
-  }
-  return stillValid();
 }
 
 /** A clearer message for a failed DROP DATABASE. */
