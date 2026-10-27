@@ -547,6 +547,14 @@ describe("buildPostgresTableStructure: generated and identity columns", () => {
     expect(s.preDataSql).toContain(
       '"half" numeric GENERATED ALWAYS AS ((price / 2)) VIRTUAL'
     );
+    // Set again even when the CREATE is skipped (an existing table or
+    // sequence), before any row.
+    expect(s.preDataSql).toContain(
+      'ALTER TABLE "app"."g" ALTER COLUMN "id" SET INCREMENT BY -10 SET MINVALUE -1000 SET MAXVALUE -1 SET START WITH -1 SET CACHE 1 SET CYCLE RESTART;'
+    );
+    expect(s.preDataSql.indexOf("ALTER TABLE")).toBeGreaterThan(
+      s.preDataSql.indexOf("CREATE TABLE")
+    );
     expect(s.generatedColumns).toEqual(["total", "half"]);
     expect(s.identityAlways).toBe(true);
     expect(s.allGenerated).toBe(false);

@@ -1115,12 +1115,17 @@ export async function buildPostgresTableStructure(args: {
       if (!seq || !type || !numbers.every((n) => /^-?\d+$/.test(n))) {
         throw new Error("unexpected sequence state");
       }
+      const cycle = cellToBool(r[6]) ? "CYCLE" : "NO CYCLE";
       return {
         sequenceFor,
         type,
         options:
           `INCREMENT BY ${inc} MINVALUE ${min} MAXVALUE ${max} START WITH ${start} ` +
-          `CACHE ${cache} ${cellToBool(r[6]) ? "CYCLE" : "NO CYCLE"}`,
+          `CACHE ${cache} ${cycle}`,
+        // The same options as ALTER TABLE … ALTER COLUMN … SET clauses.
+        identitySet:
+          `SET INCREMENT BY ${inc} SET MINVALUE ${min} SET MAXVALUE ${max} ` +
+          `SET START WITH ${start} SET CACHE ${cache} SET ${cycle}`,
         setval: `SELECT pg_catalog.setval(${sequenceFor}, ${last}, ${cellToBool(stateRes.rows?.[0]?.[1]) ? "true" : "false"})`,
       };
     } catch {
@@ -1133,6 +1138,13 @@ export async function buildPostgresTableStructure(args: {
   const generatedColumns: string[] = [];
   let identityAlways = false;
   let sequenceValuesSql = "";
+  /**
+   * Each owned sequence's options, set again after CREATE: a CREATE … IF
+   * NOT EXISTS is skipped when the sequence or table already exists (a
+   * restore over a table, or a sequence a domain default created first)
+   * and would leave other options. RESTART: the rows and setval follow.
+   */
+  let sequenceOptionsSql = "";
   const columns: string[] = [];
   for (const r of (colsRes.rows ?? []) as any[]) {
     const name = cellToString(r?.[0]) ?? "";
@@ -1158,6 +1170,9 @@ export async function buildPostgresTableStructure(args: {
       if (identity === "a") identityAlways = true;
       const seq = await readOwnedSequence(name);
       sequenceValuesSql += ensureSqlEndsWithSemicolon(seq.setval);
+      sequenceOptionsSql += ensureSqlEndsWithSemicolon(
+        `ALTER TABLE ${tableIdent} ALTER COLUMN ${qIdent(name, "postgres")} ${seq.identitySet} RESTART`
+      );
       columns.push(
         `${col} GENERATED ${identity === "a" ? "ALWAYS" : "BY DEFAULT"} AS IDENTITY (${seq.options})${nn}`
       );
@@ -1217,9 +1232,12 @@ export async function buildPostgresTableStructure(args: {
     sequenceOwnedBySql += ensureSqlEndsWithSemicolon(
       `ALTER SEQUENCE ${seqIdent} OWNED BY ${tableIdent}.${qIdent(colName, "postgres")}`
     );
+    sequenceOptionsSql += ensureSqlEndsWithSemicolon(
+      `ALTER SEQUENCE ${seqIdent} AS ${seq.type} ${seq.options} RESTART`
+    );
   }
 
-  let preDataSql = `${sequenceCreateSql}${createTableSql}${sequenceOwnedBySql}`;
+  let preDataSql = `${sequenceCreateSql}${createTableSql}${sequenceOwnedBySql}${sequenceOptionsSql}`;
 
   const constraintsRes = await runSqlQuery(
     connectionId,
