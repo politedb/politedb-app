@@ -694,3 +694,65 @@ Apply a fixed total budget or bounded selection of diagnostic fields, reserving 
 - Independent in-memory Node probes exercised actual helpers, main/parent classifiers and engine-selected splitting; no source/test fixtures written. Worst-case summary, useful HINT suffix, engine readings and differential results recorded above.
 - No live database, database writes, native dialog or desktop UI exercised. No Rust source changed; Rust checks not run.
 - Only `.agent/REVIEW.md` modified; unrelated untracked `.claude/launch.json` preserved. No commit, push or merge.
+
+
+## Re-review (round 18)
+
+**Status: CHANGES REQUIRED.** Reviewed commits `90824b0` and `c8d59c1` on `fix/backup-restore-safety` (2026-10-27), HEAD `c8d59c15c0930eb8ffddbf067086c28d5e09ba5b`. Read both diffs and traced PostgreSQL decoding, grid SQL generation, backup serialization, database-management dispatch, tab closure, modal lifetime and safety modes. No application source or tests modified.
+
+### P1 — New test breaks the production build
+
+**Location:** `src/components/modal/DatabaseManagerDialog.test.tsx:94` (`c8d59c1`).
+
+`mock.invocationCallOrder.at(-1)` requires ES2022, while this project's TypeScript configuration includes ES2020 and type-checks tests under `src`. `npm run build` fails with TS2550 at this exact line before Vite runs. Replace with ES2020-compatible indexing; do not raise the application's library target solely for this assertion. Vitest transpilation passing does not establish build compatibility.
+
+### P1 — Recheck safety after awaiting tab closures
+
+**Location:** `src/screens/connection/lib/databaseDrop.ts:119–127`; dispatch in `src/hooks/useDatabases.ts:113–120` (`c8d59c1`).
+
+The safety check completes before `closeTabsOnDatabase`, which can await multiple native connection removals. The confirmation has already closed, so the user can change the initiating tab's mode while those removals are pending. Nothing checks that mode again before DROP dispatch. An independent actual-helper probe changed Default to Production from the close callback: `beforeDatabaseChange` returned null with Production active. Changing Default to Safe returned null with zero Touch ID calls. Lock and originating-tab closure have the same missing final check. Thus the new promise that Lock/Production refuse database changes and Safe authenticates is not maintained across this await.
+
+Revalidate the originating tab, its live mode and connection identity immediately before SQL dispatch, after all asynchronous preparation. Require authentication when the final mode needs it, then revalidate after that authentication without introducing another unchecked asynchronous gap. Also recheck the own-database and remaining-target-tab conditions if those can change during preparation. Add deferred-close regressions for Production, Lock, Safe and originating-tab closure; assert no forbidden SQL dispatch.
+
+### P2 — Newly decoded enum arrays do not round-trip through the backup writer
+
+**Location:** `src-tauri/src/engines/postgres/row_codec.rs:331–332` (`90824b0`); consumer `src/screens/connection/hooks/sqlInsertLiteral.ts:35–40,52`; metadata at `row_codec.rs:433–434`.
+
+The new Json enum-array output reaches a writer that treats a lowercased, unqualified PostgreSQL internal type name as a cast target. Actual-helper probes produce `ARRAY['admin', NULL]::userrole[]` for `_UserRole`. A real type `public."UserRole"` therefore cannot restore. Likewise an enum defined in schema `app` is exported with only `_role`, yielding `::role[]`; restore does not set a matching search_path, so `app.role[]` cannot resolve from the usual public search path. Internal array names also need not equal underscore plus the element name when PostgreSQL resolves name collisions.
+
+The scalar enum path needs no cast and is correct. The array consumer was already limited for other array types; this commit newly sends enum data through it, so label decoding alone does not deliver enum-array backup correctness. Preserve enough type identity to quote/schema-qualify the actual element type, or use an array literal whose type is inferred from the destination column. Add mixed-case, non-public-schema, empty-array and NULL-element round-trip coverage.
+
+### P2 — Newly displayed enum arrays still generate invalid grid edit SQL
+
+**Location:** `src-tauri/src/engines/postgres/row_codec.rs:331–332` (`90824b0`); consumer `src/lib/sql/sqlDialect.ts:778–875`, called by `src/lib/patches/generateSql.ts`.
+
+Grid formatting does not share the backup array conversion. Actual-module probe: `formatSqlValue({t: "Json", v: '["admin",null]'}, "_user_role", "postgres")` emits the SQL literal `'["admin",null]'`. PostgreSQL enum-array input expects array syntax, so editing/duplicating this array value fails; a no-primary-key update/delete can also use the original array in its fallback WHERE predicate and fail even when another column was edited. Scalar enum labels emit ordinary quoted strings and work with destination-column inference.
+
+This exposes an existing generic PostgreSQL-array editing limitation through the new enum-array representation; it is not a claim that arrays worked before. Make the grid writer accept the representation it now receives, or explicitly prevent unsupported array edits/identity predicates rather than presenting them as saveable. Add actual generated INSERT/UPDATE/DELETE coverage with NULL elements and a no-primary-key row.
+
+### Codec assessment and remaining limits
+
+- Direct enum values correctly use their binary label bytes. The exact Kind::Enum acceptance avoids interpreting arbitrary binary types as strings. Existing text decoding stays first; JSON and bytea fallbacks retain their ordering. tokio-postgres checks `accepts` before nullable decoding, so a NULL enum does not accidentally match Option<String>; the enum reader then returns CellValue::Null. One-dimensional arrays preserve empty arrays, labels and NULL elements through the existing Json representation by inspection of the dependency's Vec/Option readers.
+- `from_utf8` is checked and returns an error rather than panicking or using lossy conversion. A malformed/non-UTF-8 value ultimately becomes Null through the existing fallback policy because Vec<u8> accepts bytea, not enums. This is memory-safe, but not lossless or an error surfaced to the user. No live non-UTF-8 server case exercised.
+- Domain scope is limited: ordinary scalar domain query results are normally described by PostgreSQL using their base type, which permits this enum reader. A Type retaining Kind::Domain is not accepted; arrays whose element is a domain over an enum therefore remain unsupported and fall through to Null. The dependency does not automatically unwrap that element domain. These unsupported-domain paths predate the commit; do not advertise general domain support from this fix.
+- The dependency's Vec reader explicitly rejects more than one array dimension, and ignores lower-bound identity when collecting values. Multidimensional enum arrays remain Null; non-default bounds cannot round-trip. These are existing array-contract limits, not newly introduced decoder regressions. The committed live test only covers a direct enum, a one-dimensional array with a NULL element, and top-level NULLs.
+
+### Database-management behavior and race assessment
+
+- Initial Lock/Production gates apply to create, rename and drop. Safe rejection stops dispatch before closing tabs; after successful Touch ID, mode changes are recursively rechecked. Default does not authenticate. The separate post-tab-closure race above remains.
+- PostgreSQL/SQL Server own-database checks run both before showing confirmation and again on submission. Other engines retain own-database permission; there is no FORCE/session-termination SQL. Existing typed-name and irreversible-operation confirmation text is retained, with added tab-closure disclosure.
+- Detection uses explicit databaseOverride, then the existing legacy label inference, then saved-profile input, scoped to the same profile ID. This matches the application's displayed database selection and avoids closing another saved connection's tabs. It is not an authoritative query of a live session: profile edits, unspecified server defaults, session-level USE changes, SQL Server case-insensitive names and legacy labels can differ. The server remains the final own-database refusal; no blanket runtime-identity guarantee established.
+- Closing tabs uses the existing dirty-state/close bridge. A tab that remains open stops DROP. The final live rescan also stops a newly opened matching tab; independent helper probe reproduced this. Its error incorrectly attributes every remaining/new tab to unsaved changes. Closures are not atomic: clean tabs may already be closed when another tab blocks the operation. Native disconnect failure is swallowed by the existing close helper, so a remaining server session can still reject DROP and reach the clearer diagnostic.
+- Confirmation state is cleared when `open` becomes false, not when tab/profile/runtime props change. Normal pointer navigation is behind the modal and connection-tab shortcuts explicitly refuse switching while a modal is open, so no ordinary shortcut-based wrong-connection reproduction was found. At submission, database name is captured before clearing confirmation; later authentication/closures use the captured callback and runtime ID rather than retargeting to a newly rendered tab. Background prop/connection replacement while confirmation remains open is still not independently covered; binding confirmation to an immutable connection identity or invalidating it on identity change would strengthen that existing contract.
+- The other-session message preserves the server detail and explains other apps/saved connections. No raw-name/SQL logging was added. Existing query analytics report kinds/lengths; analytics sanitization converts error strings to fixed categories before logging/capture. Names in local warning/error dialogs remain intentional UI text.
+
+### Verification
+
+- `cargo test` from `src-tauri/`: **429 passed, 47 failed, 21 ignored**. Failures are in HTTP/AI/license fixture paths with sandbox-denied local socket binds (`Operation not permitted`), including dependent loopback-address assertions. The full Rust suite is not green in this environment; no escalation or customer database used.
+- `cargo test row_codec -- --nocapture`: **9 passed, 1 ignored, 487 filtered out** across the reported suites. The ignored `row_codec_enum_live` was not run: no verified disposable PostgreSQL was provisioned. Did not inspect/reuse any configured HEALTH_PG_URL or contact any database. Domain/array/backup restore conclusions above are static or helper-level, not live round trips.
+- `npm run test:run -- --exclude '**/.claude/**' src/screens/connection/lib/databaseDrop.test.ts src/components/modal/DatabaseManagerDialog.test.tsx src/screens/connection/hooks/sqlInsertLiteral.test.ts src/screens/connection/hooks/useDatabaseBackup.types.test.ts src/lib/dump src/screens/connection/hooks/useSqlRunner.safety.test.ts`: **7 files / 57 tests passed**.
+- `npm run test:run -- --exclude '**/.claude/**' src/lib/patches src/components/table/commitTableCellEdit.test.ts src/screens/connection/lib src/screens/connection/workspace/MenuBar.safetyPicker.test.tsx src/lib/queries/querySafety.test.ts src/lib/queries/sql/ddl.test.ts src/lib/connection/connection.test.ts`: **21 files / 156 tests passed** (overlaps the prior command's databaseDrop suite).
+- `npm run test:run -- --exclude '**/.claude/**' src/lib/sql/sqlDialect.test.ts src/screens/connection/hooks/useDatabaseBackup.restore.test.ts src/lib/analytics.errors.test.ts src/lib/tabs/connectionTabShortcuts.test.ts`: **4 files / 67 tests passed**.
+- `npm run build`: **failed**, TS2550 in the newly added test, documented above. No source was changed to bypass the failure.
+- Independent in-memory Node probes transpiled the actual helpers: reproduced mode changes during tab closure, newly opened target-tab refusal, enum-array backup casts, scalar enum grid formatting and invalid enum-array grid formatting. No source/test fixtures written. No desktop UI, native Touch ID, live database or destructive SQL exercised.
+- Only `.agent/REVIEW.md` modified; unrelated untracked `.claude/launch.json` preserved. No commit, push or merge.
