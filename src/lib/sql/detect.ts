@@ -59,33 +59,40 @@ export function isDDLStatement(sql: string) {
 /** Statements that change data, schema, permissions or server settings. */
 const OTHER_WRITE_RE =
   /^(GRANT|REVOKE|COPY|LOAD|IMPORT|REFRESH|REINDEX|VACUUM|CLUSTER)\b/i;
-/** Server-wide or persisted settings (MySQL/MariaDB); a plain SET is a session read. */
-const GLOBAL_SET_RE =
-  /^SET\s+(GLOBAL|PERSIST|PERSIST_ONLY)\b|^SET\s+@@(GLOBAL|PERSIST|PERSIST_ONLY)\./i;
+/**
+ * Server-wide or persisted settings (MySQL/MariaDB), anywhere in a SET list;
+ * a plain SET is a session read.
+ */
+const GLOBAL_SETTING_RE = /\b(GLOBAL|PERSIST|PERSIST_ONLY)\b|@@\s*GLOBAL\b/i;
 const DML_KEYWORD_RE = /\b(INSERT|UPDATE|DELETE|MERGE)\b/i;
-
-/** The text with quoted strings and identifiers blanked out. */
-function withoutQuoted(text: string): string {
-  return text.replace(/'(?:[^']|'')*'|"(?:[^"]|"")*"|`[^`]*`/g, " ");
-}
+const INTO_RE = /\bINTO\b/i;
 
 /**
- * Where the statement starts after leading whitespace and comments, or -1
- * when a MySQL/MariaDB executable comment (`/*! … *\/`, `/*M! … *\/`) runs
- * code. Block comments nest in PostgreSQL and not in MySQL, so both readings
- * are asked for and checked.
+ * The statement's executable text: quoted strings and identifiers ('…',
+ * "…", `…`, PostgreSQL $tag$…$tag$) and comments (--, #, /* *\/) become
+ * spaces, so only real tokens are matched. Null when a MySQL/MariaDB
+ * executable comment (/*! … *\/, /*M! … *\/) runs code. Dialects differ:
+ * block comments nest in PostgreSQL and not in MySQL, and a backslash
+ * escapes a quote in MySQL strings and not in standard SQL. Callers check
+ * every reading, so a write seen by any of them counts.
  */
-function statementStart(s: string, nestedComments: boolean): number {
-  let i = 0;
+function executableText(
+  s: string,
+  nestedComments: boolean,
+  backslashEscapes: boolean
+): string | null {
   const len = s.length;
+  let out = "";
+  let i = 0;
   while (i < len) {
-    while (i < len && /\s/.test(s[i]!)) i++;
-    if (s.startsWith("--", i) || s[i] === "#") {
+    const c = s[i]!;
+    if (s.startsWith("--", i) || c === "#") {
       while (i < len && s[i] !== "\n") i++;
+      out += " ";
       continue;
     }
     if (s.startsWith("/*", i)) {
-      if (s.startsWith("/*!", i) || s.startsWith("/*M!", i)) return -1;
+      if (s.startsWith("/*!", i) || s.startsWith("/*M!", i)) return null;
       i += 2;
       let depth = 1;
       while (i < len && depth > 0) {
@@ -99,41 +106,77 @@ function statementStart(s: string, nestedComments: boolean): number {
           i++;
         }
       }
+      out += " ";
       continue;
     }
-    break;
+    if (c === "'" || c === '"' || c === "`") {
+      i++;
+      while (i < len) {
+        if (backslashEscapes && s[i] === "\\") {
+          i += 2;
+          continue;
+        }
+        if (s[i] === c) {
+          // A doubled quote is a quote inside the string.
+          if (s[i + 1] === c) {
+            i += 2;
+            continue;
+          }
+          i++;
+          break;
+        }
+        i++;
+      }
+      out += " ";
+      continue;
+    }
+    if (c === "$" && !/[\w$]/.test(s[i - 1] ?? "")) {
+      const tag = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(s.slice(i))?.[0];
+      if (tag) {
+        const end = s.indexOf(tag, i + tag.length);
+        i = end < 0 ? len : end + tag.length;
+        out += " ";
+        continue;
+      }
+    }
+    out += c;
+    i++;
   }
-  return i;
+  return out;
 }
 
-function headIsWrite(head: string): boolean {
+function codeIsWrite(code: string): boolean {
   if (
-    DDL_RE.test(head) ||
-    DML_RE.test(head) ||
-    TRANSACTION_RE.test(head) ||
-    OTHER_WRITE_RE.test(head) ||
-    GLOBAL_SET_RE.test(head)
+    DDL_RE.test(code) ||
+    DML_RE.test(code) ||
+    TRANSACTION_RE.test(code) ||
+    OTHER_WRITE_RE.test(code)
   ) {
     return true;
   }
-  const code = withoutQuoted(head);
-  // A writable CTE: WITH gone AS (DELETE … RETURNING *) SELECT …
-  if (/^WITH\b/i.test(code)) return DML_KEYWORD_RE.test(code);
+  if (/^SET\b/i.test(code)) return GLOBAL_SETTING_RE.test(code);
+  // A writable CTE (WITH gone AS (DELETE …) SELECT …) or a final
+  // SELECT … INTO after the WITH list.
+  if (/^WITH\b/i.test(code)) {
+    return DML_KEYWORD_RE.test(code) || INTO_RE.test(code);
+  }
   // SELECT … INTO creates a table (PostgreSQL) or writes a file/variable.
-  if (/^SELECT\b/i.test(code)) return /\bINTO\b/i.test(code);
+  if (/^SELECT\b/i.test(code)) return INTO_RE.test(code);
   return false;
 }
 
 /**
  * Whether a statement may change the database (best effort, erring towards
- * yes): Lock and Production block these. Leading comments are skipped.
+ * yes): Lock and Production block these.
  */
 export function isMutatingStatement(sql: string) {
   if (!sql) return false;
   for (const nested of [true, false]) {
-    const start = statementStart(sql, nested);
-    if (start < 0) return true;
-    if (headIsWrite(sql.slice(start).trimStart())) return true;
+    for (const backslash of [false, true]) {
+      const text = executableText(sql, nested, backslash);
+      if (text === null) return true;
+      if (codeIsWrite(text.replace(/\s+/g, " ").trim())) return true;
+    }
   }
   return false;
 }

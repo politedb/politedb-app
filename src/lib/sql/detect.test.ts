@@ -24,6 +24,14 @@ describe("isMutatingStatement", () => {
     // SELECT … INTO creates a table or writes a file.
     "SELECT * INTO backup_a FROM a;",
     "SELECT * FROM a INTO OUTFILE '/tmp/a';",
+    // A final SELECT … INTO after a WITH list.
+    "WITH t AS (SELECT 1 AS id) SELECT * INTO backup_a FROM t;",
+    // Comments between the tokens of a server-wide setting.
+    "SET /* comment */ GLOBAL read_only = OFF;",
+    "SET @@global /* comment */ .read_only = OFF;",
+    "SET SESSION sql_mode = '', GLOBAL read_only = OFF;",
+    // A backslash-escaped quote (MySQL) does not end the string early.
+    "SELECT 'a\\'' INTO OUTFILE '/tmp/x';",
   ])("treats %s as a write", (sql) => {
     expect(isMutatingStatement(sql)).toBe(true);
   });
@@ -50,6 +58,15 @@ describe("isMutatingStatement", () => {
     "WITH t AS (SELECT 'delete me' AS x) SELECT * FROM t;",
     "SET search_path TO public;",
     "SET SESSION sql_mode = '';",
+    "SET search_path TO global_schema;",
+    // Keywords inside dollar quotes and comments are not code.
+    "SELECT $$into$$;",
+    "SELECT $tag$ DELETE FROM a $tag$;",
+    "SELECT 1 /* INTO */;",
+    "SELECT 1 -- INTO\n;",
+    "WITH t AS (SELECT 1 /* DELETE */) SELECT * FROM t;",
+    'SELECT "into" FROM a;',
+    "SELECT $1::int;",
     "SHOW TABLES;",
     "EXPLAIN SELECT 1;",
     "",

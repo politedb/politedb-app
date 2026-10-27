@@ -11,6 +11,7 @@ const m = vi.hoisted(() => ({
   runSqlQuery: vi.fn(),
   touchId: vi.fn(),
   showToast: vi.fn(),
+  refresh: vi.fn(async () => {}),
   rt: { engine: "postgres" as string },
 }));
 
@@ -46,7 +47,7 @@ vi.mock("../workspace/ConnectionRuntimeContext", () => ({
     engine: m.rt.engine,
     metaKey: "meta",
     metadata: { load: vi.fn() },
-    refreshSchemaAndTables: vi.fn(async () => {}),
+    refreshSchemaAndTables: m.refresh,
   }),
 }));
 
@@ -63,9 +64,9 @@ function setMode(mode: string) {
   });
 }
 
-async function restore() {
+async function restore(onRefresh?: () => void) {
   const { result } = renderHook(() => useDatabaseBackup());
-  await act(() => result.current.onRestoreDatabase(undefined, "shop_db"));
+  await act(() => result.current.onRestoreDatabase(onRefresh, "shop_db"));
 }
 
 beforeEach(() => {
@@ -180,8 +181,12 @@ describe("the safety mode is read again while a dump runs", () => {
       setMode("lock");
       return {};
     });
-    await restore();
+    const onRefresh = vi.fn();
+    await restore(onRefresh);
     expect(m.runSqlQuery).toHaveBeenCalledTimes(1);
+    // What already ran is shown.
+    expect(m.refresh).toHaveBeenCalledTimes(1);
+    expect(onRefresh).toHaveBeenCalledTimes(1);
     const [message] = m.showMessage.mock.calls[0]!;
     expect(message).toContain("so nothing more was restored");
     expect(message).toContain("Stopped before statement 2 of 3.");
@@ -232,5 +237,19 @@ describe("database backup", () => {
     expect(m.showMessage.mock.calls[0]![0]).toBe(
       "Database backup is available for PostgreSQL, MySQL and MariaDB."
     );
+  });
+});
+
+describe("a stop before anything ran", () => {
+  it("does not refresh when the tab is locked during Touch ID", async () => {
+    setMode("safe");
+    m.touchId.mockImplementation(async () => {
+      setMode("lock");
+      return true;
+    });
+    const onRefresh = vi.fn();
+    await restore(onRefresh);
+    expect(m.refresh).not.toHaveBeenCalled();
+    expect(onRefresh).not.toHaveBeenCalled();
   });
 });
