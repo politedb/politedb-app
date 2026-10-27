@@ -77,3 +77,17 @@ describe("the SQL editor in Lock mode", () => {
     expect(onRunSql).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("the SQL editor splitting PostgreSQL text", () => {
+  it("never runs the text of a continued E-string as a statement", async () => {
+    const { onRunSql } = await run(
+      "SELECT E'a'\n'\\'; DELETE FROM victim; --';",
+      "postgres",
+      false
+    );
+    expect(onRunSql).toHaveBeenCalledTimes(1);
+    const sql = (onRunSql.mock.calls[0] as unknown as [{ sql: string }])[0].sql;
+    expect(sql.startsWith("SELECT E'a'")).toBe(true);
+    expect(sql).toContain("DELETE FROM victim");
+  });
+});

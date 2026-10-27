@@ -32,6 +32,19 @@ import {
   unpackDumpBytes,
 } from "src/lib/dump/politedbDumbFormat";
 
+/**
+ * A schema-qualified name for a "-- …" comment line in a dump. Names may
+ * legally hold line breaks; written raw, the rest of the name would end the
+ * comment and run as SQL on restore. Control characters become spaces so
+ * the comment stays one line.
+ */
+export function dumpCommentName(schema: string, name: string): string {
+  return `${schema}.${name}`.replace(
+    /[\u0000-\u001f\u007f\u0085\u2028\u2029]/g,
+    " "
+  );
+}
+
 function cellToBool(cell: unknown): boolean {
   if (typeof cell === "boolean") return cell;
   if (cell && typeof cell === "object" && (cell as any).t === "Bool") {
@@ -1041,7 +1054,7 @@ export function useDatabaseBackup() {
 
           if (postDataSql) {
             postDataSqlChunks.push(
-              `\n-- Post-data ${table.schema}.${table.name}\n${postDataSql}`
+              `\n-- Post-data ${dumpCommentName(table.schema, table.name)}\n${postDataSql}`
             );
           }
 
@@ -1077,7 +1090,7 @@ export function useDatabaseBackup() {
           const structureSql = preDataByTable.get(key) ?? "";
           if (!structureSql) continue;
           appendSql(
-            `\n-- Structure ${table.schema}.${table.name}\n${structureSql}`
+            `\n-- Structure ${dumpCommentName(table.schema, table.name)}\n${structureSql}`
           );
         }
 
@@ -1087,7 +1100,7 @@ export function useDatabaseBackup() {
           const columns = columnsByTable.get(key) ?? [];
           if (!columns.length) continue;
 
-          appendSql(`\n-- Data ${table.schema}.${table.name}\n`);
+          appendSql(`\n-- Data ${dumpCommentName(table.schema, table.name)}\n`);
 
           await exportTableToSqlParts({
             append: appendSql,

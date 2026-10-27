@@ -356,9 +356,9 @@ export function SqlEditorPane(props: Props) {
     ) {
       return clear();
     }
-    const statement = runStatementStarts(
-      errorMarker.runSql,
-      splitSqlStatements
+    // Split as the run was split, by the engine's quoting rules.
+    const statement = runStatementStarts(errorMarker.runSql, (sql) =>
+      splitSqlStatements(sql, { dialect: splitDialectFor(engine) })
     )[errorMarker.statementIndex];
     const range = statement
       ? errorRangeInStatement(statement.text, errorMarker)
@@ -390,6 +390,7 @@ export function SqlEditorPane(props: Props) {
   }, [
     editorVersion,
     draftId,
+    engine,
     errorMarker?.runKey,
     errorMarker?.runSql,
     errorMarker?.statementIndex,

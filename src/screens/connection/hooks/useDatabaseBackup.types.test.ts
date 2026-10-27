@@ -9,7 +9,8 @@ vi.mock("src/stores/persistentStore", () => ({
   usePersistentStore: { getState: () => ({ scheduleSave: () => {} }) },
 }));
 
-import { buildPostgresTypesSql } from "./useDatabaseBackup";
+import { buildPostgresTypesSql, dumpCommentName } from "./useDatabaseBackup";
+import { splitSqlStatements } from "src/components/editor/splitSqlStatements";
 
 /** One catalog row, in the query's column order. */
 function row(p: {
@@ -315,5 +316,17 @@ describe("buildPostgresTypesSql", () => {
 
   it("adds nothing when the tables use only built-in types", async () => {
     expect(await build([])).toBe("");
+  });
+});
+
+describe("dumpCommentName", () => {
+  it("keeps a name with line breaks inside its comment line", () => {
+    const name = "x\nDROP TABLE victim;--\r\nmore";
+    const header = `-- Structure ${dumpCommentName("public", name)}`;
+    expect(header).toBe("-- Structure public.x DROP TABLE victim;--  more");
+    const dump = `${header}\nCREATE TABLE IF NOT EXISTS "public"."x\nDROP TABLE victim;--" (v text);`;
+    const statements = splitSqlStatements(dump, { dialect: "postgres" });
+    expect(statements).toHaveLength(1);
+    expect(statements[0]!.text).toContain("CREATE TABLE IF NOT EXISTS");
   });
 });

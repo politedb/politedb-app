@@ -186,4 +186,71 @@ SELECT 1;`;
       "SELECT 2",
     ]);
   });
+
+  it("keeps an E-string's escapes in its continuation lines", () => {
+    // PostgreSQL reads 'a' + newline + '…' as one string, still in E mode:
+    // the DELETE is data.
+    const sql = String.raw`SELECT E'a'
+'\'; DELETE FROM victim; --';
+SELECT 2;`;
+    expect(pg(sql)).toEqual([
+      String.raw`SELECT E'a'
+'\'; DELETE FROM victim; --'`,
+      "SELECT 2",
+    ]);
+    // A "--" comment line may sit between the parts.
+    expect(
+      pg(String.raw`SELECT E'a' -- note
+'\'; x'; SELECT 2;`)
+    ).toEqual([
+      String.raw`SELECT E'a' -- note
+'\'; x'`,
+      "SELECT 2",
+    ]);
+  });
+
+  it("does not continue a plain string in E mode", () => {
+    expect(
+      pg(String.raw`SELECT 'a'
+'\'; SELECT 2;`)
+    ).toEqual([
+      String.raw`SELECT 'a'
+'\'`,
+      "SELECT 2",
+    ]);
+  });
+
+  it("does not take a non-ASCII name ending in e for an E-string", () => {
+    expect(pg(String.raw`SELECT ée'a\'; SELECT 2;`)).toEqual([
+      String.raw`SELECT ée'a\'`,
+      "SELECT 2",
+    ]);
+  });
+
+  it("reads dollar quotes by identifier rules", () => {
+    // A non-ASCII tag is a tag.
+    expect(pg("SELECT $é$one;DROP TABLE victim;--$é$; SELECT 2;")).toEqual([
+      "SELECT $é$one;DROP TABLE victim;--$é$",
+      "SELECT 2",
+    ]);
+    // $tag$ inside an identifier is part of the identifier.
+    expect(pg("SELECT foo$tag$; SELECT 2;")).toEqual([
+      "SELECT foo$tag$",
+      "SELECT 2",
+    ]);
+    // A parameter like $1 never opens a quote.
+    expect(pg("SELECT $1$; SELECT 2;")).toEqual(["SELECT $1$", "SELECT 2"]);
+  });
+
+  it("ends a line comment at a carriage return and ignores backticks", () => {
+    expect(pg("SELECT 1 -- note\rDELETE FROM t; SELECT 2;")).toEqual([
+      "SELECT 1 -- note\rDELETE FROM t",
+      "SELECT 2",
+    ]);
+    expect(pg("SELECT '`'; SELECT `; SELECT 2;")).toEqual([
+      "SELECT '`'",
+      "SELECT `",
+      "SELECT 2",
+    ]);
+  });
 });
