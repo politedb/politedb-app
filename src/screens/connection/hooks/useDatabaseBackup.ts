@@ -90,11 +90,15 @@ function isIgnorableRestoreError(sql: string, err: unknown): boolean {
     err instanceof Error ? err.message : (err ?? "")
   ).toLowerCase();
 
+  // A dump statement starts with its "-- Structure …" comment line.
+  const head = stmt.replace(/^(?:\s*--[^\n]*\n)+/, "").trimStart();
   const isDdl =
-    stmt.startsWith("CREATE TABLE") ||
-    stmt.startsWith("CREATE SCHEMA") ||
-    stmt.startsWith("CREATE INDEX") ||
-    stmt.startsWith("ALTER TABLE");
+    head.startsWith("CREATE TABLE") ||
+    head.startsWith("CREATE SCHEMA") ||
+    head.startsWith("CREATE TYPE") ||
+    head.startsWith("CREATE DOMAIN") ||
+    head.startsWith("CREATE INDEX") ||
+    head.startsWith("ALTER TABLE");
 
   if (!isDdl) return false;
 
@@ -399,6 +403,119 @@ async function exportTableToSqlParts(args: {
       },
     });
   });
+}
+
+/**
+ * What the backed-up tables need before they can be created: their
+ * schemas (other than public), and the enum types and domains their
+ * columns use (also as array elements or as a domain's base type).
+ */
+export async function buildPostgresTypesSql(args: {
+  connectionId: string;
+  tables: ReadonlyArray<{ schema: string; name: string }>;
+}): Promise<string> {
+  const { connectionId, tables } = args;
+  if (!tables.length) return "";
+
+  const tableList = tables
+    .map((t) => `(${qLiteral(t.schema)}, ${qLiteral(t.name)})`)
+    .join(", ");
+  const usedTypes = `
+    WITH used AS (
+      SELECT DISTINCT
+        CASE WHEN t.typcategory = 'A' AND t.typelem <> 0
+          THEN t.typelem ELSE t.oid END AS type_oid
+      FROM pg_attribute a
+      JOIN pg_class c ON c.oid = a.attrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      JOIN pg_type t ON t.oid = a.atttypid
+      WHERE (n.nspname, c.relname) IN (${tableList})
+        AND a.attnum > 0
+        AND NOT a.attisdropped
+    ),
+    all_types AS (
+      SELECT type_oid FROM used
+      UNION
+      SELECT CASE WHEN bt.typcategory = 'A' AND bt.typelem <> 0
+        THEN bt.typelem ELSE bt.oid END
+      FROM used u
+      JOIN pg_type d ON d.oid = u.type_oid AND d.typtype = 'd'
+      JOIN pg_type bt ON bt.oid = d.typbasetype
+    )`;
+
+  const enumsRes = await runSqlQuery(
+    connectionId,
+    `${usedTypes}
+    SELECT n.nspname, t.typname,
+      string_agg(quote_literal(e.enumlabel), ', ' ORDER BY e.enumsortorder)
+    FROM all_types a
+    JOIN pg_type t ON t.oid = a.type_oid AND t.typtype = 'e'
+    JOIN pg_namespace n ON n.oid = t.typnamespace
+    JOIN pg_enum e ON e.enumtypid = t.oid
+    GROUP BY n.nspname, t.typname
+    ORDER BY n.nspname, t.typname;`
+  );
+
+  const domainsRes = await runSqlQuery(
+    connectionId,
+    `${usedTypes}
+    SELECT n.nspname, t.typname,
+      pg_catalog.format_type(t.typbasetype, t.typtypmod),
+      t.typnotnull, t.typdefault,
+      (SELECT string_agg(
+          'CONSTRAINT ' || quote_ident(c.conname) || ' ' ||
+            pg_get_constraintdef(c.oid),
+          ' ' ORDER BY c.conname)
+        FROM pg_constraint c
+        -- CHECK only: NOT NULL comes from typnotnull (PostgreSQL 17 also
+        -- records it as a constraint).
+        WHERE c.contypid = t.oid AND c.contype = 'c')
+    FROM all_types a
+    JOIN pg_type t ON t.oid = a.type_oid AND t.typtype = 'd'
+    JOIN pg_namespace n ON n.oid = t.typnamespace
+    ORDER BY n.nspname, t.typname;`
+  );
+
+  const schemas = new Set(
+    tables.map((t) => t.schema).filter((name) => name !== "public")
+  );
+  let typesSql = "";
+  for (const row of enumsRes.rows ?? []) {
+    const schema = cellToString(row?.[0]) ?? "";
+    const name = cellToString(row?.[1]) ?? "";
+    const labels = cellToString(row?.[2], true) ?? "";
+    if (!schema || !name) continue;
+    if (schema !== "public") schemas.add(schema);
+    typesSql += ensureSqlEndsWithSemicolon(
+      `CREATE TYPE ${qIdent(schema, "postgres")}.${qIdent(name, "postgres")} AS ENUM (${labels})`
+    );
+  }
+  for (const row of domainsRes.rows ?? []) {
+    const schema = cellToString(row?.[0]) ?? "";
+    const name = cellToString(row?.[1]) ?? "";
+    const baseType = cellToString(row?.[2]) ?? "";
+    const notNull = cellToBool(row?.[3]);
+    const defaultExpr = cellToString(row?.[4], true) ?? "";
+    const constraints = cellToString(row?.[5], true) ?? "";
+    if (!schema || !name || !baseType) continue;
+    if (schema !== "public") schemas.add(schema);
+    typesSql += ensureSqlEndsWithSemicolon(
+      `CREATE DOMAIN ${qIdent(schema, "postgres")}.${qIdent(name, "postgres")} AS ${baseType}` +
+        `${defaultExpr ? ` DEFAULT ${defaultExpr}` : ""}` +
+        `${notNull ? " NOT NULL" : ""}` +
+        `${constraints ? ` ${constraints}` : ""}`
+    );
+  }
+
+  const schemasSql = [...schemas]
+    .sort()
+    .map((schema) =>
+      ensureSqlEndsWithSemicolon(
+        `CREATE SCHEMA IF NOT EXISTS ${qIdent(schema, "postgres")}`
+      )
+    )
+    .join("");
+  return `${schemasSql}${typesSql}`;
 }
 
 async function buildPostgresTableStructure(args: {
@@ -711,6 +828,15 @@ export function useDatabaseBackup() {
 
           if (!columns.length) continue;
           columnsByTable.set(key, columns);
+        }
+
+        // Phase 0: schemas and the types the tables use (PostgreSQL)
+        if (rt.engine === "postgres") {
+          const typesSql = await buildPostgresTypesSql({
+            connectionId: rt.runtimeConnectionId,
+            tables: orderedTables,
+          });
+          if (typesSql) appendSql(`\n-- Schemas and types\n${typesSql}`);
         }
 
         // Phase 1: create all tables (and non-FK constraints)

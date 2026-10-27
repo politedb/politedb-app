@@ -146,6 +146,22 @@ describe("restoring a dump", () => {
     );
   });
 
+  it("skips a type that already exists, after the dump's comment line", async () => {
+    m.unpack.mockResolvedValue({
+      sql: '-- Schemas and types\nCREATE TYPE "public"."user_role" AS ENUM (\'a\');\nINSERT INTO a VALUES (1);',
+      engine: "postgres",
+    });
+    m.runSqlQuery.mockRejectedValueOnce(
+      new Error('type "user_role" already exists')
+    );
+    await restore();
+    expect(m.runSqlQuery).toHaveBeenCalledTimes(2);
+    expect(m.showToast).toHaveBeenCalledWith(
+      expect.stringContaining("1 statement was skipped"),
+      { tone: "info" }
+    );
+  });
+
   it("says what already ran when it stops partway", async () => {
     m.runSqlQuery
       .mockResolvedValueOnce({})
