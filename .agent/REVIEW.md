@@ -106,3 +106,54 @@ Provide a recursively safe serialization/restore contract, or detect money-conta
 - Only this round 2 section appended to `.agent/REVIEW.md`; no source/test edits, commits, pushes or merges. Existing untracked `.claude/launch.json` preserved.
 
 **Verdict: CHANGES REQUIRED.** Fix scalar money restore typing and cover or explicitly reject incompatible nested-money restores; then re-run disposable PostgreSQL regressions. The source-format scoping and type-output fixes are otherwise sound by static inspection and the available checks.
+
+## Round 3 — commit `8afdcf5` (2026-10-27)
+
+### Status
+
+CHANGES REQUIRED
+
+Re-reviewed `8afdcf5c42b84d2f84f99d7558ccec031c468b10` with `git show 8afdcf5` on `fix/postgres-backup-fidelity` (also current HEAD), all three changed files and affected callers/error paths. Numeric assignment fixes round 2's punctuation/parser corruption when monetary fractional precision is compatible. Nested-money rejection is incomplete at the walk's depth limit.
+
+### Findings
+
+#### P1 — Typed numeric still silently rounds under a lower-precision money locale
+
+**Location:** `src/screens/connection/hooks/sqlInsertLiteral.ts:102-105`; `src/screens/connection/hooks/useDatabaseBackup.ts:569-575`.
+
+`numeric -> money` is an assignment cast, but `numeric_cash` scales by the destination session's `lc_monetary.frac_digits` and rounds to an int64. A source with two fractional digits exporting 1234.56 restores as 1235 under a zero-fraction monetary locale (for example, an installed Japanese locale). This affects scalar money, array elements and domains. Domain CHECKs evaluate the converted value; a permissive CHECK does not detect lost cents. Greater target precision can instead exceed the int64 range and fail. The dump/restore path neither records nor validates monetary precision/representability. Round 2 explicitly requested refusal of incompatible fractional precision/range, so that part remains open.
+
+Establish and enforce a compatible monetary precision contract, or validate exact representability and reject before applying data; do not rely on numeric assignment alone. Add positive/negative rounding, precision-transition and range-boundary equality/refusal regressions, including arrays and domains. This is upstream-source verification, not a local SQL reproduction: [numeric_cash](https://github.com/postgres/postgres/blob/REL_17_STABLE/src/backend/utils/adt/cash.c#L1057-L1087), [assignment cast](https://github.com/postgres/postgres/blob/REL_17_STABLE/src/include/catalog/pg_cast.dat#L80-L81).
+
+#### P2 — Depth cutoff silently treats unexplored nested money as safe
+
+**Location:** `src/screens/connection/hooks/useDatabaseBackup.ts:497-499`.
+
+`length(w.steps) < 16` stops expanding a type after sixteen array/composite/range edges, then returns only money already reached. For a valid chain of seventeen composite wrappers ending in money, no money row is returned: the column takes locale-dependent `format('%s', col)` instead of throwing. Restoring into an existing matching schema can therefore retain round 2's corruption/failure. A domain encountered at depth sixteen is not even unwrapped. This gap is independent of the pre-existing omission of composite DDL.
+
+Track visited type OIDs with a finite classification state (scalar / one array / unsupported nesting), or explicitly fail if unexplored edges remain at a resource limit. Do not interpret truncation as absence of money. Add tests beyond sixteen edges and for cyclic type graphs. `UNION` includes the growing steps string, so it alone does not deduplicate cycles across depths; the current cutoff bounds structural cycles but sacrifices completeness.
+
+#### P2 — Unconditional multirange catalog access breaks PostgreSQL 13 backups
+
+**Location:** `src/screens/connection/hooks/useDatabaseBackup.ts:495`.
+
+PostgreSQL 13's `pg_range` has no `rngmultitypid`. The new query references it on every PostgreSQL table, so even an ordinary integer-only table fails during query analysis on 13 (and older versions). This introduces a server-version requirement without an explicit minimum-version gate; nearby backup code documents PostgreSQL 13+ compatibility. See [PostgreSQL 13 catalog](https://www.postgresql.org/docs/13/catalog-pg-range.html).
+
+Build the multirange edge only for servers exposing that catalog column (or explicitly establish a supported minimum version and gate it). A CASE/WHERE condition around a missing column is insufficient because parsing still resolves it. Add a pre-14 catalog regression.
+
+### Compatibility and scope assessment
+
+- **Arrays/domains:** static inspection of PostgreSQL's coercion implementation supports numeric[] assignment to money[], arrays of money domains, and domains over either array, with destination domain constraints applied. Domains add no structural step; a single array edge is classified as supported. Multiple dimensions still use one array type edge. Arrays of domains over arrays produce multiple edges and are conservatively rejected. On PostgreSQL 14+, multiranges traverse to their range and then subtype; money there is rejected. Both root and composite-field dropped attributes are excluded.
+- **Bounds and NULL:** built-in array coercion copies dimensions/lower bounds and maps elements, including NULLs; numeric[] text carries bounds and dimensions through the INSERT. Empty arrays and SQL NULL remain distinct. Domain NOT NULL/CHECK constraints can reject NULLs or converted amounts as intended. These are static conclusions from [array_map](https://github.com/postgres/postgres/blob/REL_17_STABLE/src/backend/utils/adt/arrayfuncs.c#L3008-L3167) and [coercion/domain handling](https://github.com/postgres/postgres/blob/REL_17_STABLE/src/backend/parser/parse_coerce.c); no independent live array/domain equality run was possible.
+- **Other callers:** repository-wide search finds `exportTableToSqlParts` as the sole production `formatSqlInsertChunk` caller, and that function is the sole production `formatSqlInsertValue` caller. Clipboard INSERT generation in `CanvasTable.tsx` uses the separate `formatSqlValue` helper. Thus the new Str branch does not change clipboard literals. Genuine numeric/numeric[] Str inputs retain their numeric meaning through the explicit casts; Json arrays, NULL, I64/F64 and other engines retain their existing branches. Backup stream columns are text except for the deliberate money override.
+- **Error/privacy and clean stop:** the nested-money message includes column/schema/table identifiers and guidance, but no values, SQL, credentials or paths. It is sent to the local Backup error dialog, with no added logging/telemetry call. The catalog check is awaited before starting that table's stream; rejection exits the table loop, skips packing/writeFile and success toast, and clears `dbBackupRunning` in finally. Earlier table data exists only in local memory; no partial backup file is written and an existing destination file is untouched by this error path. The message's “nothing was backed up” is accurate for file output. Failure-path integration assertions were not added or executed; this conclusion is from control-flow inspection.
+- **Scope:** round 1's pre-existing DDL/generated/identity limitations remain. Numeric casting fixes differing separators at equal fractional precision, not arbitrary locale portability. The implementer's disposable de_DE evidence was not independently reproduced.
+
+### Verification
+
+- Relevant Vitest command with required exclusion: `npm run test:run -- --exclude '**/.claude/**' src/lib/sql src/lib/queries src/lib/patches src/lib/dump src/screens/connection/hooks/sqlInsertLiteral.test.ts src/screens/connection/hooks/useDatabaseBackup.types.test.ts src/screens/connection/hooks/useDatabaseBackup.restore.test.ts src/screens/connection/hooks/useDatabaseBackup.free.test.ts src/components/editor/splitSqlStatements.test.ts src/screens/connection/hooks/useSqlRunner.safety.test.ts`: **32 files / 558 tests passed**.
+- `npm run build`: **passed** (TypeScript + Vite). Warnings: node:zlib browser externalization, ineffective dynamic imports, large chunks and plugin timings.
+- Context7 PostgreSQL 17 documentation and upstream source informed semantic checks. `docker info` again fails with permission denied on the OrbStack socket; no disposable SQL server, saved/customer connection, desktop UI or native round trip accessed. Live precision/range, domain, multidimensional, depth/cycle and pre-14 SQL regressions remain unexecuted. Existing mocked tests do not execute the catalog SQL.
+- Only round 3 appended to `.agent/REVIEW.md`. No source/test edits, commits, pushes or merges; existing untracked `.claude/launch.json` preserved.
+
+**Verdict: CHANGES REQUIRED.** Enforce exact money representability, make recursive detection complete or fail closed, and preserve pre-14 catalog compatibility before claiming portable backup fidelity.
