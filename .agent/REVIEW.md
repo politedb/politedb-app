@@ -4,7 +4,7 @@
 
 CHANGES REQUIRED
 
-Latest review: **round 4**, `95674cf..daa4912`; round 3 named findings resolved, two new P2 read regressions require changes. See appended findings and verification.
+Latest review: **round 5**, `daa4912..93f14f3`; both round 4 P2 findings resolved for their named engines. One new P1 regression in session-dependent string quoting requires changes. See appended review.
 
 Reviewed `main..6f853c31b22f76672db0dace4a6d10adf8152533` on `fix/backup-restore-safety`, against the human-approved batch 1 requirements. No application source changed.
 
@@ -229,3 +229,52 @@ The MySQL reading exposes INTO in the PostgreSQL comment; the PostgreSQL reading
 - Reviewer differential probes: **31 cases / 62 assertions passed**, loading the actual TypeScript classifier at `95674cf` and in the working tree through the installed TypeScript transpiler. Includes six newly regressed reads, all named round 3 cases, retained round 2 cases, and EXPLAIN option combinations. Assertions encode the observed before/after behavior; passing regression probes is evidence of the defects, not correctness. No probe files retained.
 - No new executable-write false negative found in the reviewed cases. Preexisting incompleteness remains a limitation for the separately tracked server-side SQL-editor read-only enforcement task; for example, `SELECT side_effect_function()` still returns false in both versions. Existing editor live-mode/authentication races remain outside this fix. Dump Lock/Production refusal remains independent of this heuristic.
 - No live database queries, native dialogs/Touch ID, desktop UI, or Rust checks performed; no Rust/source changes. Only this review document changed; unrelated `.claude/launch.json` preserved. No commit, push or merge.
+
+
+## Re-review (round 5)
+
+**Status: CHANGES REQUIRED.** Reviewed `daa4912..93f14f3` on `fix/backup-restore-safety` (2026-10-27). HEAD `343410b` differs from `93f14f3` only in review documentation; tested application code matches the requested fix. Same agreed scope as round 4: preexisting heuristic gaps remain limitations for the separate server-side read-only enforcement task. No application source changed.
+
+### Round 4 disposition
+
+- **P2 PostgreSQL dollar-string reads — resolved for PostgreSQL.** `src/lib/sql/detect.ts:223` selects only the PostgreSQL reading for `postgres`. All four named dollar-string reads now return false; committed regressions at `src/lib/sql/detect.test.ts:105` cover spaced INTO, tagged strings, DELETE inside WITH, and executable-comment text inside a string. The real-hook test at `src/screens/connection/hooks/useSqlRunner.safety.test.ts:64` verifies dispatch of a representative dollar-string read in Lock.
+- **P2 incompatible line-comment readings — resolved for named engines.** PostgreSQL no-space `--note` and MySQL/MariaDB hash-comment reads use their own rules (`src/lib/sql/detect.ts:224`, `:225`). Classifier tests cover PostgreSQL and both MySQL engines; real-hook tests cover PostgreSQL/MySQL reads. Previously reported operator-before-write cases remain classified as writes in the supplied dialect. Unknown/other engines intentionally retain the conservative union and its existing read false positives.
+
+### P1 — Selecting one dialect drops protection for supported session string modes
+
+**Locations:** `src/lib/sql/detect.ts:223`–`:225` (new routing), `:137`–`:145` (fixed escape assumptions); consumers `src/screens/connection/hooks/useSqlRunner.ts:651`, `:671`.
+
+These statements returned **true** at `daa4912`, but return **false** at `93f14f3` with the indicated engine:
+
+```sql
+-- MySQL or MariaDB, with session sql_mode including NO_BACKSLASH_ESCAPES:
+SELECT 'a\' INTO OUTFILE '/tmp/reviewer-probe'
+
+-- PostgreSQL, with session standard_conforming_strings = off:
+SELECT 'a\'b' INTO backup_x
+```
+
+Each example contains one literal backslash. In the MySQL/MariaDB mode, the backslash is ordinary text and the following quote closes the string; INTO OUTFILE writes a file. The selected MySQL reading instead escapes that quote and hides INTO inside a string. In PostgreSQL's alternate mode, the escaped quote belongs inside the string; INTO creates a table. The selected PostgreSQL reading instead closes the string too soon and subsequently hides INTO. The removed alternate reading caught each write in the previous commit. These are newly reopened writes, not preexisting unrecognized statement forms.
+
+Official semantics: [MySQL string literals](https://dev.mysql.com/doc/refman/8.4/en/string-literals.html), [MariaDB NO_BACKSLASH_ESCAPES](https://mariadb.com/docs/server/server-management/variables-and-modes/sql_mode#no_backslash_escapes), and [PostgreSQL lexical structure](https://www.postgresql.org/docs/15/sql-syntax-lexical.html). No general SQL-editor connection setup was found that forces these settings to the classifier's assumptions; the PostgreSQL Explain Analyze path's local setting is specific to that operation (`src-tauri/src/engines/postgres/explain_analyze.rs:611`).
+
+Temporary real-hook probes reproduced all three statements reaching `onRunSql` unchanged in **both Lock and Production** (Production authentication successful; backend validation mocked). Backend syntax validation is not read-only authorization. No live database effects were executed or claimed.
+
+Keep engine-specific comment/dollar-quote rules, but conservatively consider the supported string-escape modes within that dialect unless the actual execution session's mode is authoritatively known/enforced. Explicit PostgreSQL E strings must retain their unconditional escape semantics. Add classifier and Lock/Production hook regressions for these writes alongside the round 4 reads. Do not restore the incompatible whole-dialect union that caused the P2 findings.
+
+### Engine flow and adjacent regressions
+
+- `src/screens/connection/ConnectionScreen.tsx:129` derives the engine from the active profile tab; its runtime context at `:908` supplies that engine (PostgreSQL fallback). `src/screens/connection/workspace/ActiveWindowContent.tsx:225` passes `rt.engine` into `SqlWindowPane`; `src/screens/connection/sql/SqlWindowPane.tsx:103` passes it unchanged into `useSqlRunner`. The runner destructures the argument and uses it at both restricted-mode gates; `src/screens/connection/hooks/useSqlRunner.ts:727` includes it in `startRun` dependencies. No missing engine forwarding found in this path.
+- `src/types.ts:149`–`:165` has no distinct CockroachDB/Redshift engine value. PostgreSQL-compatible servers configured as `postgres` receive that reading; any other/unknown engine keeps both readings (`src/lib/sql/detect.ts:226`). Consequently restricting the known-engine routes does not remove the former union for SQLite, SQL Server, DuckDB, ClickHouse, or other engine keys. Their preexisting dialect mismatches remain limitations, not newly attributed blockers.
+- MariaDB `/*M!100100 DELETE FROM a */` and MySQL-style `/*!50000 DROP TABLE a */` remain writes with engine `mariadb`; both executable-comment checks precede ordinary comment removal (`src/lib/sql/detect.ts:118`). No separate MariaDB executable-comment regression found.
+- AI `sqlSafety` remains unchanged: `src/lib/ai-assistant/agent.ts:239` requires its separate frontend/backend checks for `read_only`; its classifier call without an engine at `:245` labels other previews. It retains the former union behavior and does not acquire the new engine-specific false negatives.
+- Dump restore/import Lock/Production refusal remains independent of this classifier. Preexisting side-effect-function gaps and SQL-editor live-mode/authentication races remain outside this fix.
+
+### Test quality, verification and limits
+
+- `npm run build`: **passed**, TypeScript plus production Vite build. Existing warnings: `node:zlib` externalization, ineffective dynamic imports, large chunks.
+- `npm run test:run -- --exclude '**/.claude/**' src/lib/sql src/lib/dump src/screens/connection/hooks/useDatabaseBackup.restore.test.ts src/screens/connection/hooks/useDatabaseBackup.free.test.ts src/screens/connection/hooks/useSqlRunner.sequential.test.ts src/screens/connection/hooks/useSqlRunner.explainAnalyze.test.ts src/screens/connection/hooks/useSqlRunner.safety.test.ts src/screens/connection/hooks/useSqlHistoryRunner.test.ts src/lib/ai-assistant/agent.test.ts`: **17 files / 276 tests passed**. Unrelated nested worktree excluded as requested.
+- Differential classifier probes loaded actual old/current TypeScript: all three session-mode write examples changed true → false; MariaDB executable comments stayed true; representative round 4 reads changed true → false as intended. Other/unknown routing remains both ways by inspection.
+- Temporary reviewer hook suite: **12 tests passed**: six original safety cases plus six reproductions (three newly missed writes × Lock/Production), asserting dispatch once with unchanged SQL. Passing reproduction assertions demonstrate the defect, not correct authorization. Temporary file removed.
+- New committed tests exercise the real hook, actual client validation/splitter and actual classifier, while mocking native execution/validation/authentication. Paired reads demonstrate that dispatch is reachable, improving on classifier-only coverage. Unique window IDs avoid throttle/inflight collisions. Blocked cases at `src/screens/connection/hooks/useSqlRunner.safety.test.ts:59` assert only no dispatch, not the expected block reason; future tests should also inspect the run error so unrelated early exits cannot satisfy them. Missing committed coverage: Production, MariaDB hook behavior, session string modes, and engine-change rerenders. The mode regression above requires coverage; the other gaps are nonblocking test improvements.
+- No live DB queries, native dialogs/Touch ID, desktop UI or Rust checks performed. Native validation is mocked in hook probes, so successful database execution is inferred from documented SQL semantics, not verified end to end. Only `.agent/REVIEW.md` retained as a change; unrelated `.claude/launch.json` preserved. No source edits, commit, push or merge.
