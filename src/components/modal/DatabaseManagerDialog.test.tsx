@@ -49,7 +49,12 @@ beforeEach(() => {
   });
   useScreenStore.setState({
     profileTabs: [
-      { id: "home", profileId: "p1", label: "Athena" },
+      {
+        id: "home",
+        profileId: "p1",
+        label: "Athena",
+        runtimeConnectionId: "c1",
+      },
       { id: "t1", profileId: "p1", databaseOverride: "test1" },
     ] as never,
   });
@@ -91,7 +96,9 @@ describe("DatabaseManagerDialog drop", () => {
     expect(m.close).toHaveBeenCalledWith("t1");
     // Closed before the DROP ran.
     expect(m.close.mock.invocationCallOrder[0]).toBeLessThan(
-      m.runSqlQuery.mock.invocationCallOrder.at(-1)!
+      m.runSqlQuery.mock.invocationCallOrder[
+        m.runSqlQuery.mock.invocationCallOrder.length - 1
+      ]!
     );
   });
 

@@ -83,9 +83,15 @@ export function DatabaseManagerDialog({
     beforeChange: useCallback(
       (change: DatabaseChange) =>
         tabId && profileId
-          ? beforeDatabaseChange(tabId, profileId, engine, change)
+          ? beforeDatabaseChange(
+              tabId,
+              profileId,
+              engine,
+              change,
+              runtimeConnectionId
+            )
           : Promise.resolve(null),
-      [tabId, profileId, engine]
+      [tabId, profileId, engine, runtimeConnectionId]
     ),
   });
 

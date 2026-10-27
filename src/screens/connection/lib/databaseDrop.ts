@@ -10,6 +10,7 @@ import { useScreenStore } from "src/stores/screen";
 import type { DatabaseChange } from "src/hooks/useDatabases";
 import type { DatabaseEngine } from "src/types";
 import { requestCloseConnectionTab } from "./connectionTabClose";
+import { connectionTabHasChanges } from "./tabDirty";
 
 /** The database a connection tab is using. */
 export function tabDatabase(tabId: string): string {
@@ -44,32 +45,14 @@ function dropNeedsAnotherDatabase(engine?: DatabaseEngine): boolean {
   return engine === "postgres" || engine === "sqlserver";
 }
 
-/**
- * Why a database cannot be changed (created, renamed or dropped) from a
- * tab right now, or null. Lock and Production refuse it; Safe asks for
- * Touch ID.
- */
-export async function databaseChangeBlocked(
-  tabId: string
-): Promise<string | null> {
-  const mode = tabSafetyModeNow(tabId);
+/** Why the mode refuses database changes, or null (Safe and Default). */
+function modeRefusal(mode: ReturnType<typeof tabSafetyModeNow>) {
   if (mode === null) return "The connection tab was closed.";
-  if (mode === "lock")
+  if (mode === "lock") {
     return "This tab is locked. Unlock it to change databases.";
+  }
   if (mode === "production") {
     return "Production mode blocks changes to the database. Choose another safety mode to change databases.";
-  }
-  if (readNeedsTouchId(mode)) {
-    try {
-      await securityTouchIdAuthenticate(
-        "Authenticate with Touch ID to change databases on this connection."
-      );
-    } catch {
-      return "Touch ID was not confirmed, so nothing was changed.";
-    }
-    // The mode may have changed while Touch ID was open.
-    const after = tabSafetyModeNow(tabId);
-    if (after !== mode) return databaseChangeBlocked(tabId);
   }
   return null;
 }
@@ -85,46 +68,92 @@ export function dropFromOwnDatabase(
   return `This tab is connected to "${database}", and a database cannot be dropped while connected to it. Open another database on this connection (for example ${engine === "sqlserver" ? "master" : "postgres"}) and drop "${database}" from there.`;
 }
 
-/**
- * Closes the other tabs using the database. False when one of them stayed
- * open (unsaved changes): nothing is dropped then.
- */
-export async function closeTabsOnDatabase(
+/** The connection's other tabs using the database. */
+function otherTabsOnDatabase(
   profileId: string,
   database: string,
   keepTabId: string
-): Promise<boolean> {
-  const others = () =>
-    tabsOnDatabase(profileId, database).filter((id) => id !== keepTabId);
-  for (const id of others()) {
-    await requestCloseConnectionTab(id);
-  }
-  return others().length === 0;
+): string[] {
+  return tabsOnDatabase(profileId, database).filter((id) => id !== keepTabId);
 }
 
 /**
- * The check before a database change from a tab: the safety mode, and for
- * a drop, the tab's own database and the other tabs using it (closed here).
+ * The check before a database change from a tab. Lock and Production
+ * refuse it, Safe asks for Touch ID (once). A drop also refuses the tab's
+ * own database and closes the connection's other tabs using it.
+ *
+ * Closing tabs and Touch ID wait, and the tab may be switched to another
+ * mode, closed or reconnected meanwhile, or a tab opened on the database:
+ * everything is checked again after the last wait, so the SQL is sent
+ * right after a passing check.
  */
 export async function beforeDatabaseChange(
   tabId: string,
   profileId: string,
   engine: DatabaseEngine | undefined,
-  change: DatabaseChange
+  change: DatabaseChange,
+  /** The connection the SQL will run on: the tab must still use it. */
+  runtimeConnectionId?: string
 ): Promise<string | null> {
+  let authenticated = false;
+
+  /** The live mode allows the change; asks for Touch ID when Safe. */
+  const modeAllows = async (): Promise<string | null> => {
+    for (;;) {
+      const mode = tabSafetyModeNow(tabId);
+      const refusal = modeRefusal(mode);
+      if (refusal) return refusal;
+      if (authenticated || !readNeedsTouchId(mode!)) return null;
+      try {
+        await securityTouchIdAuthenticate(
+          "Authenticate with Touch ID to change databases on this connection."
+        );
+      } catch {
+        return "Touch ID was not confirmed, so nothing was changed.";
+      }
+      authenticated = true;
+      // Read the mode again: it may have changed during Touch ID.
+    }
+  };
+
+  /** Checks with nothing awaited, run last. */
+  const stillValid = (): string | null => {
+    const tab = useScreenStore
+      .getState()
+      .profileTabs.find((item) => item.id === tabId);
+    if (!tab) return "The connection tab was closed.";
+    if (
+      runtimeConnectionId &&
+      tab.runtimeConnectionId !== runtimeConnectionId
+    ) {
+      return "The connection tab reconnected meanwhile, so nothing was changed. Try again.";
+    }
+    if (change.kind !== "drop") return null;
+    const own = dropFromOwnDatabase(tabId, engine, change.name);
+    if (own) return own;
+    const remaining = otherTabsOnDatabase(profileId, change.name, tabId);
+    if (remaining.length === 0) return null;
+    return remaining.some((id) => connectionTabHasChanges(id))
+      ? `A tab using "${change.name}" has unsaved changes. Save or discard them, then drop the database.`
+      : `A tab using "${change.name}" is still open. Close it, then drop the database.`;
+  };
+
   if (change.kind === "drop") {
     const own = dropFromOwnDatabase(tabId, engine, change.name);
     if (own) return own;
   }
-  const blocked = await databaseChangeBlocked(tabId);
-  if (blocked) return blocked;
+  const refused = await modeAllows();
+  if (refused) return refused;
+
   if (change.kind === "drop") {
-    const closed = await closeTabsOnDatabase(profileId, change.name, tabId);
-    if (!closed) {
-      return `A tab using "${change.name}" has unsaved changes. Save or discard them, then drop the database.`;
+    for (const id of otherTabsOnDatabase(profileId, change.name, tabId)) {
+      await requestCloseConnectionTab(id);
     }
+    // The mode may have changed while tabs were closing.
+    const after = await modeAllows();
+    if (after) return after;
   }
-  return null;
+  return stillValid();
 }
 
 /** A clearer message for a failed DROP DATABASE. */

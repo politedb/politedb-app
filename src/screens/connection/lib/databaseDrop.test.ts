@@ -12,7 +12,9 @@ import {
 const m = vi.hoisted(() => ({
   touchId: vi.fn(),
   close: vi.fn(),
+  dirty: vi.fn(),
 }));
+vi.mock("./tabDirty", () => ({ connectionTabHasChanges: m.dirty }));
 vi.mock("src/lib/tauri/security", () => ({
   securityTouchIdAuthenticate: m.touchId,
 }));
@@ -29,6 +31,7 @@ function setTabs(tabs: Array<Record<string, unknown>>) {
 
 beforeEach(() => {
   m.touchId.mockReset().mockResolvedValue(undefined);
+  m.dirty.mockReset().mockReturnValue(false);
   m.close.mockReset().mockImplementation(async (id: string) => {
     setTabs(
       useScreenStore.getState().profileTabs.filter((tab) => tab.id !== id)
@@ -105,14 +108,22 @@ describe("dropping a database", () => {
     ]);
   });
 
-  it("stops when a tab on that database stays open (unsaved changes)", async () => {
+  it("stops when a tab on that database stays open", async () => {
     m.close.mockResolvedValue(undefined);
+    m.dirty.mockImplementation((id: string) => id === "t1b");
     expect(
       await beforeDatabaseChange("home", "p1", "postgres", {
         kind: "drop",
         name: "test1",
       })
     ).toContain("unsaved changes");
+    m.dirty.mockReturnValue(false);
+    expect(
+      await beforeDatabaseChange("home", "p1", "postgres", {
+        kind: "drop",
+        name: "test1",
+      })
+    ).toContain("is still open");
   });
 
   it("explains other sessions holding the database", () => {
@@ -179,5 +190,87 @@ describe("the safety mode", () => {
       })
     ).toBeNull();
     expect(m.touchId).not.toHaveBeenCalled();
+  });
+});
+
+describe("changes while the tabs close", () => {
+  const drop = { kind: "drop", name: "test1" } as const;
+
+  function whileClosing(change: () => void) {
+    const close = m.close.getMockImplementation()!;
+    m.close.mockImplementationOnce(async (id: string) => {
+      await close(id);
+      change();
+    });
+  }
+
+  function setHome(patch: Record<string, unknown>) {
+    setTabs(
+      useScreenStore
+        .getState()
+        .profileTabs.map((tab) =>
+          tab.id === "home" ? { ...tab, ...patch } : tab
+        ) as never
+    );
+  }
+
+  it.each([
+    ["Production", { querySafetyMode: "production" }, "Production mode"],
+    ["Lock", { isLocked: true }, "This tab is locked"],
+  ])("refuses a tab switched to %s", async (_, patch, message) => {
+    whileClosing(() => setHome(patch));
+    expect(
+      await beforeDatabaseChange("home", "p1", "postgres", drop)
+    ).toContain(message);
+  });
+
+  it("asks for Touch ID for a tab switched to Safe", async () => {
+    whileClosing(() => setHome({ querySafetyMode: "safe" }));
+    m.touchId.mockRejectedValueOnce(new Error("cancelled"));
+    expect(
+      await beforeDatabaseChange("home", "p1", "postgres", drop)
+    ).toContain("Touch ID was not confirmed");
+    expect(m.touchId).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses once the tab closed or reconnected", async () => {
+    whileClosing(() =>
+      setTabs(
+        useScreenStore
+          .getState()
+          .profileTabs.filter((tab) => tab.id !== "home") as never
+      )
+    );
+    expect(await beforeDatabaseChange("home", "p1", "postgres", drop)).toBe(
+      "The connection tab was closed."
+    );
+
+    setTabs([
+      {
+        id: "home",
+        profileId: "p1",
+        label: "Athena",
+        runtimeConnectionId: "c1",
+      },
+      { id: "t1", profileId: "p1", databaseOverride: "test1" },
+    ]);
+    whileClosing(() => setHome({ runtimeConnectionId: "c2" }));
+    expect(
+      await beforeDatabaseChange("home", "p1", "postgres", drop, "c1")
+    ).toContain("reconnected");
+  });
+
+  it("refuses a tab opened on the database meanwhile", async () => {
+    whileClosing(() =>
+      setTabs([
+        ...useScreenStore.getState().profileTabs,
+        { id: "new", profileId: "p1", databaseOverride: "test1" },
+      ] as never)
+    );
+    // The close mock only removes what it is asked to; "new" stays.
+    m.close.mockImplementation(async () => {});
+    expect(
+      await beforeDatabaseChange("home", "p1", "postgres", drop)
+    ).toContain("is still open");
   });
 });
