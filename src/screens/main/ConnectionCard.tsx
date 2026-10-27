@@ -11,7 +11,9 @@ import {
   CopyIcon,
   PinIcon,
   PinFilledIcon,
+  ArrowRightIcon,
 } from "src/components/icons";
+import { normalizeEngineName } from "src/utils/convert";
 import { TagChips } from "src/components/common/TagChips";
 import { ContextMenu } from "src/components/common/ContextMenu";
 import { useProfileStore } from "src/stores/profile";
@@ -229,6 +231,9 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
       data-density-card
       role="button"
       tabIndex={0}
+      aria-label={[label, normalizeEngineName(engine), subtitle]
+        .filter(Boolean)
+        .join(", ")}
       onClick={onSelectProfile}
       onDblClick={(e) => {
         e.stopPropagation();
@@ -236,6 +241,8 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
       }}
       onContextMenu={(e) => openMenuAtPoint(e)}
       onKeyDown={(e) => {
+        // Keys on the card's own buttons (Open, ⋮) are theirs.
+        if (e.target !== e.currentTarget) return;
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           onOpen();
@@ -273,9 +280,11 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
               title={hasCustomIndicator ? "Indicator color" : "Default color"}
             />
 
-            {/* The name keeps its room; other tags only get what is left
-                (clipped, the rest in the "+N" tooltip). A production tag is
-                a warning, so it always stays visible next to the name. */}
+            {/* The name keeps its room; other tags only get what is left. A
+                chip that does not fit wraps onto a hidden second line, so it
+                disappears whole instead of being cut (the rest are in the
+                "+N" tooltip). A production tag is a warning, so it always
+                stays visible next to the name. */}
             <span
               class="min-w-0 truncate text-sm font-semibold text-slate-900 dark:text-slate-100"
               title={label}
@@ -294,7 +303,7 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
 
             <div class="min-w-0 flex-1 overflow-hidden">
               <TagChips
-                className="flex-nowrap [&>*]:shrink-0"
+                className="h-5 flex-wrap before:-mr-1 before:h-5 before:w-0 before:content-[''] [&>*]:shrink-0"
                 tags={otherTags}
                 max={1}
                 size="sm"
@@ -331,12 +340,36 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
         </div>
       </div>
 
-      {/* RIGHT */}
-      <KebabButton
-        menuOpen={menuOpen}
-        onClick={() => openMenuAtAnchor()}
-        buttonRef={kebabRef}
-      />
+      {/* RIGHT: open (a double-click or Enter does the same) and the menu,
+          shown on hover or keyboard focus. */}
+      <div class="relative z-10 flex shrink-0 items-center gap-1">
+        <button
+          type="button"
+          title="Open in a new tab"
+          aria-label={`Open ${label}`}
+          class={cn(
+            "flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold transition",
+            "border-blue-200 bg-white text-blue-700 hover:bg-blue-50",
+            "dark:border-blue-500/40 dark:bg-transparent dark:text-blue-300 dark:hover:bg-blue-950/40",
+            "focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none",
+            "hidden group-focus-within:flex group-hover:flex"
+          )}
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpen();
+          }}
+          onDblClick={(e) => e.stopPropagation()}
+        >
+          Open
+          <ArrowRightIcon className="size-3" aria-hidden="true" />
+        </button>
+        <KebabButton
+          menuOpen={menuOpen}
+          onClick={() => openMenuAtAnchor()}
+          buttonRef={kebabRef}
+          label={label}
+        />
+      </div>
 
       <ContextMenu
         open={menuOpen}

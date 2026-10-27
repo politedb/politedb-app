@@ -35,7 +35,10 @@ beforeEach(() => {
   });
 });
 
+const onOpen = vi.fn();
+
 function renderCard() {
+  onOpen.mockReset();
   render(
     <ConnectionCard
       profileId="p1"
@@ -43,7 +46,7 @@ function renderCard() {
       groups={[]}
       selectedGroupIds={[]}
       onAssignGroups={vi.fn()}
-      onOpen={vi.fn()}
+      onOpen={onOpen}
       onEdit={vi.fn()}
       onSelectProfile={vi.fn()}
     />
@@ -52,12 +55,12 @@ function renderCard() {
 }
 
 describe("ConnectionCard", () => {
-  it("gives the name room before the tags, which clip instead of wrapping", () => {
+  it("gives the name room before the tags, which hide whole when out of room", () => {
     renderCard();
     const name = screen.getByText("staging orders");
     expect(name.getAttribute("title")).toBe("staging orders");
     expect(name.className).toContain("truncate");
-    const tags = screen.getByText("staging").closest("div.flex-nowrap")!;
+    const tags = screen.getByText("staging").closest("div.flex-wrap")!;
     expect(tags.parentElement!.className).toContain("overflow-hidden");
     expect(screen.getByText("+2").getAttribute("title")).toBe("team-a, eu");
   });
@@ -116,5 +119,32 @@ describe("ConnectionCard", () => {
     fireEvent.contextMenu(card);
     fireEvent.click(screen.getByText("Delete"));
     await waitFor(() => expect(removeProfile).toHaveBeenCalledWith("p1"));
+  });
+
+  it("names the card and its menu for screen readers", () => {
+    const card = renderCard();
+    expect(card.getAttribute("aria-label")).toBe(
+      "staging orders, Postgres, db.internal:5432 • orders"
+    );
+    const kebab = screen.getByRole("button", {
+      name: "Options for staging orders",
+    });
+    expect(kebab.getAttribute("aria-haspopup")).toBe("menu");
+  });
+
+  it("opens from its Open button, once, by click or Enter", () => {
+    const card = renderCard();
+    const open = screen.getByRole("button", { name: "Open staging orders" });
+    fireEvent.click(open);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    // Enter on the button is the button's (its click), not also the card's.
+    fireEvent.keyDown(open, { key: "Enter" });
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    // A double-click on the button does not open a second tab.
+    fireEvent.dblClick(open);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    // The card itself still opens with Enter.
+    fireEvent.keyDown(card, { key: "Enter" });
+    expect(onOpen).toHaveBeenCalledTimes(2);
   });
 });

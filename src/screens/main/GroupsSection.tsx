@@ -39,6 +39,7 @@ export function GroupsSection(props: {
       <div class="flex flex-wrap gap-2">
         <Button
           variant="outline"
+          aria-pressed={!selectedGroupId}
           onClick={() => onPickGroup(undefined)}
           class={`rounded-full border px-3 py-0.75 text-sm font-semibold ${
             !selectedGroupId
@@ -48,7 +49,7 @@ export function GroupsSection(props: {
         >
           All
         </Button>
-        {groups.map(({ group }) => (
+        {groups.map(({ group, count }) => (
           <div
             key={group.id}
             class={`flex items-center gap-1 rounded-full border py-0.75 pr-2 pl-3 text-sm font-semibold ${
@@ -59,10 +60,17 @@ export function GroupsSection(props: {
           >
             <button
               type="button"
+              aria-pressed={selectedGroupId === group.id}
               onClick={() => onPickGroup(group.id)}
-              class="flex min-w-0 items-center gap-1"
+              class="flex min-w-0 items-center gap-1.5"
             >
               <span class="max-w-55 truncate">{group.name}</span>
+              <span
+                class="text-xs font-medium text-slate-400 tabular-nums"
+                aria-label={`${count} connection${count === 1 ? "" : "s"}`}
+              >
+                {count}
+              </span>
             </button>
 
             <button

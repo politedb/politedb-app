@@ -35,4 +35,21 @@ describe("GroupsSection", () => {
     );
     await waitFor(() => expect(onDeleteGroup).toHaveBeenCalledWith("g1"));
   });
+
+  it("shows each group's size and which filter is on", () => {
+    render(
+      <GroupsSection
+        groups={[{ group, count: 2 }]}
+        selectedGroupId="g1"
+        onPickGroup={vi.fn()}
+        onDeleteGroup={vi.fn()}
+      />
+    );
+    expect(
+      screen.getByRole("button", { name: "All" }).getAttribute("aria-pressed")
+    ).toBe("false");
+    const teamA = screen.getByRole("button", { name: /Team A/, pressed: true });
+    expect(teamA.textContent).toContain("2");
+    expect(screen.getByLabelText("2 connections")).toBeTruthy();
+  });
 });

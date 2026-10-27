@@ -107,7 +107,7 @@ describe("KeychainCard menu", () => {
   it("still opens from the menu button", () => {
     setup();
 
-    fireEvent.click(screen.getByRole("button", { name: "Open menu" }));
+    fireEvent.click(screen.getByRole("button", { name: "Options for Athena" }));
 
     expect(menu()).not.toBeNull();
   });

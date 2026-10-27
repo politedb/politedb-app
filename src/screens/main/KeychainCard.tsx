@@ -103,6 +103,8 @@ export function KeychainCard(props: {
         onDblClick={disabled ? undefined : onOpen}
         onContextMenu={openMenuAtPoint}
         onKeyDown={(e) => {
+          // Keys on the card's ⋮ button are its own.
+          if (e.target !== e.currentTarget) return;
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
             onSelect();
@@ -154,6 +156,7 @@ export function KeychainCard(props: {
           menuOpen={menu !== null}
           onClick={openMenuAtAnchor}
           buttonRef={btnRef}
+          label={title}
         />
       </div>
       <ContextMenu
