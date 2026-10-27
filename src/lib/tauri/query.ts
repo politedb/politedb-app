@@ -32,6 +32,12 @@ export type RunSqlOptions = {
   statementTimeoutMs?: number;
   lockTimeoutMs?: number;
   readOnly?: boolean;
+  /**
+   * PostgreSQL: values in fixed text formats whatever the session settings
+   * (ISO dates, ISO 8601 intervals, exact floats), for text that must read
+   * back the same elsewhere (backups).
+   */
+  canonicalTextOutput?: boolean;
 };
 
 const SQL_BUSY_RETRY_MAX = 8;
@@ -484,6 +490,7 @@ export async function startSqlQueryStream(
           batch_size: opts?.batchSize ?? 100,
           max_rows: opts?.maxRows,
           client_mode: "stream",
+          canonical_text_output: opts?.canonicalTextOutput,
         },
       },
       signal

@@ -337,11 +337,17 @@ describe("dumpCommentName", () => {
 });
 
 describe("postgresBackupRowsQuery", () => {
-  it("reads every column as text, names quoted", () => {
-    expect(
-      postgresBackupRowsQuery("App", 'we"ird', ["id", "Addr", "a = b"])
-    ).toBe(
-      'SELECT "id"::text AS "id", "Addr"::text AS "Addr", "a = b"::text AS "a = b" FROM "App"."we""ird";'
+  it("reads every column through its output function, names quoted", () => {
+    expect(postgresBackupRowsQuery("App", 'we"ird', ["id", "a = b"])).toBe(
+      'SELECT CASE WHEN num_nulls("id") = 1 THEN NULL ELSE format(\'%s\', "id") END AS "id", ' +
+        'CASE WHEN num_nulls("a = b") = 1 THEN NULL ELSE format(\'%s\', "a = b") END AS "a = b" ' +
+        'FROM "App"."we""ird";'
+    );
+  });
+
+  it("reads money as its numeric amount", () => {
+    expect(postgresBackupRowsQuery("s", "t", ["m"], new Set(["m"]))).toBe(
+      'SELECT CASE WHEN num_nulls("m") = 1 THEN NULL ELSE ("m")::numeric::text END AS "m" FROM "s"."t";'
     );
   });
 

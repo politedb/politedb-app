@@ -232,6 +232,27 @@ pub async fn run_pg_sql_query(
         }
     }
 
+    // Optional fixed text formats (backups): set before the statement runs,
+    // scoped to this transaction like the limits above.
+    if sql_input.canonical_text_output.unwrap_or(false) {
+        if let Err(e) = tx
+            .batch_execute(
+                "SET LOCAL DateStyle = 'ISO, YMD'; \
+                 SET LOCAL IntervalStyle = 'iso_8601'; \
+                 SET LOCAL extra_float_digits = 3",
+            )
+            .await
+        {
+            emit_error(
+                &ctx.app,
+                op_id,
+                format_pg_error(&e, &sql_input.sql),
+                started_at.elapsed().as_millis(),
+            );
+            return;
+        }
+    }
+
     // PREPARE catches syntax errors early
     let stmt = match tx.prepare(&sql_input.sql).await {
         Ok(s) => s,

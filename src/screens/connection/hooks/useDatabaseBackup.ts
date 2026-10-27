@@ -413,16 +413,58 @@ async function sortTablesByForeignKeys(args: {
  * PostGIS, bytea arrays) and those came back as NULL, losing data. Each
  * text value is written as a quoted literal that the INSERT types by its
  * column, so it reads back as the same value.
+ *
+ * - format('%s', …) uses the type's output function, like pg_dump; a cast
+ *   to text could run a user-defined cast instead. num_nulls tells a NULL
+ *   from a composite whose fields are all NULL.
+ * - The stream runs with fixed text formats (canonicalTextOutput): ISO
+ *   dates, ISO 8601 intervals and exact floats, read the same anywhere.
+ * - money is written as its numeric amount: its text form follows the
+ *   server's currency locale.
  */
 export function postgresBackupRowsQuery(
   schema: string,
   tableName: string,
-  columns: string[]
+  columns: string[],
+  /** Columns of type money (or a domain over it). */
+  moneyColumns: ReadonlySet<string> = new Set()
 ): string {
   const cols = columns
-    .map((c) => `${qIdent(c, "postgres")}::text AS ${qIdent(c, "postgres")}`)
+    .map((c) => {
+      const id = qIdent(c, "postgres");
+      const value = moneyColumns.has(c)
+        ? `(${id})::numeric::text`
+        : `format('%s', ${id})`;
+      return `CASE WHEN num_nulls(${id}) = 1 THEN NULL ELSE ${value} END AS ${id}`;
+    })
     .join(", ");
   return `SELECT ${cols} FROM ${qIdent(schema, "postgres")}.${qIdent(tableName, "postgres")};`;
+}
+
+/** The table's columns of type money, or a domain over it. */
+async function postgresMoneyColumns(
+  connectionId: string,
+  schema: string,
+  tableName: string
+): Promise<Set<string>> {
+  const res = await runSqlQuery(
+    connectionId,
+    `
+      SELECT a.attname
+      FROM pg_attribute a
+      JOIN pg_class c ON c.oid = a.attrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      JOIN pg_type t ON t.oid = a.atttypid
+      WHERE n.nspname = ${qLiteral(schema)}
+        AND c.relname = ${qLiteral(tableName)}
+        AND a.attnum > 0
+        AND NOT a.attisdropped
+        AND (t.oid = 'money'::regtype OR t.typbasetype = 'money'::regtype);
+    `
+  );
+  return new Set(
+    (res.rows ?? []).map((r: any) => cellToString(r?.[0]) ?? "").filter(Boolean)
+  );
 }
 
 async function exportTableToSqlParts(args: {
@@ -437,11 +479,17 @@ async function exportTableToSqlParts(args: {
 
   const query =
     engine === "postgres"
-      ? postgresBackupRowsQuery(schema, tableName, columns)
+      ? postgresBackupRowsQuery(
+          schema,
+          tableName,
+          columns,
+          await postgresMoneyColumns(connectionId, schema, tableName)
+        )
       : tableExportQuery(schema, tableName, columns, undefined, "AND", engine);
   const opId = await startSqlQueryStream(connectionId, query, {
     batchSize: 250,
     maxRows: 10_000_000,
+    canonicalTextOutput: engine === "postgres",
   });
 
   await new Promise<void>((resolve, reject) => {
