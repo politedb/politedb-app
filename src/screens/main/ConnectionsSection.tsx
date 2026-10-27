@@ -10,10 +10,18 @@ function EmptyState(props: {
   hasSearch: boolean;
   profilesEmpty: boolean;
   onCreate: () => void;
+  onClearSearch?: () => void;
   onUseTemplate?: () => void | Promise<void>;
   templateSaving?: boolean;
 }) {
-  const { hasSearch, profilesEmpty, onUseTemplate, templateSaving } = props;
+  const {
+    hasSearch,
+    profilesEmpty,
+    onCreate,
+    onClearSearch,
+    onUseTemplate,
+    templateSaving,
+  } = props;
 
   return (
     <div class="flex flex-col items-center justify-center rounded-2xl border border-slate-200 bg-white p-10 text-center shadow-sm">
@@ -26,13 +34,34 @@ function EmptyState(props: {
           : "Create a connection to start querying databases."}
       </div>
 
-      {!hasSearch ? (
+      {hasSearch ? (
+        onClearSearch ? (
+          <div class="mt-5">
+            <Button
+              type="button"
+              variant="outline"
+              class="py-2 text-sm"
+              onClick={onClearSearch}
+            >
+              Clear search
+            </Button>
+          </div>
+        ) : null
+      ) : (
         <div class="mt-5 flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-center">
+          <Button
+            type="button"
+            variant="default"
+            class="border py-2 text-sm"
+            onClick={onCreate}
+          >
+            New connection
+          </Button>
           {profilesEmpty && onUseTemplate ? (
             <Button
               type="button"
-              variant="default"
-              class="border py-2 text-sm"
+              variant="outline"
+              class="py-2 text-sm"
               loading={templateSaving}
               disabled={templateSaving}
               onClick={() => void onUseTemplate()}
@@ -41,7 +70,7 @@ function EmptyState(props: {
             </Button>
           ) : null}
         </div>
-      ) : null}
+      )}
     </div>
   );
 }
@@ -126,6 +155,7 @@ export function ConnectionsSection(props: {
   groupIdsByProfile: Record<string, string[]>;
   templateSaving?: boolean;
   onCreate: () => void;
+  onClearSearch?: () => void;
   onUseSqliteTemplate?: () => void | Promise<void>;
   onOpen: (id: string) => void;
   onEdit: (id: string) => void;
@@ -143,6 +173,7 @@ export function ConnectionsSection(props: {
     groupIdsByProfile,
     templateSaving,
     onCreate,
+    onClearSearch,
     onUseSqliteTemplate,
     onOpen,
     onEdit,
@@ -187,13 +218,14 @@ export function ConnectionsSection(props: {
           <div class="flex items-center justify-between">
             <h2 class="flex items-center gap-2 text-sm font-semibold tracking-wide text-slate-800">
               <DatabaseIcon className="size-4 text-slate-500" />
-              All Connections ({profiles.length})
+              All connections ({profiles.length})
             </h2>
           </div>
           <EmptyState
             hasSearch={hasSearch}
             profilesEmpty={profiles.length === 0}
             onCreate={onCreate}
+            onClearSearch={onClearSearch}
             onUseTemplate={onUseSqliteTemplate}
             templateSaving={templateSaving}
           />

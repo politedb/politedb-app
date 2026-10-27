@@ -1,6 +1,7 @@
 import type { ConnectionGroup } from "src/stores/connectionGroups";
 import { Button } from "src/components/common/Button";
 import { XIcon, FolderIcon } from "src/components/icons";
+import { confirmDialog } from "src/lib/system-dialog";
 
 export function GroupsSection(props: {
   groups: Array<{ group: ConnectionGroup; count: number }>;
@@ -13,10 +14,14 @@ export function GroupsSection(props: {
   if (!groups.length) return null;
 
   async function onDelete(group: ConnectionGroup) {
-    const ok = await Promise.resolve(
-      window.confirm(
-        `Delete connection?\n\nConnections in "${group.name}" will become ungrouped.`
-      )
+    const ok = await confirmDialog(
+      `Delete the group "${group.name}"? Its connections are kept and become ungrouped.`,
+      {
+        title: "Delete group",
+        kind: "warning",
+        okLabel: "Delete",
+        cancelLabel: "Cancel",
+      }
     );
     if (!ok) return;
     await onDeleteGroup(group.id);

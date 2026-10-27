@@ -526,6 +526,7 @@ export function MainScreen() {
                     groups={groups}
                     groupIdsByProfile={groupIdsByProfile}
                     onCreate={openNew}
+                    onClearSearch={() => setSearchQuery("")}
                     onUseSqliteTemplate={handleUseSqliteTemplate}
                     templateSaving={templateSaving}
                     onAssignGroups={assignGroups}

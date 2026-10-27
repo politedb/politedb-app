@@ -11,6 +11,7 @@ import {
 import { DbIcon } from "src/components/icons/DbIcon";
 import type { KeychainDisplay, KeychainIcon } from "src/lib/keychain/display";
 import { cn } from "src/utils/cn";
+import { confirmDialog } from "src/lib/system-dialog";
 import { KebabButton } from "../../components/common/KebabButton";
 
 export function KeychainCard(props: {
@@ -32,14 +33,18 @@ export function KeychainCard(props: {
   const { title, badge, detail, icon, unused } = props.display;
 
   const onDeleteSecret = useCallback(async () => {
-    const ok = await Promise.resolve(
-      window.confirm(
-        `Delete keychain secret?\n\nThis will remove the saved keychain.`
-      )
+    const ok = await confirmDialog(
+      `Delete "${title}"? This removes the saved secret from the system keychain and cannot be undone.`,
+      {
+        title: "Delete keychain secret",
+        kind: "warning",
+        okLabel: "Delete",
+        cancelLabel: "Cancel",
+      }
     );
     if (!ok) return;
     onDelete();
-  }, [onDelete]);
+  }, [onDelete, title]);
 
   const menuItems = useMemo<MenuItem[]>(
     () => [
@@ -157,6 +162,7 @@ export function KeychainCard(props: {
         y={menu?.y ?? 0}
         items={menuItems}
         onClose={() => setMenu(null)}
+        autoFocus
       />
     </>
   );

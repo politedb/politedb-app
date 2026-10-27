@@ -19,7 +19,7 @@ import { type ConnectionGroup } from "src/stores/connectionGroups";
 import { usePinnedConnectionsStore } from "src/stores/pinnedConnections";
 import { cn } from "src/utils/cn";
 import { connectionProfileSummary } from "src/lib/connection/profileSummary";
-import { saveDialog, showMessage } from "src/lib/system-dialog";
+import { confirmDialog, saveDialog, showMessage } from "src/lib/system-dialog";
 import { writeTextFile } from "src/lib/system-fs";
 import { AssignConnectionGroupDialog } from "src/components/modal/AssignConnectionGroupDialog";
 import {
@@ -32,6 +32,7 @@ import {
   formatSharingExportSuccessMessage,
 } from "src/lib/profiles/profileSharing";
 import { KebabButton } from "src/components/common/KebabButton";
+import { isProductionTag } from "src/lib/queries/querySafety";
 
 /* -------------------------------------------------- */
 export function getConnectionCardToneClass(
@@ -104,6 +105,11 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
   const { engine, subtitle, hasSsh } = connectionProfileSummary(profile);
 
   const tags = profile.input?.tags;
+  const chipTags = tags?.length
+    ? tags
+    : currentGroups.map((group) => group.name);
+  const productionTag = tags?.find(isProductionTag);
+  const otherTags = chipTags.filter((tag) => tag !== productionTag);
 
   const rawIndicator = String(profile.input.indicator_color ?? "").trim();
   const hasCustomIndicator = rawIndicator.length > 0;
@@ -130,10 +136,15 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
 
   async function onDelete() {
     if (!profile) return;
-    const ok = await Promise.resolve(
-      window.confirm(
-        "Delete connection?\n\nThis will remove the saved connection."
-      )
+    closeMenu();
+    const ok = await confirmDialog(
+      `Delete "${profile.label || "Unnamed"}"? This removes the saved connection and cannot be undone.`,
+      {
+        title: "Delete connection",
+        kind: "warning",
+        okLabel: "Delete",
+        cancelLabel: "Cancel",
+      }
     );
     if (!ok) return;
     await removeProfile(profile.id);
@@ -262,22 +273,33 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
               title={hasCustomIndicator ? "Indicator color" : "Default color"}
             />
 
-            <span class="min-w-0 truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
+            {/* The name keeps its room; other tags only get what is left
+                (clipped, the rest in the "+N" tooltip). A production tag is
+                a warning, so it always stays visible next to the name. */}
+            <span
+              class="min-w-0 truncate text-sm font-semibold text-slate-900 dark:text-slate-100"
+              title={label}
+            >
               {label}
             </span>
 
-            {tags?.length ? (
-              <div class="min-w-0 shrink-0">
-                <TagChips className="min-w-0" tags={tags} max={2} size="sm" />
-              </div>
-            ) : (
+            {productionTag ? (
               <TagChips
-                className="min-w-0"
-                tags={currentGroups.map((group) => group.name)}
+                className="shrink-0"
+                tags={[productionTag]}
                 max={1}
                 size="sm"
               />
-            )}
+            ) : null}
+
+            <div class="min-w-0 flex-1 overflow-hidden">
+              <TagChips
+                className="flex-nowrap [&>*]:shrink-0"
+                tags={otherTags}
+                max={1}
+                size="sm"
+              />
+            </div>
           </div>
 
           {/* Subtitle row */}
@@ -388,6 +410,7 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
           },
         ]}
         onClose={closeMenu}
+        autoFocus
       />
 
       <ExportConnectionDialog
