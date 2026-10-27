@@ -406,6 +406,25 @@ async function sortTablesByForeignKeys(args: {
   return orderedKeys.map((k) => byKey.get(k)).filter(Boolean) as BackupTable[];
 }
 
+/**
+ * PostgreSQL backup rows: every column read as its text form, as pg_dump
+ * does. The binary values the driver decodes miss many types (composite
+ * types, ranges of custom types, extension types such as hstore or
+ * PostGIS, bytea arrays) and those came back as NULL, losing data. Each
+ * text value is written as a quoted literal that the INSERT types by its
+ * column, so it reads back as the same value.
+ */
+export function postgresBackupRowsQuery(
+  schema: string,
+  tableName: string,
+  columns: string[]
+): string {
+  const cols = columns
+    .map((c) => `${qIdent(c, "postgres")}::text AS ${qIdent(c, "postgres")}`)
+    .join(", ");
+  return `SELECT ${cols} FROM ${qIdent(schema, "postgres")}.${qIdent(tableName, "postgres")};`;
+}
+
 async function exportTableToSqlParts(args: {
   append: (content: string) => void;
   connectionId: string;
@@ -416,14 +435,10 @@ async function exportTableToSqlParts(args: {
 }) {
   const { append, connectionId, engine, schema, tableName, columns } = args;
 
-  const query = tableExportQuery(
-    schema,
-    tableName,
-    columns,
-    undefined,
-    "AND",
-    engine
-  );
+  const query =
+    engine === "postgres"
+      ? postgresBackupRowsQuery(schema, tableName, columns)
+      : tableExportQuery(schema, tableName, columns, undefined, "AND", engine);
   const opId = await startSqlQueryStream(connectionId, query, {
     batchSize: 250,
     maxRows: 10_000_000,

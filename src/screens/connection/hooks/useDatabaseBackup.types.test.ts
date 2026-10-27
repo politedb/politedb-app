@@ -9,7 +9,12 @@ vi.mock("src/stores/persistentStore", () => ({
   usePersistentStore: { getState: () => ({ scheduleSave: () => {} }) },
 }));
 
-import { buildPostgresTypesSql, dumpCommentName } from "./useDatabaseBackup";
+import {
+  buildPostgresTypesSql,
+  dumpCommentName,
+  postgresBackupRowsQuery,
+} from "./useDatabaseBackup";
+import { formatSqlInsertChunk } from "./sqlInsertLiteral";
 import { splitSqlStatements } from "src/components/editor/splitSqlStatements";
 
 /** One catalog row, in the query's column order. */
@@ -328,5 +333,41 @@ describe("dumpCommentName", () => {
     const statements = splitSqlStatements(dump, { dialect: "postgres" });
     expect(statements).toHaveLength(1);
     expect(statements[0]!.text).toContain("CREATE TABLE IF NOT EXISTS");
+  });
+});
+
+describe("postgresBackupRowsQuery", () => {
+  it("reads every column as text, names quoted", () => {
+    expect(
+      postgresBackupRowsQuery("App", 'we"ird', ["id", "Addr", "a = b"])
+    ).toBe(
+      'SELECT "id"::text AS "id", "Addr"::text AS "Addr", "a = b"::text AS "a = b" FROM "App"."we""ird";'
+    );
+  });
+
+  it("writes the text values as literals the column types", () => {
+    // Text forms of a composite, a bytea array and hstore, as read.
+    const sql = formatSqlInsertChunk({
+      engine: "postgres",
+      schema: "app",
+      tableName: "t",
+      columnNames: ["c", "bya", "h"],
+      columnTypes: ["text", "text", "text"],
+      rows: [
+        [
+          { t: "Str", v: '("Main ""St"", 1\\2",70000)' },
+          { t: "Str", v: '{"\\x00",NULL}' },
+          { t: "Null" },
+        ],
+      ],
+      qIdent: (name) => `"${name}"`,
+    });
+    expect(sql).toContain(
+      String.raw`VALUES
+  (E'("Main ""St"", 1\\2",70000)', E'{"\\x00",NULL}', NULL);`
+    );
+    expect(
+      splitSqlStatements(`${sql}\nSELECT 2;`, { dialect: "postgres" })
+    ).toHaveLength(2);
   });
 });
