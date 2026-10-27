@@ -86,9 +86,15 @@ function normalizeEngineNameForCompare(engine: string): string {
 
 function isIgnorableRestoreError(sql: string, err: unknown): boolean {
   const stmt = sql.trim().toUpperCase();
-  const msg = String(
-    err instanceof Error ? err.message : (err ?? "")
-  ).toLowerCase();
+  // Only the error's own first line, with quoted names blanked: a DETAIL
+  // line or an object named "already exists" must not pass for a
+  // duplicate.
+  const msg = (
+    String(err instanceof Error ? err.message : (err ?? "")).split("\n")[0] ??
+    ""
+  )
+    .replace(/"(?:[^"]|"")*"|'(?:[^']|'')*'|`[^`]*`/g, '""')
+    .toLowerCase();
 
   // A dump statement starts with its "-- Structure …" comment line.
   const head = stmt.replace(/^(?:\s*--[^\n]*\n)+/, "").trimStart();
@@ -405,10 +411,36 @@ async function exportTableToSqlParts(args: {
   });
 }
 
+type PgTypeRow = {
+  oid: string;
+  schema: string;
+  name: string;
+  kind: string;
+  /** Domains: base type SQL, and the type it is built on (array → element). */
+  baseSql: string;
+  baseOid: string;
+  notNull: boolean;
+  defaultExpr: string;
+  checks: string;
+  /** Enums: quoted labels, possibly none. */
+  labels: string;
+  /** Domains: COLLATE clause target when it differs from the base's. */
+  collation: string;
+  /** Set when an extension owns the type. */
+  extension: string;
+  extensionSchema: string;
+  /** Domains: sequences their default uses. */
+  sequences: string;
+};
+
 /**
- * What the backed-up tables need before they can be created: their
- * schemas (other than public), and the enum types and domains their
- * columns use (also as array elements or as a domain's base type).
+ * What the backed-up tables need before they can be created: their schemas
+ * (other than public), the extensions that own types they use, the
+ * sequences domain defaults use, then the enum types and domains their
+ * columns use — followed through arrays and domain bases to any depth, with
+ * every domain after the domain it is built on.
+ *
+ * Composite and range types are not recreated.
  */
 export async function buildPostgresTypesSql(args: {
   connectionId: string;
@@ -420,48 +452,37 @@ export async function buildPostgresTypesSql(args: {
   const tableList = tables
     .map((t) => `(${qLiteral(t.schema)}, ${qLiteral(t.name)})`)
     .join(", ");
-  const usedTypes = `
-    WITH used AS (
-      SELECT DISTINCT
-        CASE WHEN t.typcategory = 'A' AND t.typelem <> 0
-          THEN t.typelem ELSE t.oid END AS type_oid
+  const res = await runSqlQuery(
+    connectionId,
+    `
+    WITH RECURSIVE walk(type_oid) AS (
+      SELECT a.atttypid
       FROM pg_attribute a
       JOIN pg_class c ON c.oid = a.attrelid
       JOIN pg_namespace n ON n.oid = c.relnamespace
-      JOIN pg_type t ON t.oid = a.atttypid
       WHERE (n.nspname, c.relname) IN (${tableList})
         AND a.attnum > 0
         AND NOT a.attisdropped
-    ),
-    all_types AS (
-      SELECT type_oid FROM used
       UNION
-      SELECT CASE WHEN bt.typcategory = 'A' AND bt.typelem <> 0
-        THEN bt.typelem ELSE bt.oid END
-      FROM used u
-      JOIN pg_type d ON d.oid = u.type_oid AND d.typtype = 'd'
-      JOIN pg_type bt ON bt.oid = d.typbasetype
-    )`;
-
-  const enumsRes = await runSqlQuery(
-    connectionId,
-    `${usedTypes}
-    SELECT n.nspname, t.typname,
-      string_agg(quote_literal(e.enumlabel), ', ' ORDER BY e.enumsortorder)
-    FROM all_types a
-    JOIN pg_type t ON t.oid = a.type_oid AND t.typtype = 'e'
-    JOIN pg_namespace n ON n.oid = t.typnamespace
-    JOIN pg_enum e ON e.enumtypid = t.oid
-    GROUP BY n.nspname, t.typname
-    ORDER BY n.nspname, t.typname;`
-  );
-
-  const domainsRes = await runSqlQuery(
-    connectionId,
-    `${usedTypes}
-    SELECT n.nspname, t.typname,
-      pg_catalog.format_type(t.typbasetype, t.typtypmod),
-      t.typnotnull, t.typdefault,
+      SELECT next.oid
+      FROM walk w
+      JOIN pg_type t ON t.oid = w.type_oid
+      CROSS JOIN LATERAL (VALUES
+        (CASE WHEN t.typcategory = 'A' THEN t.typelem END),
+        (NULLIF(t.typbasetype, 0))
+      ) AS next(oid)
+      WHERE next.oid IS NOT NULL AND next.oid <> 0
+    )
+    SELECT
+      t.oid::text,
+      n.nspname,
+      t.typname,
+      t.typtype::text,
+      CASE WHEN t.typtype = 'd'
+        THEN pg_catalog.format_type(t.typbasetype, t.typtypmod) END,
+      CASE WHEN bt.typcategory = 'A' THEN bt.typelem ELSE bt.oid END::text,
+      t.typnotnull,
+      pg_get_expr(t.typdefaultbin, 0),
       (SELECT string_agg(
           'CONSTRAINT ' || quote_ident(c.conname) || ' ' ||
             pg_get_constraintdef(c.oid),
@@ -469,41 +490,113 @@ export async function buildPostgresTypesSql(args: {
         FROM pg_constraint c
         -- CHECK only: NOT NULL comes from typnotnull (PostgreSQL 17 also
         -- records it as a constraint).
-        WHERE c.contypid = t.oid AND c.contype = 'c')
-    FROM all_types a
-    JOIN pg_type t ON t.oid = a.type_oid AND t.typtype = 'd'
+        WHERE c.contypid = t.oid AND c.contype = 'c'),
+      CASE WHEN t.typtype = 'e' THEN coalesce(
+        (SELECT string_agg(quote_literal(e.enumlabel), ', '
+            ORDER BY e.enumsortorder)
+          FROM pg_enum e WHERE e.enumtypid = t.oid), '') END,
+      CASE WHEN t.typtype = 'd' AND t.typcollation <> 0
+          AND t.typcollation IS DISTINCT FROM bt.typcollation
+        THEN quote_ident(cn.nspname) || '.' || quote_ident(co.collname) END,
+      x.extname,
+      xn.nspname,
+      (SELECT string_agg(
+          quote_ident(sn.nspname) || '.' || quote_ident(sq.relname), ',')
+        FROM pg_depend d
+        JOIN pg_class sq ON sq.oid = d.refobjid AND sq.relkind = 'S'
+        JOIN pg_namespace sn ON sn.oid = sq.relnamespace
+        WHERE d.classid = 'pg_type'::regclass
+          AND d.objid = t.oid
+          AND d.refclassid = 'pg_class'::regclass)
+    FROM (SELECT DISTINCT type_oid FROM walk) w
+    JOIN pg_type t ON t.oid = w.type_oid
     JOIN pg_namespace n ON n.oid = t.typnamespace
+    LEFT JOIN pg_type bt ON bt.oid = t.typbasetype
+    LEFT JOIN pg_collation co ON co.oid = t.typcollation
+    LEFT JOIN pg_namespace cn ON cn.oid = co.collnamespace
+    LEFT JOIN pg_depend xd
+      ON xd.classid = 'pg_type'::regclass
+     AND xd.objid = t.oid
+     AND xd.refclassid = 'pg_extension'::regclass
+     AND xd.deptype = 'e'
+    LEFT JOIN pg_extension x ON x.oid = xd.refobjid
+    LEFT JOIN pg_namespace xn ON xn.oid = x.extnamespace
+    WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
     ORDER BY n.nspname, t.typname;`
   );
+
+  const rows: PgTypeRow[] = (res.rows ?? []).map((r: any) => ({
+    oid: cellToString(r?.[0]) ?? "",
+    schema: cellToString(r?.[1]) ?? "",
+    name: cellToString(r?.[2]) ?? "",
+    kind: cellToString(r?.[3]) ?? "",
+    baseSql: cellToString(r?.[4], true) ?? "",
+    baseOid: cellToString(r?.[5], true) ?? "",
+    notNull: cellToBool(r?.[6]),
+    defaultExpr: cellToString(r?.[7], true) ?? "",
+    checks: cellToString(r?.[8], true) ?? "",
+    labels: cellToString(r?.[9], true) ?? "",
+    collation: cellToString(r?.[10], true) ?? "",
+    extension: cellToString(r?.[11], true) ?? "",
+    extensionSchema: cellToString(r?.[12], true) ?? "",
+    sequences: cellToString(r?.[13], true) ?? "",
+  }));
 
   const schemas = new Set(
     tables.map((t) => t.schema).filter((name) => name !== "public")
   );
-  let typesSql = "";
-  for (const row of enumsRes.rows ?? []) {
-    const schema = cellToString(row?.[0]) ?? "";
-    const name = cellToString(row?.[1]) ?? "";
-    const labels = cellToString(row?.[2], true) ?? "";
-    if (!schema || !name) continue;
-    if (schema !== "public") schemas.add(schema);
-    typesSql += ensureSqlEndsWithSemicolon(
-      `CREATE TYPE ${qIdent(schema, "postgres")}.${qIdent(name, "postgres")} AS ENUM (${labels})`
+  const addSchema = (name: string) => {
+    if (name && name !== "public") schemas.add(name);
+  };
+  const ident = (schema: string, name: string) =>
+    `${qIdent(schema, "postgres")}.${qIdent(name, "postgres")}`;
+
+  // Types an extension owns come with the extension, not one by one.
+  const extensions = new Map<string, string>();
+  for (const row of rows) {
+    if (!row.extension) continue;
+    extensions.set(row.extension, row.extensionSchema);
+    addSchema(row.extensionSchema);
+  }
+  const own = rows.filter((row) => !row.extension && row.schema && row.name);
+
+  let enumsSql = "";
+  for (const row of own) {
+    if (row.kind !== "e") continue;
+    addSchema(row.schema);
+    enumsSql += ensureSqlEndsWithSemicolon(
+      `CREATE TYPE ${ident(row.schema, row.name)} AS ENUM (${row.labels})`
     );
   }
-  for (const row of domainsRes.rows ?? []) {
-    const schema = cellToString(row?.[0]) ?? "";
-    const name = cellToString(row?.[1]) ?? "";
-    const baseType = cellToString(row?.[2]) ?? "";
-    const notNull = cellToBool(row?.[3]);
-    const defaultExpr = cellToString(row?.[4], true) ?? "";
-    const constraints = cellToString(row?.[5], true) ?? "";
-    if (!schema || !name || !baseType) continue;
-    if (schema !== "public") schemas.add(schema);
-    typesSql += ensureSqlEndsWithSemicolon(
-      `CREATE DOMAIN ${qIdent(schema, "postgres")}.${qIdent(name, "postgres")} AS ${baseType}` +
-        `${defaultExpr ? ` DEFAULT ${defaultExpr}` : ""}` +
-        `${notNull ? " NOT NULL" : ""}` +
-        `${constraints ? ` ${constraints}` : ""}`
+
+  // Each domain after the domain it is built on.
+  const domains = own.filter((row) => row.kind === "d" && row.baseSql);
+  const byOid = new Map(domains.map((row) => [row.oid, row]));
+  const ordered: PgTypeRow[] = [];
+  const placed = new Set<string>();
+  const place = (row: PgTypeRow, path: Set<string>) => {
+    if (placed.has(row.oid) || path.has(row.oid)) return;
+    path.add(row.oid);
+    const base = byOid.get(row.baseOid);
+    if (base) place(base, path);
+    placed.add(row.oid);
+    ordered.push(row);
+  };
+  for (const row of domains) place(row, new Set());
+
+  const sequences = new Set<string>();
+  let domainsSql = "";
+  for (const row of ordered) {
+    addSchema(row.schema);
+    for (const seq of row.sequences.split(",").filter(Boolean)) {
+      sequences.add(seq);
+    }
+    domainsSql += ensureSqlEndsWithSemicolon(
+      `CREATE DOMAIN ${ident(row.schema, row.name)} AS ${row.baseSql}` +
+        `${row.collation ? ` COLLATE ${row.collation}` : ""}` +
+        `${row.defaultExpr ? ` DEFAULT ${row.defaultExpr}` : ""}` +
+        `${row.notNull ? " NOT NULL" : ""}` +
+        `${row.checks ? ` ${row.checks}` : ""}`
     );
   }
 
@@ -515,7 +608,24 @@ export async function buildPostgresTypesSql(args: {
       )
     )
     .join("");
-  return `${schemasSql}${typesSql}`;
+  const extensionsSql = [...extensions]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([name, schema]) =>
+      ensureSqlEndsWithSemicolon(
+        `CREATE EXTENSION IF NOT EXISTS ${qIdent(name, "postgres")}` +
+          (schema ? ` WITH SCHEMA ${qIdent(schema, "postgres")}` : "")
+      )
+    )
+    .join("");
+  // Already quoted by the catalog query; owned by their tables later.
+  const sequencesSql = [...sequences]
+    .sort()
+    .map((seq) =>
+      ensureSqlEndsWithSemicolon(`CREATE SEQUENCE IF NOT EXISTS ${seq}`)
+    )
+    .join("");
+
+  return `${schemasSql}${extensionsSql}${sequencesSql}${enumsSql}${domainsSql}`;
 }
 
 async function buildPostgresTableStructure(args: {

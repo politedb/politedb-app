@@ -162,6 +162,33 @@ describe("restoring a dump", () => {
     );
   });
 
+  it.each([
+    // A type named "already exists" that is missing is not a duplicate.
+    [
+      'CREATE TABLE a (x "already exists")',
+      'type "already exists" does not exist',
+    ],
+    // A CHECK whose name holds "already" fails on the data.
+    [
+      "ALTER TABLE a ADD CONSTRAINT already_positive CHECK (x > 0)",
+      'check constraint "already_positive" of relation "a" is violated by some row',
+    ],
+    // A duplicate only in the DETAIL line is not the error itself.
+    [
+      "CREATE INDEX i ON a (missing)",
+      'column "missing" does not exist\nDETAIL: something already exists',
+    ],
+  ])("stops on a real failure of %s", async (statement, error) => {
+    m.unpack.mockResolvedValue({
+      sql: `-- Structure public.a\n${statement};\nINSERT INTO a VALUES (1);`,
+      engine: "postgres",
+    });
+    m.runSqlQuery.mockRejectedValueOnce(new Error(error));
+    await restore();
+    expect(m.runSqlQuery).toHaveBeenCalledTimes(1);
+    expect(m.showMessage.mock.calls[0]![0]).toContain("Stopped at statement 1");
+  });
+
   it("says what already ran when it stops partway", async () => {
     m.runSqlQuery
       .mockResolvedValueOnce({})

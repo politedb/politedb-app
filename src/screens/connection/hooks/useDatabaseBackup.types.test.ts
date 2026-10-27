@@ -11,60 +11,183 @@ vi.mock("src/stores/persistentStore", () => ({
 
 import { buildPostgresTypesSql } from "./useDatabaseBackup";
 
-beforeEach(() => {
-  m.runSqlQuery.mockReset();
-});
+/** One catalog row, in the query's column order. */
+function row(p: {
+  oid: string;
+  schema?: string;
+  name: string;
+  kind: "e" | "d" | "b";
+  baseSql?: string;
+  baseOid?: string;
+  notNull?: boolean;
+  defaultExpr?: string;
+  checks?: string;
+  labels?: string;
+  collation?: string;
+  extension?: string;
+  extensionSchema?: string;
+  sequences?: string;
+}) {
+  return [
+    p.oid,
+    p.schema ?? "public",
+    p.name,
+    p.kind,
+    p.baseSql ?? null,
+    p.baseOid ?? null,
+    p.notNull ?? false,
+    p.defaultExpr ?? null,
+    p.checks ?? null,
+    p.labels ?? null,
+    p.collation ?? null,
+    p.extension ?? null,
+    p.extensionSchema ?? null,
+    p.sequences ?? null,
+  ];
+}
+
+async function build(
+  rows: unknown[][],
+  tables = [{ schema: "public", name: "t" }]
+) {
+  m.runSqlQuery.mockResolvedValueOnce({ rows });
+  return buildPostgresTypesSql({ connectionId: "c1", tables });
+}
+
+beforeEach(() => m.runSqlQuery.mockReset());
 
 describe("buildPostgresTypesSql", () => {
-  it("creates the schemas, enums and domains the tables use", async () => {
-    m.runSqlQuery
-      // Enums.
-      .mockResolvedValueOnce({
-        rows: [["public", "user_role", "'customer', 'admin'"]],
-      })
-      // Domains.
-      .mockResolvedValueOnce({
-        rows: [
-          [
-            "billing",
-            "positive_amount",
-            "numeric(12,2)",
-            true,
-            "0",
-            "CONSTRAINT positive CHECK (VALUE >= 0)",
-          ],
-        ],
-      });
-
-    const sql = await buildPostgresTypesSql({
-      connectionId: "c1",
-      tables: [
-        { schema: "public", name: "users" },
-        { schema: "sales", name: "orders" },
+  it("creates schemas, enums and domains, each domain after its base", async () => {
+    const sql = await build(
+      [
+        // Sorted by name, the child comes first; it must be created last.
+        row({
+          oid: "3",
+          name: "a_child",
+          kind: "d",
+          baseSql: "z_parent",
+          baseOid: "2",
+        }),
+        row({
+          oid: "4",
+          schema: "other",
+          name: "role",
+          kind: "e",
+          labels: "'a', 'b'",
+        }),
+        row({
+          oid: "2",
+          name: "z_parent",
+          kind: "d",
+          baseSql: "other.role",
+          baseOid: "4",
+          notNull: true,
+        }),
       ],
-    });
-
+      [
+        { schema: "public", name: "t" },
+        { schema: "sales", name: "orders" },
+      ]
+    );
     expect(sql).toBe(
       [
-        'CREATE SCHEMA IF NOT EXISTS "billing";',
+        'CREATE SCHEMA IF NOT EXISTS "other";',
         'CREATE SCHEMA IF NOT EXISTS "sales";',
-        `CREATE TYPE "public"."user_role" AS ENUM ('customer', 'admin');`,
-        'CREATE DOMAIN "billing"."positive_amount" AS numeric(12,2) DEFAULT 0 NOT NULL CONSTRAINT positive CHECK (VALUE >= 0);',
+        `CREATE TYPE "other"."role" AS ENUM ('a', 'b');`,
+        'CREATE DOMAIN "public"."z_parent" AS other.role NOT NULL;',
+        'CREATE DOMAIN "public"."a_child" AS z_parent;',
         "",
       ].join("\n")
     );
-    // Both lookups are limited to the backed-up tables.
-    for (const [, query] of m.runSqlQuery.mock.calls) {
-      expect(query).toContain(`('public', 'users'), ('sales', 'orders')`);
-    }
+    // The lookup is limited to the backed-up tables.
+    expect(m.runSqlQuery.mock.calls[0]![1]).toContain(
+      `('public', 't'), ('sales', 'orders')`
+    );
+  });
+
+  it("keeps a domain's collation, default, NOT NULL and CHECKs", async () => {
+    const sql = await build([
+      row({
+        oid: "5",
+        name: "code",
+        kind: "d",
+        baseSql: "text",
+        collation: '"pg_catalog"."C"',
+        defaultExpr: "'x'::text",
+        notNull: true,
+        checks: "CONSTRAINT short CHECK ((length(VALUE) < 10))",
+      }),
+    ]);
+    expect(sql).toBe(
+      `CREATE DOMAIN "public"."code" AS text COLLATE "pg_catalog"."C" DEFAULT 'x'::text NOT NULL CONSTRAINT short CHECK ((length(VALUE) < 10));\n`
+    );
+  });
+
+  it("creates the sequences a domain default uses before the domain", async () => {
+    const sql = await build([
+      row({
+        oid: "6",
+        name: "ticket",
+        kind: "d",
+        baseSql: "integer",
+        defaultExpr: "nextval('users_id_seq'::regclass)",
+        sequences: '"public"."users_id_seq"',
+      }),
+    ]);
+    expect(sql).toBe(
+      [
+        'CREATE SEQUENCE IF NOT EXISTS "public"."users_id_seq";',
+        `CREATE DOMAIN "public"."ticket" AS integer DEFAULT nextval('users_id_seq'::regclass);`,
+        "",
+      ].join("\n")
+    );
+  });
+
+  it("installs the extension owning a type instead of recreating it", async () => {
+    const sql = await build([
+      row({
+        oid: "7",
+        name: "citext",
+        kind: "b",
+        extension: "citext",
+        extensionSchema: "public",
+      }),
+      row({
+        oid: "8",
+        name: "earth",
+        kind: "d",
+        baseSql: "cube",
+        extension: "earthdistance",
+        extensionSchema: "ext",
+      }),
+      // A user domain over an extension type is still the user's.
+      row({
+        oid: "9",
+        name: "email",
+        kind: "d",
+        baseSql: "citext",
+        baseOid: "7",
+      }),
+    ]);
+    expect(sql).toBe(
+      [
+        'CREATE SCHEMA IF NOT EXISTS "ext";',
+        'CREATE EXTENSION IF NOT EXISTS "citext" WITH SCHEMA "public";',
+        'CREATE EXTENSION IF NOT EXISTS "earthdistance" WITH SCHEMA "ext";',
+        'CREATE DOMAIN "public"."email" AS citext;',
+        "",
+      ].join("\n")
+    );
+  });
+
+  it("keeps an enum with no labels", async () => {
+    const sql = await build([
+      row({ oid: "10", name: "pending", kind: "e", labels: "" }),
+    ]);
+    expect(sql).toBe('CREATE TYPE "public"."pending" AS ENUM ();\n');
   });
 
   it("adds nothing when the tables use only built-in types", async () => {
-    m.runSqlQuery.mockResolvedValue({ rows: [] });
-    const sql = await buildPostgresTypesSql({
-      connectionId: "c1",
-      tables: [{ schema: "public", name: "users" }],
-    });
-    expect(sql).toBe("");
+    expect(await build([])).toBe("");
   });
 });
