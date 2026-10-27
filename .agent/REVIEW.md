@@ -2,9 +2,9 @@
 
 ## Status
 
-CHANGES REQUIRED
+VERIFIED WITH LIMITATIONS
 
-Latest review: **round 13**, `19fc1f7..9e57536`; new dump comments and error mapping are fixed, but E-string continuation remains exploitable with vertical tab before the first newline. Build and 333 relevant committed tests passed; reviewer real-runner reproduction confirms unintended DELETE dispatch. See appended review.
+Latest review: **round 14**, `9e57536..6f95c52`; round 13 P1 resolved. No regression or remaining PostgreSQL 17 continuation-whitespace mismatch found in this scoped review. Build and 481 relevant tests passed. No live PostgreSQL or desktop/native verification; earlier documented limitations remain. See appended review.
 
 Reviewed `main..6f853c31b22f76672db0dace4a6d10adf8152533` on `fix/backup-restore-safety`, against the human-approved batch 1 requirements. No application source changed.
 
@@ -568,3 +568,26 @@ Include vertical tab in the initial continuation whitespace class. Add exact spl
 - New exact splitter assertions and the Default-mode real-runner test are useful and catch the original LF payload. Coverage misses VT before the first newline and the first-backend-validation-error path. The dump-name test checks helper-to-splitter output for a table name in Structure only; schema-name coverage, all three emitted sections and actual backup-to-restore dispatch remain untested. Static call-site inspection supports the fix, but the test is not an end-to-end backup regression. Error-position mapping has no new dedicated assertion.
 - Independent Node probes transpiled the actual splitter and exercised VT, plain-to-E, block-comment separation, U& continuation, Unicode/default tags and overlapping closing tags. PostgreSQL behavior checked against upstream scanner source; no live PostgreSQL server, database writes, native dialogs or desktop UI exercised. No Rust changes, so no Rust checks run.
 - Only `.agent/REVIEW.md` changed. Unrelated untracked `.claude/launch.json` preserved. No commit, push or merge.
+
+
+## Re-review (round 14)
+
+**Status: VERIFIED WITH LIMITATIONS.** Reviewed exactly `9e57536..6f95c52` on `fix/backup-restore-safety` (2026-10-27), HEAD `6f95c527003032214c05937b80ec60a674b0bc9f`. Scope: round 13 P1, regressions introduced by this commit, continuation equivalence with PostgreSQL 17, and the new tests. Read all three changed application/test files; the fourth changed file is the preceding review report. No source or committed tests modified.
+
+### Findings and resolution
+
+- **Round 13 P1 — resolved.** `src/components/editor/splitSqlStatements.ts:47` now includes VT in the pre-newline class as well as post-newline whitespace. The continuation branch at `:233` preserves the original E-string escape mode for the reported payload, keeping `DELETE FROM victim` inside the SELECT literal. The only runtime change is this PostgreSQL-only regex expansion; default-dialect splitting is unaffected. No new blocking finding.
+- **Continuation grammar — matches the requested scanner rules.** Compared directly with upstream [REL_17_STABLE scan.l](https://github.com/postgres/postgres/blob/REL_17_STABLE/src/backend/parser/scan.l#L205-L226): initial alternatives represent `non_newline_whitespace`, followed by a mandatory LF/CR, then repetitions of `special_whitespace`. All six whitespace characters match; line comments exclude CR/LF and post-newline comments require their terminating newline. CRLF works as two newlines. Block comments, Unicode spaces, bare horizontal whitespace without a newline, and executable tokens between string parts do not qualify. The scanner's quote-continuation action restores its preceding string state (`scan.l:559–565`), matching retained `lastSingleEscapes`. No remaining disagreement found within this continuation rule. This does not certify the entire splitter or remove earlier session-setting/external-dump limitations.
+
+### New tests
+
+- `src/components/editor/splitSqlStatements.test.ts:258–270`: 147 table-driven cases (7 before × 3 newline × 7 after) exercise VT, space, tab, form feed, empty sides, mixed horizontal whitespace, LF/CR/CRLF, and line comments. Assertions require two statements, retained DELETE text in the first, and a separately executable `SELECT 2`. These catch the original pre-newline VT defect. The matrix does not enumerate every combination of multiple comments/control characters, so independent probes below supplement it.
+- `src/screens/connection/hooks/useSqlRunner.safety.test.ts:94–104`: uses the real hook and client validation in Default mode, with the first backend validation mocked to reject. Confirms no dispatched statement starts with DELETE. Traced `useSqlRunner.ts:473–485` and `:561–573`: rejection is caught before dispatch and default continue-on-error can proceed to later fragments, so the test addresses the consequential path. The assertion loops over calls and does not separately assert the validation call/full SQL, error state, or zero total dispatches; this is a non-blocking test-strength limitation, supported by explicit splitter coverage. The shared stream mock would leave an incorrectly split intermediate DELETE waiting for stream completion; a regression can therefore fail by timeout instead of the DELETE assertion. A direct-result mock plus explicit validation/dispatch counts would improve failure diagnostics.
+
+### Verification
+
+- `npm run build`: **passed**, TypeScript and Vite. Existing `node:zlib` browser externalization, ineffective dynamic-import and large-chunk warnings remain.
+- `npm run test:run -- --exclude '**/.claude/**' src/components/editor/splitSqlStatements.test.ts src/lib/tauri/queryValidate.client.test.ts src/screens/connection/hooks/sqlInsertLiteral.test.ts src/screens/connection/hooks/useDatabaseBackup.restore.test.ts src/screens/connection/hooks/useDatabaseBackup.types.test.ts src/screens/connection/hooks/useDatabaseBackup.free.test.ts src/screens/connection/hooks/useSqlRunner.safety.test.ts src/screens/connection/hooks/useSqlRunner.sequential.test.ts src/screens/connection/hooks/useSqlRunner.explainAnalyze.test.ts src/lib/dump src/lib/sql src/components/editor/SqlEditorPane.persist.test.tsx`: **20 files / 481 tests passed**.
+- Independent in-memory Node probe transpiled the actual splitter and compared its actual regex with a procedural whitespace/comment scanner. Enumerated token sequences through length four plus targeted mixed-comment, block-comment, unterminated-comment and Unicode-space cases: **16,110 separators, zero grammar mismatches**. All **2,508 accepted continuations** also retained the injected-looking DELETE in the first literal and split the final `SELECT 2` correctly. No temporary source/test files created.
+- **Limits:** scanner-source comparison and mocked backend dispatch only; no live PostgreSQL server execution, database writes, native dialogs or desktop UI exercised. Older-version VT behavior was not independently executed. No Rust change, so no Rust checks run. Earlier documented external-dump/session-setting limits remain outside this narrow closure.
+- Only `.agent/REVIEW.md` modified. Unrelated untracked `.claude/launch.json` preserved. No commit, push or merge.
