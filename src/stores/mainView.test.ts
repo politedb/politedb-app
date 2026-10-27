@@ -19,4 +19,14 @@ describe("main view store", () => {
       logs: 40,
     });
   });
+
+  it("keeps each page's search apart", () => {
+    const { setSearchQuery } = useMainViewStore.getState();
+    setSearchQuery("connections", "prod");
+    setSearchQuery("keychain", "ssh");
+    const { searchQueryByNav } = useMainViewStore.getState();
+    expect(searchQueryByNav.connections).toBe("prod");
+    expect(searchQueryByNav.keychain).toBe("ssh");
+    expect(searchQueryByNav.logs).toBeUndefined();
+  });
 });

@@ -1,4 +1,5 @@
 import {
+  ClockIcon,
   DateAscIcon,
   DateDescIcon,
   FolderIcon,
@@ -44,6 +45,7 @@ export const SORT_LABELS: Record<
   ConnectionSortMode | KeychainSortMode,
   string
 > = {
+  "used-desc": "Recently used",
   "label-asc": "Name A–Z",
   "label-desc": "Name Z–A",
   "created-desc": "Newest first",
@@ -58,8 +60,16 @@ export function buildConnectionSortItems(args: {
 
   return [
     {
+      key: "used-desc",
+      label: SORT_LABELS["used-desc"],
+      icon: <ClockIcon className="size-5 text-slate-500" />,
+      rightSlot: selectedMark(mode === "used-desc"),
+      onSelect: () => onChange?.("used-desc"),
+    },
+    {
       key: "label-asc",
       label: SORT_LABELS["label-asc"],
+      separatorBefore: true,
       icon: alphaSortBadge("Az"),
       rightSlot: selectedMark(mode === "label-asc"),
       onSelect: () => onChange?.("label-asc"),

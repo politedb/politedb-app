@@ -19,7 +19,12 @@ import { ProfileTab, useScreenStore } from "src/stores/screen";
 import { useProfileStore } from "src/stores/profile";
 import { useConnectionGroupsStore } from "src/stores/connectionGroups";
 import { usePinnedConnectionsStore } from "src/stores/pinnedConnections";
-import { openProfileTab } from "src/lib/tabs/openProfileTab";
+import {
+  openProfileTab,
+  switchToProfileTab,
+} from "src/lib/tabs/openProfileTab";
+import { useConnectionLogStore } from "src/stores/connectionLog";
+import { groupFilterShowing } from "./showConnection";
 import { normalizeGroupIds } from "src/stores/connectionGroups";
 import { useLicenseStore } from "src/stores/license";
 
@@ -94,9 +99,13 @@ export function MainScreen() {
 
   // Kept in a store: this screen unmounts while a connection tab is open, and
   // coming back must not reset search, sort, layout or the chosen group.
-  const searchQuery = useMainViewStore((s) => s.searchQuery);
-  const setSearchQuery = useMainViewStore((s) => s.setSearchQuery);
   const activeNav = useMainViewStore((s) => s.activeNav);
+  // The search box filters only the page it was typed on.
+  const searchQuery = useMainViewStore(
+    (s) => s.searchQueryByNav[activeNav] ?? ""
+  );
+  const setSearchQueryFor = useMainViewStore((s) => s.setSearchQuery);
+  const setSearchQuery = (query: string) => setSearchQueryFor(activeNav, query);
   const setActiveNav = useMainViewStore((s) => s.setActiveNav);
   const viewMode = useMainViewStore((s) => s.viewMode);
   const setViewMode = useMainViewStore((s) => s.setViewMode);
@@ -176,12 +185,25 @@ export function MainScreen() {
     [groups, profiles, groupIdsByProfile]
   );
 
+  // When each connection was last opened, from the History log.
+  const logEntries = useConnectionLogStore((s) => s.entries);
+  const lastOpenedById = useMemo(() => {
+    const byId: Record<string, number> = {};
+    for (const entry of logEntries) {
+      if ((byId[entry.profileId] ?? 0) < entry.openedAt) {
+        byId[entry.profileId] = entry.openedAt;
+      }
+    }
+    return byId;
+  }, [logEntries]);
+
   const filteredProfiles = useMemo(() => {
     const searched = filterConnections(
       profiles,
       searchQuery,
       connectionSortMode,
-      pinnedIds
+      pinnedIds,
+      lastOpenedById
     );
     if (!selectedGroupId) return searched;
     return searched.filter((profile) =>
@@ -194,6 +216,7 @@ export function MainScreen() {
     groupIdsByProfile,
     connectionSortMode,
     pinnedIds,
+    lastOpenedById,
   ]);
 
   useEffect(() => {
@@ -241,6 +264,11 @@ export function MainScreen() {
   function openProfileInTab(profileId: string) {
     const found = profiles.find((p) => p.id === profileId);
     if (found) openProfileTab(found);
+  }
+
+  /** Switches to the connection's tab when one is open, else opens one. */
+  function openOrSwitchToProfile(profileId: string) {
+    if (!switchToProfileTab(profileId)) openProfileInTab(profileId);
   }
 
   async function finishExternalImport(path: string, password?: string) {
@@ -503,6 +531,16 @@ export function MainScreen() {
                 knownProfileIds={knownProfileIds}
                 onOpenConnection={openProfileInTab}
                 onShowConnection={(profileId) => {
+                  // Show it even if the Connections search or the group
+                  // filter would hide it.
+                  setSearchQueryFor("connections", "");
+                  setSelectedGroupId(
+                    groupFilterShowing(
+                      profileId,
+                      selectedGroupId,
+                      groupIdsByProfile
+                    )
+                  );
                   setActiveNav("connections");
                   selectProfile(profileId);
                 }}
@@ -526,12 +564,15 @@ export function MainScreen() {
                     groups={groups}
                     groupIdsByProfile={groupIdsByProfile}
                     onCreate={openNew}
+                    onClearSearch={() => setSearchQuery("")}
                     onUseSqliteTemplate={handleUseSqliteTemplate}
                     templateSaving={templateSaving}
                     onAssignGroups={assignGroups}
                     onOpen={(id) => {
-                      // optional: keep selection in sync when opening
-                      // selectProfile(id);
+                      openOrSwitchToProfile(id);
+                      closeEdit();
+                    }}
+                    onOpenNewTab={(id) => {
                       openProfileInTab(id);
                       closeEdit();
                     }}

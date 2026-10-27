@@ -17,3 +17,16 @@ export function openProfileTab(profile: ConnectionProfile): ProfileTab {
   setActiveProfileScreen(tab.id);
   return tab;
 }
+
+/**
+ * Switches to the most recent tab of a saved connection. Returns false when
+ * none is open (the caller then opens one).
+ */
+export function switchToProfileTab(profileId: string): boolean {
+  const { profileTabs, setActiveProfileScreen } = useScreenStore.getState();
+  const open = profileTabs.filter((tab) => tab.profileId === profileId);
+  const latest = open[open.length - 1];
+  if (!latest) return false;
+  setActiveProfileScreen(latest.id);
+  return true;
+}

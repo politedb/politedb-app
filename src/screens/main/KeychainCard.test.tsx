@@ -1,6 +1,15 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/preact";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/preact";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { KeychainCard } from "./KeychainCard";
+
+const dialogs = vi.hoisted(() => ({ confirmDialog: vi.fn() }));
+vi.mock("src/lib/system-dialog", () => dialogs);
 
 function setup() {
   const handlers = {
@@ -98,7 +107,7 @@ describe("KeychainCard menu", () => {
   it("still opens from the menu button", () => {
     setup();
 
-    fireEvent.click(screen.getByRole("button", { name: "Open menu" }));
+    fireEvent.click(screen.getByRole("button", { name: "Options for Athena" }));
 
     expect(menu()).not.toBeNull();
   });
@@ -119,5 +128,35 @@ describe("KeychainCard menu", () => {
     fireEvent.click(screen.getByText("Copy name"));
 
     expect(onCopy).toHaveBeenCalledTimes(1);
+  });
+
+  it("focuses the first item when opened from the keyboard", () => {
+    setup();
+    const card = screen
+      .getByText("Athena")
+      .closest<HTMLElement>('[role="button"]')!;
+    card.focus();
+    fireEvent.keyDown(card, { key: "F10", shiftKey: true });
+    expect(document.activeElement).toBe(screen.getAllByRole("menuitem")[0]);
+  });
+
+  it("asks with a native dialog naming the secret before deleting", async () => {
+    const { onDelete } = setup();
+    dialogs.confirmDialog.mockResolvedValueOnce(false);
+    fireEvent.contextMenu(screen.getByText("Athena"));
+    fireEvent.click(screen.getByText("Delete"));
+    await waitFor(() => expect(dialogs.confirmDialog).toHaveBeenCalled());
+    const [body, options] = dialogs.confirmDialog.mock.calls[0]!;
+    expect(body).toContain('"Athena"');
+    expect(options).toMatchObject({
+      title: "Delete keychain secret",
+      okLabel: "Delete",
+    });
+    expect(onDelete).not.toHaveBeenCalled();
+
+    dialogs.confirmDialog.mockResolvedValueOnce(true);
+    fireEvent.contextMenu(screen.getByText("Athena"));
+    fireEvent.click(screen.getByText("Delete"));
+    await waitFor(() => expect(onDelete).toHaveBeenCalledTimes(1));
   });
 });

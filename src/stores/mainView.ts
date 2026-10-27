@@ -15,7 +15,8 @@ import type { ConnectionLogStatusFilter } from "src/utils/connectionLog";
  */
 type MainViewState = {
   activeNav: NavId;
-  searchQuery: string;
+  /** Each page (Connections, Credentials, History) keeps its own search. */
+  searchQueryByNav: Partial<Record<NavId, string>>;
   viewMode: ViewMode;
   connectionSortMode: ConnectionSortMode;
   keychainSortMode: KeychainSortMode;
@@ -26,7 +27,7 @@ type MainViewState = {
   scrollTopByNav: Partial<Record<NavId, number>>;
 
   setActiveNav: (nav: NavId) => void;
-  setSearchQuery: (query: string) => void;
+  setSearchQuery: (nav: NavId, query: string) => void;
   setViewMode: (mode: ViewMode) => void;
   setConnectionSortMode: (mode: ConnectionSortMode) => void;
   setKeychainSortMode: (mode: KeychainSortMode) => void;
@@ -38,7 +39,7 @@ type MainViewState = {
 
 export const MAIN_VIEW_DEFAULTS = {
   activeNav: "connections" as NavId,
-  searchQuery: "",
+  searchQueryByNav: {},
   viewMode: "grid" as ViewMode,
   connectionSortMode: "created-desc" as ConnectionSortMode,
   keychainSortMode: "label-asc" as KeychainSortMode,
@@ -51,7 +52,8 @@ export const MAIN_VIEW_DEFAULTS = {
 export const useMainViewStore = create<MainViewState>((set) => ({
   ...MAIN_VIEW_DEFAULTS,
   setActiveNav: (activeNav) => set({ activeNav }),
-  setSearchQuery: (searchQuery) => set({ searchQuery }),
+  setSearchQuery: (nav, query) =>
+    set((s) => ({ searchQueryByNav: { ...s.searchQueryByNav, [nav]: query } })),
   setViewMode: (viewMode) => set({ viewMode }),
   setConnectionSortMode: (connectionSortMode) => set({ connectionSortMode }),
   setKeychainSortMode: (keychainSortMode) => set({ keychainSortMode }),

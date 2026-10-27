@@ -11,12 +11,16 @@ import {
   CopyIcon,
   PinIcon,
   PinFilledIcon,
+  ArrowRightIcon,
 } from "src/components/icons";
+import { normalizeEngineName } from "src/utils/convert";
 import { TagChips } from "src/components/common/TagChips";
 import { ContextMenu } from "src/components/common/ContextMenu";
 import { useProfileStore } from "src/stores/profile";
 import { type ConnectionGroup } from "src/stores/connectionGroups";
 import { usePinnedConnectionsStore } from "src/stores/pinnedConnections";
+import { useScreenStore } from "src/stores/screen";
+import { deleteConnectionProfile } from "./deleteConnection";
 import { cn } from "src/utils/cn";
 import { connectionProfileSummary } from "src/lib/connection/profileSummary";
 import { saveDialog, showMessage } from "src/lib/system-dialog";
@@ -32,6 +36,7 @@ import {
   formatSharingExportSuccessMessage,
 } from "src/lib/profiles/profileSharing";
 import { KebabButton } from "src/components/common/KebabButton";
+import { isProductionTag } from "src/lib/queries/querySafety";
 
 /* -------------------------------------------------- */
 export function getConnectionCardToneClass(
@@ -63,6 +68,8 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
   onOpen: () => void;
   onEdit: () => void;
   onDuplicate?: () => void | Promise<void>;
+  /** Opens another tab even when one is already open. */
+  onOpenNewTab?: () => void;
   onSelectProfile: () => void;
 }) {
   const {
@@ -74,6 +81,7 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
     onOpen,
     onEdit,
     onDuplicate,
+    onOpenNewTab,
     onSelectProfile,
   } = props;
 
@@ -84,6 +92,10 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
   const ensurePinnedLoaded = usePinnedConnectionsStore((s) => s.ensureLoaded);
   const isPinned = usePinnedConnectionsStore((s) => s.isPinned(profileId));
   const togglePin = usePinnedConnectionsStore((s) => s.togglePin);
+  // Open in a connection tab: Open then switches to it.
+  const isOpenInTab = useScreenStore((s) =>
+    s.profileTabs.some((tab) => tab.profileId === profileId)
+  );
   const selectedGroupIdSet = new Set(selectedGroupIds);
   const currentGroups = groups.filter((group) =>
     selectedGroupIdSet.has(group.id)
@@ -104,6 +116,11 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
   const { engine, subtitle, hasSsh } = connectionProfileSummary(profile);
 
   const tags = profile.input?.tags;
+  const chipTags = tags?.length
+    ? tags
+    : currentGroups.map((group) => group.name);
+  const productionTag = tags?.find(isProductionTag);
+  const otherTags = chipTags.filter((tag) => tag !== productionTag);
 
   const rawIndicator = String(profile.input.indicator_color ?? "").trim();
   const hasCustomIndicator = rawIndicator.length > 0;
@@ -130,13 +147,8 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
 
   async function onDelete() {
     if (!profile) return;
-    const ok = await Promise.resolve(
-      window.confirm(
-        "Delete connection?\n\nThis will remove the saved connection."
-      )
-    );
-    if (!ok) return;
-    await removeProfile(profile.id);
+    closeMenu();
+    await deleteConnectionProfile(profile, removeProfile);
   }
 
   function openExportDialog() {
@@ -218,6 +230,9 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
       data-density-card
       role="button"
       tabIndex={0}
+      aria-label={[label, normalizeEngineName(engine), subtitle]
+        .filter(Boolean)
+        .join(", ")}
       onClick={onSelectProfile}
       onDblClick={(e) => {
         e.stopPropagation();
@@ -225,6 +240,8 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
       }}
       onContextMenu={(e) => openMenuAtPoint(e)}
       onKeyDown={(e) => {
+        // Keys on the card's own buttons (Open, ⋮) are theirs.
+        if (e.target !== e.currentTarget) return;
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           onOpen();
@@ -262,22 +279,48 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
               title={hasCustomIndicator ? "Indicator color" : "Default color"}
             />
 
-            <span class="min-w-0 truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
+            {/* The name keeps its room; other tags only get what is left. A
+                chip that does not fit wraps onto a hidden second line, so it
+                disappears whole instead of being cut (the rest are in the
+                "+N" tooltip). A production tag is a warning, so it always
+                stays visible next to the name. */}
+            <span
+              class="min-w-0 truncate text-sm font-semibold text-slate-900 dark:text-slate-100"
+              title={label}
+            >
               {label}
             </span>
 
-            {tags?.length ? (
-              <div class="min-w-0 shrink-0">
-                <TagChips className="min-w-0" tags={tags} max={2} size="sm" />
-              </div>
-            ) : (
+            {isOpenInTab ? (
+              <span
+                class="flex h-5 shrink-0 items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-1.5 text-xs font-semibold text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
+                title="Open in a connection tab"
+              >
+                <span
+                  aria-hidden="true"
+                  class="size-1.5 rounded-full bg-emerald-500"
+                />
+                Active
+              </span>
+            ) : null}
+
+            {productionTag ? (
               <TagChips
-                className="min-w-0"
-                tags={currentGroups.map((group) => group.name)}
+                className="shrink-0"
+                tags={[productionTag]}
                 max={1}
                 size="sm"
               />
-            )}
+            ) : null}
+
+            <div class="min-w-0 flex-1 overflow-hidden">
+              <TagChips
+                className="h-5 flex-wrap before:-mr-1 before:h-5 before:w-0 before:content-[''] [&>*]:shrink-0"
+                tags={otherTags}
+                max={1}
+                size="sm"
+              />
+            </div>
           </div>
 
           {/* Subtitle row */}
@@ -309,12 +352,36 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
         </div>
       </div>
 
-      {/* RIGHT */}
-      <KebabButton
-        menuOpen={menuOpen}
-        onClick={() => openMenuAtAnchor()}
-        buttonRef={kebabRef}
-      />
+      {/* RIGHT: open (a double-click or Enter does the same) and the menu,
+          shown on hover or keyboard focus. */}
+      <div class="relative z-10 flex shrink-0 items-center gap-1">
+        <button
+          type="button"
+          title={isOpenInTab ? "Switch to its tab" : "Open in a new tab"}
+          aria-label={`Open ${label}`}
+          class={cn(
+            "flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold transition",
+            "border-blue-200 bg-white text-blue-700 hover:bg-blue-50",
+            "dark:border-blue-500/40 dark:bg-transparent dark:text-blue-300 dark:hover:bg-blue-950/40",
+            "focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none",
+            "hidden group-focus-within:flex group-hover:flex"
+          )}
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpen();
+          }}
+          onDblClick={(e) => e.stopPropagation()}
+        >
+          Open
+          <ArrowRightIcon className="size-3" aria-hidden="true" />
+        </button>
+        <KebabButton
+          menuOpen={menuOpen}
+          onClick={() => openMenuAtAnchor()}
+          buttonRef={kebabRef}
+          label={label}
+        />
+      </div>
 
       <ContextMenu
         open={menuOpen}
@@ -335,6 +402,19 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
               togglePin(profileId);
             },
           },
+          ...(isOpenInTab && onOpenNewTab
+            ? [
+                {
+                  type: "item" as const,
+                  label: "Open in New Tab",
+                  icon: <ArrowRightIcon className="size-4" />,
+                  onClick: () => {
+                    closeMenu();
+                    onOpenNewTab();
+                  },
+                },
+              ]
+            : []),
           { type: "sep" },
           {
             type: "item",
@@ -388,6 +468,7 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
           },
         ]}
         onClose={closeMenu}
+        autoFocus
       />
 
       <ExportConnectionDialog
