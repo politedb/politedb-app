@@ -121,4 +121,23 @@ describe("database backup file", () => {
       expect.objectContaining({ kind: "error" })
     );
   });
+
+  it("is not written when a sequence cannot be read", async () => {
+    const S = (v: string) => ({ t: "Str", v });
+    m.runSqlQuery.mockImplementation(async (_c: string, sql = "") => {
+      if (sql.includes("SELECT c.oid")) return { rows: [[S("42")]] };
+      if (sql.includes("format_type(a.atttypid"))
+        return {
+          rows: [[S("id"), S("integer"), S("t"), S(""), S("a"), S("")]],
+        };
+      if (sql.includes("FROM pg_sequence s"))
+        throw new Error("permission denied");
+      return { rows: [] };
+    });
+    streamDelivers((h) => h.onDone());
+    const { result } = renderHook(() => useDatabaseBackup());
+    await act(() => result.current.onBackupDatabase("db"));
+    expect(m.writeFile).not.toHaveBeenCalled();
+    expect(m.showMessage.mock.calls[0]![0]).toMatch(/could not be read/);
+  });
 });

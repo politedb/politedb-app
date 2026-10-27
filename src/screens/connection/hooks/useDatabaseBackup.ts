@@ -993,6 +993,30 @@ export async function buildPostgresTypesSql(args: {
   return `${schemasSql}${extensionsSql}${collationsSql}${sequencesSql}${enumsSql}${domainsSql}`;
 }
 
+/**
+ * The rows of a table whose columns are all generated, as many rows of
+ * defaults (there is nothing else to restore).
+ */
+export async function postgresGeneratedOnlyRowsSql(
+  connectionId: string,
+  schema: string,
+  tableName: string
+): Promise<string> {
+  const tableIdent = `${qIdent(schema, "postgres")}.${qIdent(tableName, "postgres")}`;
+  const res = await runSqlQuery(
+    connectionId,
+    `SELECT count(*)::text FROM ${tableIdent};`
+  );
+  const count = cellToString(res.rows?.[0]?.[0], true) ?? "";
+  if (!/^\d+$/.test(count)) {
+    throw new Error(
+      `The rows of ${schema}.${tableName} could not be counted, so nothing was backed up.`
+    );
+  }
+  if (count === "0") return "";
+  return `INSERT INTO ${tableIdent} SELECT FROM generate_series(1, ${count});\n`;
+}
+
 type PostgresTableStructure = {
   preDataSql: string;
   postDataSql: string;
@@ -1000,6 +1024,8 @@ type PostgresTableStructure = {
   generatedColumns: string[];
   /** A GENERATED ALWAYS identity column: inserts override it. */
   identityAlways: boolean;
+  /** Every column is generated: rows are restored by count. */
+  allGenerated: boolean;
   /** setval for owned sequences, run after the rows are restored. */
   sequenceValuesSql: string;
 };
@@ -1015,6 +1041,7 @@ export async function buildPostgresTableStructure(args: {
     postDataSql: "",
     generatedColumns: [],
     identityAlways: false,
+    allGenerated: false,
     sequenceValuesSql: "",
   };
 
@@ -1052,39 +1079,96 @@ export async function buildPostgresTableStructure(args: {
     `
   );
 
+  const tableIdent = `${qIdent(schema, "postgres")}.${qIdent(tableName, "postgres")}`;
+
+  /**
+   * The sequence a column owns (serial or identity): its options and where
+   * it stands. Throws when it cannot be read: restoring the rows without
+   * it would restart the numbering and collide with restored keys.
+   */
+  const readOwnedSequence = async (col: string) => {
+    const sequenceFor = `pg_get_serial_sequence(${qLiteral(tableIdent)}, ${qLiteral(col)})`;
+    try {
+      const optRes = await runSqlQuery(
+        connectionId,
+        `
+          SELECT ${sequenceFor}, s.seqstart::text, s.seqincrement::text,
+            s.seqmin::text, s.seqmax::text, s.seqcache::text, s.seqcycle,
+            pg_catalog.format_type(s.seqtypid, NULL)
+          FROM pg_sequence s
+          WHERE s.seqrelid = ${sequenceFor}::regclass;
+        `
+      );
+      const r = optRes.rows?.[0] ?? [];
+      // Already a quoted, schema-qualified name.
+      const seq = cellToString(r[0], true) ?? "";
+      const [start, inc, min, max, cache] = [1, 2, 3, 4, 5].map(
+        (i) => cellToString(r[i], true) ?? ""
+      );
+      const type = cellToString(r[7], true) ?? "";
+      const stateRes = await runSqlQuery(
+        connectionId,
+        `SELECT last_value::text, is_called FROM ${seq};`
+      );
+      const last = cellToString(stateRes.rows?.[0]?.[0], true) ?? "";
+      const numbers = [start, inc, min, max, cache, last];
+      if (!seq || !type || !numbers.every((n) => /^-?\d+$/.test(n))) {
+        throw new Error("unexpected sequence state");
+      }
+      return {
+        sequenceFor,
+        type,
+        options:
+          `INCREMENT BY ${inc} MINVALUE ${min} MAXVALUE ${max} START WITH ${start} ` +
+          `CACHE ${cache} ${cellToBool(r[6]) ? "CYCLE" : "NO CYCLE"}`,
+        setval: `SELECT pg_catalog.setval(${sequenceFor}, ${last}, ${cellToBool(stateRes.rows?.[0]?.[1]) ? "true" : "false"})`,
+      };
+    } catch {
+      throw new Error(
+        `The sequence numbering "${col}" of ${schema}.${tableName} could not be read (reading it needs SELECT on the sequence), so nothing was backed up: restored without it, the numbering would start over and collide with the restored rows.`
+      );
+    }
+  };
+
   const generatedColumns: string[] = [];
-  const identityColumns: string[] = [];
   let identityAlways = false;
-  const columns = (colsRes.rows ?? [])
-    .map((r: any) => {
-      const name = cellToString(r?.[0]) ?? "";
-      const dataType = cellToString(r?.[1]) ?? "";
-      const notNull = cellToBool(r?.[2]);
-      const expr = cellToString(r?.[3], true) ?? "";
-      const identity = cellToString(r?.[4], true) ?? "";
-      const generated = cellToString(r?.[5], true) ?? "";
-      if (!name || !dataType) return "";
-      const col = `  ${qIdent(name, "postgres")} ${dataType}`;
-      const nn = notNull ? " NOT NULL" : "";
-      // A stored generated column: computed again on restore, never inserted.
-      if (generated === "s") {
-        generatedColumns.push(name);
-        return `${col} GENERATED ALWAYS AS (${expr}) STORED${nn}`;
-      }
-      // An identity column: its sequence is created with it.
-      if (identity === "a" || identity === "d") {
-        identityColumns.push(name);
-        if (identity === "a") identityAlways = true;
-        return `${col} GENERATED ${identity === "a" ? "ALWAYS" : "BY DEFAULT"} AS IDENTITY${nn}`;
-      }
-      const defaultExpr = normalizePostgresDefaultExpr(expr);
-      return `${col}${defaultExpr ? ` DEFAULT ${defaultExpr}` : ""}${nn}`;
-    })
-    .filter(Boolean);
+  let sequenceValuesSql = "";
+  const columns: string[] = [];
+  for (const r of (colsRes.rows ?? []) as any[]) {
+    const name = cellToString(r?.[0]) ?? "";
+    const dataType = cellToString(r?.[1]) ?? "";
+    const notNull = cellToBool(r?.[2]);
+    const expr = cellToString(r?.[3], true) ?? "";
+    const identity = cellToString(r?.[4], true) ?? "";
+    const generated = cellToString(r?.[5], true) ?? "";
+    if (!name || !dataType) continue;
+    const col = `  ${qIdent(name, "postgres")} ${dataType}`;
+    const nn = notNull ? " NOT NULL" : "";
+    // Generated columns (stored, or virtual on PostgreSQL 18) are computed
+    // again on restore and never inserted.
+    if (generated === "s" || generated === "v") {
+      generatedColumns.push(name);
+      columns.push(
+        `${col} GENERATED ALWAYS AS (${expr}) ${generated === "s" ? "STORED" : "VIRTUAL"}${nn}`
+      );
+      continue;
+    }
+    // An identity column: its sequence is created with it, with its options.
+    if (identity === "a" || identity === "d") {
+      if (identity === "a") identityAlways = true;
+      const seq = await readOwnedSequence(name);
+      sequenceValuesSql += ensureSqlEndsWithSemicolon(seq.setval);
+      columns.push(
+        `${col} GENERATED ${identity === "a" ? "ALWAYS" : "BY DEFAULT"} AS IDENTITY (${seq.options})${nn}`
+      );
+      continue;
+    }
+    const defaultExpr = normalizePostgresDefaultExpr(expr);
+    columns.push(`${col}${defaultExpr ? ` DEFAULT ${defaultExpr}` : ""}${nn}`);
+  }
 
   if (columns.length === 0) return empty;
 
-  const tableIdent = `${qIdent(schema, "postgres")}.${qIdent(tableName, "postgres")}`;
   const createTableSql =
     `CREATE TABLE IF NOT EXISTS ${tableIdent} (\n` +
     `${columns.join(",\n")}\n` +
@@ -1123,9 +1207,12 @@ export async function buildPostgresTableStructure(args: {
     const colName = cellToString(row?.[2]) ?? "";
     if (!seqSchema || !seqName || !colName) continue;
 
+    // Its options, and where it stands (set again after the rows).
+    const seq = await readOwnedSequence(colName);
+    sequenceValuesSql += ensureSqlEndsWithSemicolon(seq.setval);
     const seqIdent = `${qIdent(seqSchema, "postgres")}.${qIdent(seqName, "postgres")}`;
     sequenceCreateSql += ensureSqlEndsWithSemicolon(
-      `CREATE SEQUENCE IF NOT EXISTS ${seqIdent}`
+      `CREATE SEQUENCE IF NOT EXISTS ${seqIdent} AS ${seq.type} ${seq.options}`
     );
     sequenceOwnedBySql += ensureSqlEndsWithSemicolon(
       `ALTER SEQUENCE ${seqIdent} OWNED BY ${tableIdent}.${qIdent(colName, "postgres")}`
@@ -1133,38 +1220,6 @@ export async function buildPostgresTableStructure(args: {
   }
 
   let preDataSql = `${sequenceCreateSql}${createTableSql}${sequenceOwnedBySql}`;
-
-  // Where each owned sequence (serial or identity) stands, set again after
-  // the rows are restored; otherwise it starts over and the next insert
-  // collides with a restored key. The restored sequence is found by its
-  // column, since an identity sequence's name may differ there.
-  const ownedColumns = new Set(identityColumns);
-  for (const row of seqRes.rows ?? []) {
-    const col = cellToString(row?.[2]) ?? "";
-    if (col) ownedColumns.add(col);
-  }
-  let sequenceValuesSql = "";
-  for (const col of ownedColumns) {
-    const sequenceFor = `pg_get_serial_sequence(${qLiteral(tableIdent)}, ${qLiteral(col)})`;
-    try {
-      const nameRes = await runSqlQuery(connectionId, `SELECT ${sequenceFor};`);
-      // Already a quoted, schema-qualified name.
-      const seq = cellToString(nameRes.rows?.[0]?.[0], true) ?? "";
-      if (!seq) continue;
-      const res = await runSqlQuery(
-        connectionId,
-        `SELECT last_value::text, is_called FROM ${seq};`
-      );
-      const last = cellToString(res.rows?.[0]?.[0], true) ?? "";
-      if (!/^-?\d+$/.test(last)) continue;
-      const isCalled = cellToBool(res.rows?.[0]?.[1]);
-      sequenceValuesSql += ensureSqlEndsWithSemicolon(
-        `SELECT pg_catalog.setval(${sequenceFor}, ${last}, ${isCalled ? "true" : "false"})`
-      );
-    } catch {
-      // Not readable (privileges): the sequence restarts from its start.
-    }
-  }
 
   const constraintsRes = await runSqlQuery(
     connectionId,
@@ -1226,6 +1281,7 @@ export async function buildPostgresTableStructure(args: {
     postDataSql,
     generatedColumns,
     identityAlways,
+    allGenerated: generatedColumns.length === columns.length,
     sequenceValuesSql,
   };
 }
@@ -1325,6 +1381,8 @@ export function useDatabaseBackup() {
         const preDataByTable = new Map<string, string>();
         const columnsByTable = new Map<string, string[]>();
         const identityAlwaysTables = new Set<string>();
+        // Tables whose columns are all generated: no column to insert.
+        const generatedOnlyTables = new Set<string>();
 
         if (rt.engine === "mysql" || rt.engine === "mariadb") {
           appendSql("\nSET FOREIGN_KEY_CHECKS = 0;\n");
@@ -1347,6 +1405,9 @@ export function useDatabaseBackup() {
             generatedColumns = pgStruct.generatedColumns;
             if (pgStruct.identityAlways) {
               identityAlwaysTables.add(`${table.schema}.${table.name}`);
+            }
+            if (pgStruct.allGenerated) {
+              generatedOnlyTables.add(`${table.schema}.${table.name}`);
             }
           } else if (rt.engine === "mysql" || rt.engine === "mariadb") {
             structureSql = await buildMysqlTableStructure({
@@ -1381,7 +1442,7 @@ export function useDatabaseBackup() {
 
           // Generated columns are computed again on restore.
           columns = columns.filter((c) => !generatedColumns.includes(c));
-          if (!columns.length) continue;
+          if (!columns.length && !generatedOnlyTables.has(key)) continue;
           columnsByTable.set(key, columns);
         }
 
@@ -1408,9 +1469,21 @@ export function useDatabaseBackup() {
         for (const table of orderedTables) {
           const key = `${table.schema}.${table.name}`;
           const columns = columnsByTable.get(key) ?? [];
-          if (!columns.length) continue;
+          if (!columns.length && !generatedOnlyTables.has(key)) continue;
 
           appendSql(`\n-- Data ${dumpCommentName(table.schema, table.name)}\n`);
+
+          // Every column is generated: the rows are restored by count.
+          if (!columns.length) {
+            appendSql(
+              await postgresGeneratedOnlyRowsSql(
+                rt.runtimeConnectionId,
+                table.schema,
+                table.name
+              )
+            );
+            continue;
+          }
 
           await exportTableToSqlParts({
             append: appendSql,
