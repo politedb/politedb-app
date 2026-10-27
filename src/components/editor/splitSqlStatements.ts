@@ -18,7 +18,28 @@ function scanDollarTag(sql: string, i: number) {
   return { tag: sql.slice(i, j + 1), end: j + 1 };
 }
 
-export function splitSqlStatements(sql: string): SplitStmt[] {
+/**
+ * How strings and comments are read, so a ";" inside them never splits:
+ * - postgres: a backslash is an ordinary character in '…' and "…" (only
+ *   E'…' strings take backslash escapes), block comments nest.
+ * - default (MySQL/MariaDB and other engines): a backslash escapes the
+ *   next character inside '…' and "…".
+ * Reading PostgreSQL text the default way ends strings in the wrong place:
+ * 'a\' would swallow the rest, and text inside a later string would be
+ * split into statements of its own.
+ */
+export type SqlSplitDialect = "postgres" | "default";
+
+/** The splitter dialect for an engine. */
+export function splitDialectFor(engine?: string | null): SqlSplitDialect {
+  return engine === "postgres" ? "postgres" : "default";
+}
+
+export function splitSqlStatements(
+  sql: string,
+  options?: { dialect?: SqlSplitDialect }
+): SplitStmt[] {
+  const pg = options?.dialect === "postgres";
   const out: SplitStmt[] = [];
   const n = sql.length;
 
@@ -26,10 +47,13 @@ export function splitSqlStatements(sql: string): SplitStmt[] {
   let i = 0;
 
   let inSingle = false; // '
+  /** The current '…' string takes backslash escapes. */
+  let singleEscapes = false;
   let inDouble = false; // "
   let inBacktick = false; // `
   let inLineComment = false; // --
   let inBlockComment = false; // /* */
+  let blockDepth = 0; // nesting, PostgreSQL only
   let dollarTag: string | null = null; // $$ or $tag$
 
   const push = (to: number) => {
@@ -53,7 +77,13 @@ export function splitSqlStatements(sql: string): SplitStmt[] {
     // ---- In block comment
     if (inBlockComment) {
       if (ch === "*" && next === "/") {
-        inBlockComment = false;
+        blockDepth--;
+        if (blockDepth <= 0) inBlockComment = false;
+        i += 2;
+        continue;
+      }
+      if (pg && ch === "/" && next === "*") {
+        blockDepth++;
         i += 2;
         continue;
       }
@@ -78,7 +108,7 @@ export function splitSqlStatements(sql: string): SplitStmt[] {
 
     // ---- In single quotes '
     if (inSingle) {
-      if (ch === "\\") {
+      if (singleEscapes && ch === "\\") {
         // MySQL-style backslash escapes inside string literal (e.g. \', \", \\)
         i += 2;
         continue;
@@ -97,7 +127,7 @@ export function splitSqlStatements(sql: string): SplitStmt[] {
 
     // ---- In double quotes "
     if (inDouble) {
-      if (ch === "\\") {
+      if (!pg && ch === "\\") {
         // Support backslash escapes in engines that allow it.
         i += 2;
         continue;
@@ -136,6 +166,7 @@ export function splitSqlStatements(sql: string): SplitStmt[] {
     }
     if (ch === "/" && next === "*") {
       inBlockComment = true;
+      blockDepth = 1;
       i += 2;
       continue;
     }
@@ -143,6 +174,11 @@ export function splitSqlStatements(sql: string): SplitStmt[] {
     // ---- Enter quotes
     if (ch === "'") {
       inSingle = true;
+      // PostgreSQL: only an E'…' (e'…') string takes backslash escapes.
+      singleEscapes =
+        !pg ||
+        (/[eE]/.test(sql[i - 1] ?? "") &&
+          !/[A-Za-z0-9_$]/.test(sql[i - 2] ?? ""));
       i++;
       continue;
     }

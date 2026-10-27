@@ -1,6 +1,9 @@
 import { operationBus } from "src/lib/tauri/operationBus";
 import { operationExecute, operationCancel } from "src/lib/tauri";
-import { splitSqlStatements } from "src/components/editor/splitSqlStatements";
+import {
+  splitDialectFor,
+  splitSqlStatements,
+} from "src/components/editor/splitSqlStatements";
 
 type ValidateSqlOptions = {
   timeoutMs?: number;
@@ -106,11 +109,14 @@ function looksLikeMultipleStatementsWithoutSemicolons(sql: string) {
   return (starters?.length ?? 0) >= 2;
 }
 
-export function validateSqlClient(sql: string) {
+export function validateSqlClient(sql: string, engine?: string) {
   const trimmed = sql.trim();
   if (!trimmed) return { ok: false as const, message: "SQL is empty." };
 
-  const parts = splitSqlStatements(trimmed) as any;
+  // Split by the engine's quoting rules (PostgreSQL backslashes are text).
+  const parts = splitSqlStatements(trimmed, {
+    dialect: splitDialectFor(engine),
+  }) as any;
   const stmts =
     typeof parts?.[0] === "string"
       ? (parts as string[])

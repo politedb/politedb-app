@@ -16,10 +16,13 @@ import {
   qLiteral,
 } from "src/lib/queries/sql";
 import { cellToString } from "src/utils/convert";
-import { splitSqlStatements } from "src/components/editor/splitSqlStatements";
+import {
+  splitDialectFor,
+  splitSqlStatements,
+} from "src/components/editor/splitSqlStatements";
 import type { ConnectionCreateInput } from "src/lib/tauri";
 import { useConnectionRuntimeCtx } from "../workspace/ConnectionRuntimeContext";
-import { formatSqlInsertChunk } from "./sqlInsertLiteral";
+import { formatSqlInsertChunk, sqlQuoteString } from "./sqlInsertLiteral";
 import { showToast } from "src/stores/toast";
 import { useScreenStore } from "src/stores/screen";
 import { securityTouchIdAuthenticate } from "src/lib/tauri/security";
@@ -459,22 +462,27 @@ function createCollationSql(
     // PostgreSQL 17's builtin provider.
     options.push(
       "provider = builtin",
-      `locale = ${qLiteral(text("colllocale"))}`
+      `locale = ${sqlQuoteString(text("colllocale"), "postgres")}`
     );
   } else if (def.collprovider === "i") {
     // The ICU locale moved: collcollate (≤14), colliculocale (15–16),
     // colllocale (17+).
     const locale =
       text("colllocale") || text("colliculocale") || text("collcollate");
-    options.push("provider = icu", `locale = ${qLiteral(locale)}`);
+    options.push(
+      "provider = icu",
+      `locale = ${sqlQuoteString(locale, "postgres")}`
+    );
     if (text("collicurules")) {
-      options.push(`rules = ${qLiteral(text("collicurules"))}`);
+      options.push(
+        `rules = ${sqlQuoteString(text("collicurules"), "postgres")}`
+      );
     }
   } else if (def.collprovider === "c") {
     options.push(
       "provider = libc",
-      `lc_collate = ${qLiteral(text("collcollate"))}`,
-      `lc_ctype = ${qLiteral(text("collctype"))}`
+      `lc_collate = ${sqlQuoteString(text("collcollate"), "postgres")}`,
+      `lc_ctype = ${sqlQuoteString(text("collctype"), "postgres")}`
     );
   } else {
     // Never reinterpret a provider as another: say so instead.
@@ -1177,7 +1185,12 @@ export function useDatabaseBackup() {
           }
         }
 
-        const statements = splitSqlStatements(sql)
+        // Split by the engine's own quoting rules: read the PostgreSQL way,
+        // a backslash in a string is text, and data can never end a string
+        // early and turn the rest into statements.
+        const statements = splitSqlStatements(sql, {
+          dialect: splitDialectFor(rt.engine),
+        })
           .map((statement) => statement.text.trim())
           .filter(Boolean);
         if (!statements.length) {
@@ -1326,7 +1339,7 @@ export function useDatabaseBackup() {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rt.runtimeConnectionId, rt.refreshSchemaAndTables, rt.profileId]
+    [rt.runtimeConnectionId, rt.refreshSchemaAndTables, rt.profileId, rt.engine]
   );
 
   const onRestoreDatabase = useCallback(

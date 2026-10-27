@@ -131,3 +131,59 @@ describe("splitSqlStatements", () => {
     expect(out[1]).toBe("select * from `t`");
   });
 });
+
+describe("splitSqlStatements for PostgreSQL", () => {
+  const pg = (sql: string) =>
+    splitSqlStatements(sql, { dialect: "postgres" }).map((s) => s.text);
+
+  it("never lets a backslash in data end a string early", () => {
+    // A dump row whose first value is a single backslash: PostgreSQL reads
+    // '\' as a whole string, so the ";" inside the second value is data.
+    const sql = String.raw`INSERT INTO "public"."t" ("a","b") VALUES ('\', ';DROP TABLE victim;--');
+SELECT 1;`;
+    expect(pg(sql)).toEqual([
+      String.raw`INSERT INTO "public"."t" ("a","b") VALUES ('\', ';DROP TABLE victim;--')`,
+      "SELECT 1",
+    ]);
+  });
+
+  it("keeps backslash escapes in E-strings", () => {
+    expect(pg(String.raw`SELECT E'it\'s; ok'; SELECT 2;`)).toEqual([
+      String.raw`SELECT E'it\'s; ok'`,
+      "SELECT 2",
+    ]);
+    expect(pg(String.raw`SELECT e'a\\'; SELECT 2;`)).toEqual([
+      String.raw`SELECT e'a\\'`,
+      "SELECT 2",
+    ]);
+  });
+
+  it("does not take a name ending in E for an E-string", () => {
+    expect(pg(String.raw`SELECT type'a\'; SELECT 2;`)).toEqual([
+      String.raw`SELECT type'a\'`,
+      "SELECT 2",
+    ]);
+  });
+
+  it("reads a backslash in a quoted identifier as text", () => {
+    expect(pg(String.raw`CREATE TYPE "a\" AS ENUM ('x'); SELECT 2;`)).toEqual([
+      String.raw`CREATE TYPE "a\" AS ENUM ('x')`,
+      "SELECT 2",
+    ]);
+  });
+
+  it("follows nested block comments", () => {
+    expect(pg("/* a /* b; */ c; */ SELECT 1; SELECT 2;")).toEqual([
+      "/* a /* b; */ c; */ SELECT 1",
+      "SELECT 2",
+    ]);
+  });
+
+  it("keeps the backslash escapes of other engines by default", () => {
+    const sql = String.raw`INSERT INTO t VALUES ('a\'b;c'); SELECT 2;`;
+    expect(splitSqlStatements(sql).map((s) => s.text)).toEqual([
+      String.raw`INSERT INTO t VALUES ('a\'b;c')`,
+      "SELECT 2",
+    ]);
+  });
+});

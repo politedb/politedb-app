@@ -189,6 +189,19 @@ describe("restoring a dump", () => {
     expect(m.showMessage.mock.calls[0]![0]).toContain("Stopped at statement 1");
   });
 
+  it("never splits data into statements of its own (PostgreSQL backslashes)", async () => {
+    m.unpack.mockResolvedValue({
+      sql: String.raw`INSERT INTO "public"."t" ("a","b") VALUES ('\', ';DROP TABLE victim;--');
+INSERT INTO "public"."t" ("a","b") VALUES ('x', 'y');`,
+      engine: "postgres",
+    });
+    await restore();
+    const ran = m.runSqlQuery.mock.calls.map((call) => call[1] as string);
+    expect(ran).toHaveLength(2);
+    expect(ran.some((sql) => /^\s*DROP TABLE victim/i.test(sql))).toBe(false);
+    expect(ran[0]).toContain(";DROP TABLE victim;--')");
+  });
+
   it("says what already ran when it stops partway", async () => {
     m.runSqlQuery
       .mockResolvedValueOnce({})

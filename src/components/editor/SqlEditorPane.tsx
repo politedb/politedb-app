@@ -25,7 +25,7 @@ import {
   matchesShortcut,
   useKeyboardShortcutsStore,
 } from "src/stores/keyboardShortcuts";
-import { splitSqlStatements } from "./splitSqlStatements";
+import { splitDialectFor, splitSqlStatements } from "./splitSqlStatements";
 import {
   errorRangeInStatement,
   runStatementStarts,
@@ -135,7 +135,8 @@ function buildExportHeader(opts: { engine: string; includeUrl?: boolean }) {
 
 function getSelectedOrCurrentSql(
   editor: monaco.editor.IStandaloneCodeEditor,
-  preferredPosition?: monaco.Position | null
+  preferredPosition?: monaco.Position | null,
+  engine?: string
 ) {
   const model = editor.getModel();
   if (!model) return { mode: "none" as const, sql: "", range: null };
@@ -164,7 +165,9 @@ function getSelectedOrCurrentSql(
       probe = Math.max(0, j);
     }
 
-    const statements = splitSqlStatements(full);
+    const statements = splitSqlStatements(full, {
+      dialect: splitDialectFor(engine),
+    });
     const current =
       statements.find((stmt) => probe >= stmt.start && probe <= stmt.end) ??
       statements.find((stmt) => probe >= stmt.start && probe < stmt.end) ??
@@ -615,7 +618,7 @@ export function SqlEditorPane(props: Props) {
               sql: model.getValue().trim(),
               range: model.getFullModelRange(),
             }
-          : getSelectedOrCurrentSql(ed, lastCursorPositionRef.current);
+          : getSelectedOrCurrentSql(ed, lastCursorPositionRef.current, engine);
       if (!picked.sql) return;
       applyRunHighlight(picked.range);
       const sourceKey = recordPickedStart(ed, picked);
@@ -633,7 +636,7 @@ export function SqlEditorPane(props: Props) {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [applyRunHighlight, flushDraft, win.id, draftId]
+    [applyRunHighlight, flushDraft, win.id, draftId, engine]
   );
 
   const explainWith = async (
@@ -643,7 +646,11 @@ export function SqlEditorPane(props: Props) {
     const run = callbacksRef.current[handler];
     if (!ed || !run) return;
 
-    const picked = getSelectedOrCurrentSql(ed, lastCursorPositionRef.current);
+    const picked = getSelectedOrCurrentSql(
+      ed,
+      lastCursorPositionRef.current,
+      engine
+    );
     if (!picked.sql) return;
     applyRunHighlight(picked.range);
 
@@ -654,8 +661,11 @@ export function SqlEditorPane(props: Props) {
         const current = editorRef.current;
         return (
           !!current &&
-          getSelectedOrCurrentSql(current, lastCursorPositionRef.current)
-            .sql === picked.sql
+          getSelectedOrCurrentSql(
+            current,
+            lastCursorPositionRef.current,
+            engine
+          ).sql === picked.sql
         );
       };
       await run({ windowId: win.id, sql: picked.sql, sourceUnchanged });

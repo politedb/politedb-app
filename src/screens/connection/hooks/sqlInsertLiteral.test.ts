@@ -52,16 +52,24 @@ describe("formatSqlInsertValue", () => {
     ).toBe("'[\"*\"]'::jsonb");
   });
 
-  it("does not double-escape backslashes in postgres JSON", () => {
+  it("writes postgres values with backslashes as E-strings that read back unchanged", () => {
     const raw =
       '{"type":"multi-choice","content":"<p>line\\n<img alt=\\"x\\">"}';
     const sql = formatSqlInsertValue(
       { t: "Json", v: raw },
       { dbType: "json", engine: "postgres" }
     );
-    expect(sql).toBe(`'${raw}'::json`);
-    expect(sql).not.toContain("\\\\n");
-    expect(sql).not.toContain('\\\\"');
+    expect(sql.startsWith("E'")).toBe(true);
+    expect(sql.endsWith("'::json")).toBe(true);
+    // Undoing the E-string escapes gives back the original JSON text.
+    const body = sql.slice(2, -"'::json".length);
+    expect(body.replace(/''/g, "'").replace(/\\(.)/g, "$1")).toBe(raw);
+  });
+
+  it("keeps postgres values without backslashes plain", () => {
+    expect(
+      formatSqlInsertValue({ t: "Str", v: "it's" }, { engine: "postgres" })
+    ).toBe("'it''s'");
   });
 
   it("still escapes backslashes for mysql string literals", () => {

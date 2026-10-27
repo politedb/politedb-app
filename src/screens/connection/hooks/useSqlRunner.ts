@@ -625,7 +625,7 @@ export function useSqlRunner(args: {
       inflightByWindow.set(winId, gate);
 
       try {
-        const v = validateSqlClient(payload.sql);
+        const v = validateSqlClient(payload.sql, engine);
         if (!v.ok) {
           appendRun(
             winId,
