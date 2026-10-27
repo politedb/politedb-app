@@ -2,9 +2,9 @@
 
 ## Status
 
-CHANGES REQUIRED
+VERIFIED WITH LIMITATIONS
 
-Latest review: **round 10**, `62f779e..494c78c`; sequence schemas/quoted names resolved. Custom ICU/libc collation creation works, but builtin-provider fidelity and collation extension ownership still require changes. See appended review.
+Latest review: **round 11**, `494c78c..b36a6a9`; both round 10 findings resolved. No new actionable regressions found. Build and focused Vitest passed; independent live PostgreSQL verification remains unavailable. See appended review.
 
 Reviewed `main..6f853c31b22f76672db0dace4a6d10adf8152533` on `fix/backup-restore-safety`, against the human-approved batch 1 requirements. No application source changed.
 
@@ -440,3 +440,29 @@ Only `.agent/REVIEW.md` changed. Unrelated `.claude/launch.json` preserved. No s
 - Reviewer executed **12 assertions** against the actual TypeScript builder/helpers extracted and transpiled in memory, with mocked scalar catalog rows: builtin misgeneration, absent collation-membership query, collation identifier/value escaping, ICU rules/nondeterminism, shared-sequence deduplication/special identifiers, and schema/extension/collation/domain ordering. Assertions confirming defects are reproductions, not correct-behavior tests. No temporary source/test files created.
 - **Independent live PostgreSQL verification blocked:** `docker image ls` returned permission denied for `unix:///Users/lamtung/.orbstack/run/docker.sock`. Session cannot escalate approval. No image pulled or container started; no cleanup required. Running container named `postgres` and customer databases untouched. Claude's disposable postgres:17 sequence/ICU/libc catalog round trips are acknowledged as implementer evidence, not independently repeated here; they do not cover builtin provider or collation-only extension ownership.
 - No desktop/native UI or Rust checks: no affected UI/native/Rust code in this diff. Only `.agent/REVIEW.md` changed; unrelated untracked `.claude/launch.json` preserved. No commit, push or merge.
+
+
+## Re-review (round 11)
+
+**Status: VERIFIED WITH LIMITATIONS.** Reviewed `494c78c..b36a6a9` on `fix/backup-restore-safety` (2026-10-27). Checkout HEAD `723a998` differs from `b36a6a9` only in this review document; tested application code matches the requested fix. No application source or tests modified.
+
+### Round 10 disposition
+
+1. **P2 builtin provider/locale fidelity — resolved.** `src/screens/connection/hooks/useDatabaseBackup.ts:458` emits `provider = builtin` with the PG17 `colllocale` value. ICU (`:464`) and libc (`:473`) retain their separate paths. Unknown providers throw at `:481` instead of silently selecting libc. `src/screens/connection/hooks/useDatabaseBackup.types.test.ts:192` checks exact builtin SQL, including C.UTF-8, collation-before-domain ordering and qualified COLLATE reference; `:230` checks rejection of an unsupported provider. The reported disposable postgres:17 catalog → generated SQL → restore → provider/locale comparison supplies implementer live evidence; it was not independently repeated in this review.
+2. **P2 extension-owned collation discovery — resolved.** `src/screens/connection/hooks/useDatabaseBackup.ts:572` and `:579` discover extension name/schema through the collation OID with `classid = pg_collation`, `refclassid = pg_extension`, and `deptype = e`. Result indices 17/18 match the appended SELECT fields (`:622`). The builder registers the extension and its schema at `:689`, skipping independent CREATE COLLATION. `src/screens/connection/hooks/useDatabaseBackup.types.test.ts:247` reaches the extension solely through a user domain's collation and asserts the full schema → extension → domain output with no standalone collation.
+
+### Regression assessment
+
+- **Catalog query / NULL rows:** `src/screens/connection/hooks/useDatabaseBackup.ts:592` retains LEFT JOINs for the base type, collation and collation namespace. The new ownership predicates are inside scalar subqueries, not the outer WHERE. When `co.oid` is NULL, `cd.objid = co.oid` matches nothing and each subquery yields NULL; enum and noncollatable-domain rows remain present. Extension membership has one owning extension per object; ordinary catalog membership therefore does not multiply rows or produce multiple-row scalar results. No version-specific collation columns were added to SQL; existing to_jsonb extraction remains intact.
+- **Error surface:** `src/screens/connection/hooks/useDatabaseBackup.ts:1059` awaits the builder inside onBackupDatabase's try. An unsupported-provider Error reaches `:1112`, which shows its message in the existing Backup error dialog. The message identifies the collation and unsupported provider. `:1117` clears dbBackupRunning in finally. The error occurs before data export, packSqlToDumb and writeFile (`:1105`–`:1109`), so no partial dump is written or success toast shown by this path. The save picker and structural catalog reads already occurred; those reads do not restore or mutate database objects. Hook error behavior was traced statically, not exercised through native dialogs.
+- **Ordering / deduplication:** `src/screens/connection/hooks/useDatabaseBackup.ts:716` assembles schemas after all domain dependencies are collected; `:726` builds extensions from the shared name-keyed map. Final assembly at `:754` remains schemas → extensions → standalone collations → sequences → enums → base-ordered domains. An extension found through multiple types/collations emits once. Extension-owned members bypass createCollationSql, so even a provider unsupported for standalone recreation can be supplied by its extension. General extension prerequisite discovery and installed extension/locale/privilege requirements remain existing limits.
+- No new actionable regression found in this diff. Enum/domain/array support remains the agreed scope. Composite/range types, user functions, sequence settings/state and search_path remain documented limits; this review does not expand the fidelity claim. Restore/import authorization paths are unchanged.
+
+### Test quality and verification
+
+- `npm run build`: **passed** (TypeScript and Vite). Existing node:zlib browser externalization, ineffective dynamic imports and large-chunk warnings remain.
+- `npm run test:run -- --exclude '**/.claude/**' src/screens/connection/hooks/useDatabaseBackup.types.test.ts src/screens/connection/hooks/useDatabaseBackup.restore.test.ts src/screens/connection/hooks/useDatabaseBackup.free.test.ts src/lib/dump src/components/editor/splitSqlStatements.test.ts`: **6 files / 64 tests passed**.
+- New tests provide useful exact-output assertions rather than only substring checks. Builtin fidelity, unsupported-provider refusal and extension-only discovery through a domain are covered at the builder boundary; existing ICU/libc and adjacent backup/restore cases still pass.
+- **Nonblocking coverage gaps:** positional mocked catalog rows do not execute the discovery SQL or validate real LEFT JOIN NULL behavior. Unknown-provider coverage checks builder rejection, not the hook's dialog/no-write/finally behavior. Shared extension deduplication across type and collation dependencies is not directly asserted. These paths were inspected statically; no defect established. Extension-owned collation restore remains unit-tested only, as reported; no supplied live extension fixture was available.
+- **Independent live verification unavailable:** `docker image ls` failed with permission denied on `unix:///Users/lamtung/.orbstack/run/docker.sock`; this session cannot escalate. No container started or database touched. The reported builtin PG17 round trip is acknowledged as implementer evidence, not reviewer execution. No desktop/native UI or Rust checks: no affected UI/native/Rust source in this diff.
+- Only `.agent/REVIEW.md` changed. Unrelated untracked `.claude/launch.json` preserved. No commit, push or merge.
