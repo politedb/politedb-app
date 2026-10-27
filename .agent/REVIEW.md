@@ -4,7 +4,7 @@
 
 CHANGES REQUIRED
 
-Latest review: **round 12**, `ea047ed..19fc1f7`; the reported row-value injection is fixed for standard-conforming PostgreSQL strings, but continued E-strings introduce an editor execution regression and generated dump comments still permit object-name injection. Error-position mapping also retains the wrong dialect. Build and 425 committed tests passed; see appended review for reproductions and limits.
+Latest review: **round 13**, `19fc1f7..9e57536`; new dump comments and error mapping are fixed, but E-string continuation remains exploitable with vertical tab before the first newline. Build and 333 relevant committed tests passed; reviewer real-runner reproduction confirms unintended DELETE dispatch. See appended review.
 
 Reviewed `main..6f853c31b22f76672db0dace4a6d10adf8152533` on `fix/backup-restore-safety`, against the human-approved batch 1 requirements. No application source changed.
 
@@ -531,3 +531,40 @@ The runner now splits PostgreSQL SQL by its dialect, but `runStatementStarts(err
 - New committed tests use exact statement lists and a useful restore dispatch assertion for the original payload. Missing: continued E-strings, Unicode E boundaries/tags, CR comments, unclosed-input diagnostics, generated comment-name injection, and matching editor error offsets. The JSON writer's manual escape reversal checks an implementation-shaped property rather than PostgreSQL parsing; retain real-server coverage and add exact-output adversarial fixtures. The restore regression uses a handcrafted old-style dump and does not verify the new writer-to-restore chain. No new integrated cursor-selection test was added.
 - **Live verification unavailable:** `docker image ls` failed with permission denied on `unix:///Users/lamtung/.orbstack/run/docker.sock`. Local libpq has client tools but no `postgres` server binary. No container or database touched. Claude's disposable postgres:17 on/off literal round trips are implementer evidence, not independently repeated here. No desktop/native UI exercised; no Rust source changed, so Rust checks were not run.
 - Only `.agent/REVIEW.md` changed; unrelated untracked `.claude/launch.json` preserved. No commit, push or merge.
+
+
+## Re-review (round 13)
+
+**Status: CHANGES REQUIRED.** Reviewed exactly `19fc1f7..9e57536` on `fix/backup-restore-safety` (2026-10-27), HEAD `9e57536ab868bb0f7f29b15030c831d4bae44320`. Read all six changed files and traced splitter, runner, comment emission and error mapping. No application source or committed tests changed.
+
+### P1 — Vertical tab before the first newline still exposes E-string data as executable SQL
+
+**Location:** `src/components/editor/splitSqlStatements.ts:44`, used at `:230`; dispatch/error continuation: `src/screens/connection/hooks/useSqlRunner.ts:485`, `:573`.
+
+`PG_STRING_CONTINUATION` omits `\v` from its initial `[ \t\f]` class, although it includes it after the first newline. PostgreSQL's [REL_17_STABLE scanner](https://github.com/postgres/postgres/blob/REL_17_STABLE/src/backend/parser/scan.l#L205-L226) includes vertical tab in `non_newline_space`, which participates before that newline. Thus this valid single PostgreSQL SELECT still reproduces round 12's editor injection (JavaScript notation makes the control character explicit):
+
+```js
+"SELECT E'a'\v\n'\\'; DELETE FROM victim; --';"
+```
+
+The splitter returns `SELECT E'a'` + VT + LF + `'\'`, then `DELETE FROM victim`, then `--';`. The server keeps the continuation in E-string mode, so DELETE is literal data. A temporary real `useSqlRunner` fixture in Default mode, using real client validation, rejected the first fragment through mocked backend validation and confirmed `onRunSql` receives exactly `DELETE FROM victim`. Direct-result mocks complete each dispatch; default `stopOnError=false` permits progression after the first error. This is an editor execution defect, not a demonstrated newly generated row-dump exploit: the writer does not emit continued literals.
+
+Include vertical tab in the initial continuation whitespace class. Add exact splitter and real-runner regressions for VT before the first newline, including after spaces/line comments, with first-fragment backend rejection. Prefer a table of PostgreSQL whitespace characters in both pre/post-newline positions so the claimed scanner equivalence is actually tested.
+
+### Round 12 findings and other requested edge cases
+
+- **E-string continuation — partially resolved, still blocking.** Ordinary LF/CR continuation, multi-part continuation and intervening `--` comments retain escape mode. The VT counterexample above prevents closure of this finding. A plain string followed by newline then `E'…'` starts a new E token: the intervening E prevents continuation matching and its own prefix enables escapes. A block comment between parts prevents lexical continuation, matching PostgreSQL; the next plain string therefore does not inherit E mode. `U&'…'` continuation remains plain lexical quote handling; Unicode escapes do not make backslash escape the quote delimiter. Targeted Node probes confirmed these boundaries. Invalid SQL adjacency remains for the server to reject.
+- **Comment-name injection — resolved for newly generated dumps, historical limitation retained.** `src/screens/connection/hooks/useDatabaseBackup.ts:41` replaces CR/LF and other controls; Structure (`:1093`), Data (`:1103`) and Post-data (`:1057`) all call the helper for both schema and table names. Quoted SQL identifiers retain their existing escaping. No other untrusted name interpolation into generated section comments found. Previously produced dumps retain raw dangerous comments; no migration/detection was added. This is explicitly acknowledged, not an all-old-dumps safety verdict.
+- **Error-position dialect — resolved by inspection.** `src/components/editor/SqlEditorPane.tsx:360` passes the engine-aware splitter and `:393` includes engine in effect dependencies. Execution/error mapping now use the same splitter contract. No dedicated second-statement error-marker regression was added.
+- **Dollar tags / closing match:** PostgreSQL opener rules now accept non-ASCII tags and reject digit-leading tags and tags inside identifiers (`splitSqlStatements.ts:17`). Default dialect still uses the original opener at `:254`; `$1$` compatibility remains. The exact closing-tag check (`:140`) correctly ignores opener-boundary rules inside bodies and handles overlapping candidate tags (probe: `SELECT $a$x$b$a$; SELECT 2;` yields two statements). No regression established from that change in either dialect.
+- **CR / backticks / Unicode E boundaries:** PostgreSQL line comments now end on CR and backticks remain ordinary characters; non-ASCII identifier suffixes no longer falsely activate E escapes. These fixes match the requested scanner rules. CR termination also changes default mode; no concrete regression established.
+- No additional app-generated PostgreSQL name/value-to-statement escape established in this diff. Prior limits remain: `standard_conforming_strings` is not tracked for old/external plain literals, malformed tails rely on backend rejection, and schema expressions are executable source content. This review does not certify a complete PostgreSQL parser or arbitrary external dump safety.
+
+### Test quality and verification
+
+- `npm run build`: **passed**, TypeScript and Vite. Existing browser externalization of `node:zlib`, ineffective dynamic imports and large-chunk warnings remain.
+- `npm run test:run -- --exclude '**/.claude/**' src/components/editor/splitSqlStatements.test.ts src/lib/tauri/queryValidate.client.test.ts src/screens/connection/hooks/sqlInsertLiteral.test.ts src/screens/connection/hooks/useDatabaseBackup.restore.test.ts src/screens/connection/hooks/useDatabaseBackup.types.test.ts src/screens/connection/hooks/useDatabaseBackup.free.test.ts src/screens/connection/hooks/useSqlRunner.safety.test.ts src/screens/connection/hooks/useSqlRunner.sequential.test.ts src/screens/connection/hooks/useSqlRunner.explainAnalyze.test.ts src/lib/dump src/lib/sql src/components/editor/SqlEditorPane.persist.test.tsx`: **20 files / 333 tests passed**.
+- Temporary reviewer real-runner suite: **1 file / 11 tests passed**, including the assertion of unintended DELETE dispatch above. Passing reproduction demonstrates the defect, not safety. Initial outside-root fixture attempts failed module loading; initial stream-result mocks timed out awaiting completion. Final fixture used direct-result responses and completed successfully. Temporary fixture/config removed.
+- New exact splitter assertions and the Default-mode real-runner test are useful and catch the original LF payload. Coverage misses VT before the first newline and the first-backend-validation-error path. The dump-name test checks helper-to-splitter output for a table name in Structure only; schema-name coverage, all three emitted sections and actual backup-to-restore dispatch remain untested. Static call-site inspection supports the fix, but the test is not an end-to-end backup regression. Error-position mapping has no new dedicated assertion.
+- Independent Node probes transpiled the actual splitter and exercised VT, plain-to-E, block-comment separation, U& continuation, Unicode/default tags and overlapping closing tags. PostgreSQL behavior checked against upstream scanner source; no live PostgreSQL server, database writes, native dialogs or desktop UI exercised. No Rust changes, so no Rust checks run.
+- Only `.agent/REVIEW.md` changed. Unrelated untracked `.claude/launch.json` preserved. No commit, push or merge.
