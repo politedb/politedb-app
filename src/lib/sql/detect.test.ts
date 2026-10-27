@@ -166,6 +166,19 @@ describe("isMutatingStatement for a known engine", () => {
     }
   );
 
+  it("ends a PostgreSQL line comment at a carriage return, as PostgreSQL does", () => {
+    expect(isMutatingStatement("-- note\rDELETE FROM t", "postgres")).toBe(
+      true
+    );
+    expect(
+      isMutatingStatement("SELECT 1 -- n\rINTO backup_x", "postgres")
+    ).toBe(true);
+    expect(isMutatingStatement("-- note\rDELETE FROM t")).toBe(true);
+    // MySQL ends it only at a line feed; other engines are read every way.
+    expect(isMutatingStatement("-- note\rDELETE FROM t", "mysql")).toBe(false);
+    expect(isMutatingStatement("-- note\rDELETE FROM t", "sqlite")).toBe(true);
+  });
+
   it("reads other or unknown engines every way, erring towards a write", () => {
     expect(isMutatingStatement("SELECT 1 # note INTO backup\n;")).toBe(true);
     expect(

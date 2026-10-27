@@ -61,6 +61,7 @@ describe("the SQL editor in Lock mode", () => {
     ["SELECT 'a\\' INTO OUTFILE '/tmp/x'", "mariadb"],
     ["SELECT 'a\\'b' INTO backup_x", "postgres"],
     ["--x\n/* /* */ DELETE FROM t", "sqlite"],
+    ["SELECT 1; -- note\rDELETE FROM t", "postgres"],
   ])("blocks the hidden write %s on %s", async (sql, engine) => {
     const { onRunSql, runs } = await run(sql, engine, true);
     expect(onRunSql).not.toHaveBeenCalled();

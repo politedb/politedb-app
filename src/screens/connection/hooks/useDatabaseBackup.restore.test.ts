@@ -378,6 +378,25 @@ describe("stop message parts", () => {
     );
   });
 
+  it("stays bounded however many DETAIL and HINT lines there are", () => {
+    const repeated = Array.from(
+      { length: 1_000 },
+      () => `DETAIL: ${"r".repeat(400)}`
+    ).join("\n");
+    const summary = restoreErrorSummary(
+      new Error(
+        `new row violates check\nDETAIL: Failing row contains (a\n${repeated}\nHINT: first hint\nHINT: second`
+      )
+    );
+    expect(summary.length).toBeLessThan(1_000);
+    expect(summary.split("\n")).toEqual([
+      "new row violates check",
+      "DETAIL: Failing row contains (a",
+      "HINT: first hint",
+      "…",
+    ]);
+  });
+
   it("cuts a long line in the middle, keeping its end", () => {
     const summary = restoreErrorSummary(
       new Error(`${"y".repeat(1_000)} the useful end`)

@@ -93,6 +93,8 @@ const DIALECT_RULES: Record<
     dashCommentAnywhere: boolean;
     /** "#" starts a line comment. */
     hashComments: boolean;
+    /** A line comment also ends at a carriage return (not only a line feed). */
+    lineCommentEndsAtCr: boolean;
     /** $tag$…$tag$ quotes text; E'…' strings take backslash escapes. */
     postgresQuotes: boolean;
     /** With backslash escapes on, they apply to "…" as well as '…'. */
@@ -103,6 +105,7 @@ const DIALECT_RULES: Record<
     nestedComments: true,
     dashCommentAnywhere: true,
     hashComments: false,
+    lineCommentEndsAtCr: true,
     postgresQuotes: true,
     escapesDoubleQuoted: false,
   },
@@ -110,6 +113,7 @@ const DIALECT_RULES: Record<
     nestedComments: false,
     dashCommentAnywhere: false,
     hashComments: true,
+    lineCommentEndsAtCr: false,
     postgresQuotes: false,
     escapesDoubleQuoted: true,
   },
@@ -119,6 +123,7 @@ const DIALECT_RULES: Record<
     nestedComments: false,
     dashCommentAnywhere: true,
     hashComments: false,
+    lineCommentEndsAtCr: false,
     postgresQuotes: false,
     escapesDoubleQuoted: false,
   },
@@ -131,7 +136,7 @@ const DIALECT_RULES: Record<
  * /*M! … *\/) runs code.
  *
  * - postgres (and standard SQL): block comments nest, "--" always starts a
- *   comment, "#" is an operator, $tag$…$tag$ quotes text; a backslash
+ *   comment and ends at a line feed or carriage return, "#" is an operator, $tag$…$tag$ quotes text; a backslash
  *   escapes in E'…' strings, and in every '…' string when the session has
  *   standard_conforming_strings off.
  * - mysql: block comments do not nest, "#" starts a comment, "--" only
@@ -153,7 +158,12 @@ function executableText(
   let out = "";
   let i = 0;
   const lineComment = () => {
-    while (i < len && s[i] !== "\n") i++;
+    while (
+      i < len &&
+      s[i] !== "\n" &&
+      !(rules.lineCommentEndsAtCr && s[i] === "\r")
+    )
+      i++;
     out += " ";
   };
   while (i < len) {

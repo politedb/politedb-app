@@ -161,8 +161,9 @@ export function restoreStatementLabel(sql: string, max = 160): string {
 /**
  * A server error for the stop dialog, kept short so a "Failing row contains
  * (…)" detail or a long message cannot push the dialog past the screen: the
- * message line, then its DETAIL and HINT lines wherever they are (CONTEXT,
- * WHERE and other lines are left out), each cut in the middle. Values the
+ * message line, then its first DETAIL and first HINT lines wherever they
+ * are (CONTEXT, WHERE and other lines are left out), each cut in the
+ * middle: at most about 1,000 characters in all. Values the
  * server echoes (a failing row, a duplicate key) stay, cut: they say which
  * row failed. The dialog is local and nothing is logged.
  */
@@ -179,10 +180,13 @@ export function restoreErrorSummary(error: unknown): string {
     .filter(Boolean);
   const [first, ...rest] = lines;
   if (!first) return "Unknown restore error";
-  const kept = [clip(first, 300)];
-  for (const line of rest) {
-    if (/^(?:DETAIL|HINT):/i.test(line)) kept.push(clip(line, 300));
-  }
+  // The first DETAIL and the first HINT only: a message repeating them
+  // (or a failing row holding line breaks) stays bounded.
+  const detail = rest.find((line) => /^DETAIL:/i.test(line));
+  const hint = rest.find((line) => /^HINT:/i.test(line));
+  const kept = [first, detail, hint]
+    .filter((line): line is string => !!line)
+    .map((line) => clip(line, 300));
   if (kept.length < lines.length) kept.push("…");
   return kept.join("\n");
 }
