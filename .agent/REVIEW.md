@@ -2,9 +2,9 @@
 
 ## Status
 
-CHANGES REQUIRED
+VERIFIED WITH LIMITATIONS
 
-Latest review: **round 5**, `daa4912..93f14f3`; both round 4 P2 findings resolved for their named engines. One new P1 regression in session-dependent string quoting requires changes. See appended review.
+Latest review: **round 6**, `93f14f3..db1fb7b`; round 5 P1 resolved, round 4 reads preserved. No new in-scope regression found. Preexisting heuristic gaps remain assigned to the separate server-side read-only task. See appended review.
 
 Reviewed `main..6f853c31b22f76672db0dace4a6d10adf8152533` on `fix/backup-restore-safety`, against the human-approved batch 1 requirements. No application source changed.
 
@@ -278,3 +278,28 @@ Keep engine-specific comment/dollar-quote rules, but conservatively consider the
 - Temporary reviewer hook suite: **12 tests passed**: six original safety cases plus six reproductions (three newly missed writes × Lock/Production), asserting dispatch once with unchanged SQL. Passing reproduction assertions demonstrate the defect, not correct authorization. Temporary file removed.
 - New committed tests exercise the real hook, actual client validation/splitter and actual classifier, while mocking native execution/validation/authentication. Paired reads demonstrate that dispatch is reachable, improving on classifier-only coverage. Unique window IDs avoid throttle/inflight collisions. Blocked cases at `src/screens/connection/hooks/useSqlRunner.safety.test.ts:59` assert only no dispatch, not the expected block reason; future tests should also inspect the run error so unrelated early exits cannot satisfy them. Missing committed coverage: Production, MariaDB hook behavior, session string modes, and engine-change rerenders. The mode regression above requires coverage; the other gaps are nonblocking test improvements.
 - No live DB queries, native dialogs/Touch ID, desktop UI or Rust checks performed. Native validation is mocked in hook probes, so successful database execution is inferred from documented SQL semantics, not verified end to end. Only `.agent/REVIEW.md` retained as a change; unrelated `.claude/launch.json` preserved. No source edits, commit, push or merge.
+
+
+## Re-review (round 6)
+
+**Status: VERIFIED WITH LIMITATIONS.** Reviewed `93f14f3..db1fb7b` on `fix/backup-restore-safety` (2026-10-27). Checkout HEAD `384d57c` differs from `db1fb7b` only in review documentation; tested application code matches the requested fix. Scope remains the rounds 4–5 agreement: confirm the round 5 P1 fix and check newly reopened writes or reblocked round 4 reads. No new in-scope findings requiring changes.
+
+### Round 5 disposition and regression assessment
+
+- **P1 session string modes — resolved.** `src/lib/sql/detect.ts:248` evaluates both backslash settings within each selected dialect and returns true if either sees a write. The old PostgreSQL reading is retained with `false`; the old MySQL reading is retained with `true`. Their existing positive classifications therefore remain positive; this change adds readings rather than removing protection. All three reported session-mode examples (MySQL, MariaDB, PostgreSQL) now classify as writes. Classifier regressions: `src/lib/sql/detect.test.ts:141`.
+- **Explicit PostgreSQL E strings retain unconditional escapes.** `src/lib/sql/detect.ts:146` combines the session setting with explicit E-prefix detection. `src/lib/sql/detect.test.ts:112` verifies the named E-string read remains false in the PostgreSQL dialect. Its removal from the engine-unspecified read table is appropriate: other/unknown engines intentionally consider MySQL as well, where E is not PostgreSQL escape syntax.
+- **Round 4 reads remain allowed.** Engine routing at `src/lib/sql/detect.ts:233` is unchanged; additional readings use the same comment and dollar-quote rules. Differential probes confirm all four named PostgreSQL dollar-string reads, PostgreSQL no-space line-comment read, and both MySQL/MariaDB hash-comment reads stay false. Committed coverage remains at `src/lib/sql/detect.test.ts:103` and `:117`. No incompatible whole-dialect union was reintroduced for known engines.
+- **Restricted-mode integration remains intact.** Production and Lock use the same classifier with the supplied engine at `src/screens/connection/hooks/useSqlRunner.ts:651` and `:671`. Neither gate nor engine forwarding changed. Dump Lock/Production refusal remains independent of this heuristic; no dump source changed in this fix.
+
+### Test assessment
+
+- `src/screens/connection/hooks/useSqlRunner.safety.test.ts:58` adds real-hook Lock regressions for MariaDB and PostgreSQL session-mode writes. `:65` now checks the actual Lock error as well as no dispatch, closing the round 5 false-success concern. Existing paired reads at `:69` still demonstrate reachable dispatch.
+- Classifier tests cover all three named session-mode writes; the real-hook suite covers two directly. MySQL's equivalent session-mode hook case and Production-mode hook coverage remain absent, nonblocking coverage limitations: MySQL/MariaDB share the same dialect route, and Production uses the same classifier. No new Production hook execution was claimed in this round.
+
+### Verification and limitations
+
+- `npm run build`: **passed**, TypeScript and production Vite build. Existing warnings: `node:zlib` browser externalization, ineffective dynamic imports, large chunks and plugin timings.
+- `npm run test:run -- --exclude '**/.claude/**' src/lib/sql src/lib/dump src/screens/connection/hooks/useDatabaseBackup.restore.test.ts src/screens/connection/hooks/useDatabaseBackup.free.test.ts src/screens/connection/hooks/useSqlRunner.sequential.test.ts src/screens/connection/hooks/useSqlRunner.explainAnalyze.test.ts src/screens/connection/hooks/useSqlRunner.safety.test.ts src/screens/connection/hooks/useSqlHistoryRunner.test.ts src/lib/ai-assistant/agent.test.ts`: **17 files / 281 tests passed**. Unrelated nested worktree excluded as requested.
+- Reviewer differential probes transpiled the actual classifier at `93f14f3` and `db1fb7b`: **11 cases / 22 assertions passed**. Three reported writes changed false → true; seven round 4 engine-specific reads and one explicit E-string read stayed false. No probe files retained.
+- Classification remains a heuristic, not server-side read-only authorization. Preexisting side-effect-function gaps, other/unknown dialect mismatches, and editor live-mode/authentication races remain limitations for the separate task, not new blockers. Considering both unknown session settings can conservatively flag ambiguous ordinary strings; this follows the agreed fix and does not reblock the named round 4 reads.
+- No live database execution, native dialogs/Touch ID, desktop UI or Rust checks performed. Hook tests mock native validation, execution and authentication. No Rust files changed. Only `.agent/REVIEW.md` changed; unrelated `.claude/launch.json` preserved. No source edits, commit, push or merge.
