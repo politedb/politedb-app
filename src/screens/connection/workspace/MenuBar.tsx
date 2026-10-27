@@ -403,6 +403,45 @@ export function MenuBar({
     if (connectionBlocked) setSafeModeOpen(false);
   }, [connectionBlocked]);
 
+  // The picker is a menu (so app shortcuts wait while it is open): it opens
+  // on the current mode, arrows move, Escape closes back to its button.
+  const safeModeMenuRef = useRef<HTMLDivElement | null>(null);
+  const focusSafeModeTrigger = () =>
+    safeModeRef.current
+      ?.querySelector<HTMLElement>("[data-safety-mode-trigger]")
+      ?.focus();
+  useEffect(() => {
+    if (!safeModeOpen) return;
+    const menu = safeModeMenuRef.current;
+    (
+      menu?.querySelector<HTMLElement>('[aria-checked="true"]') ??
+      menu?.querySelector<HTMLElement>('[role="menuitemradio"]')
+    )?.focus();
+  }, [safeModeOpen]);
+  const onSafeModeMenuKeyDown = (e: KeyboardEvent) => {
+    const items = Array.from(
+      safeModeMenuRef.current?.querySelectorAll<HTMLElement>(
+        '[role="menuitemradio"]'
+      ) ?? []
+    );
+    if (!items.length) return;
+    const index = items.indexOf(document.activeElement as HTMLElement);
+    let next: number | null = null;
+    if (e.key === "ArrowDown") next = (index + 1) % items.length;
+    else if (e.key === "ArrowUp")
+      next = (index - 1 + items.length) % items.length;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = items.length - 1;
+    else if (e.key === "Escape" || e.key === "Tab") {
+      if (e.key === "Escape") e.preventDefault();
+      setSafeModeOpen(false);
+      if (e.key === "Escape") focusSafeModeTrigger();
+      return;
+    } else return;
+    e.preventDefault();
+    items[next]?.focus();
+  };
+
   // The status bar's mode badge opens this picker.
   useEffect(() => {
     const open = () => {
@@ -517,6 +556,9 @@ export function MenuBar({
               <IconButton
                 className="size-6"
                 title="Safety mode"
+                aria-haspopup="menu"
+                aria-expanded={safeModeOpen}
+                data-safety-mode-trigger
                 disabled={connectionBlocked}
                 onClick={(e: any) => {
                   e.stopPropagation();
@@ -540,16 +582,29 @@ export function MenuBar({
               </IconButton>
 
               {safeModeOpen ? (
-                <div class="absolute top-8 -left-1 z-40 w-md rounded-lg border border-neutral-200 bg-white p-1 shadow-lg">
+                <div
+                  role="menu"
+                  aria-label="Safety mode"
+                  ref={safeModeMenuRef}
+                  onKeyDown={onSafeModeMenuKeyDown}
+                  class="absolute top-8 -left-1 z-40 w-md rounded-lg border border-neutral-200 bg-white p-1 shadow-lg"
+                >
                   {QUERY_SAFETY_MODES.map((mode) => (
                     <button
                       type="button"
+                      role="menuitemradio"
+                      aria-checked={querySafetyMode === mode.value}
+                      tabIndex={-1}
                       class={cn(
                         "flex w-full items-center gap-2 rounded-md",
                         "px-2 py-1.5 text-left hover:bg-neutral-100",
+                        "outline-none focus-visible:bg-neutral-100 focus-visible:ring-2 focus-visible:ring-blue-500",
                         querySafetyMode === mode.value && "bg-neutral-100"
                       )}
-                      onClick={() => void setQuerySafetyMode(mode.value)}
+                      onClick={() => {
+                        void setQuerySafetyMode(mode.value);
+                        focusSafeModeTrigger();
+                      }}
                     >
                       <div
                         class={cn("size-1 rounded-full p-1", mode.dotClass)}

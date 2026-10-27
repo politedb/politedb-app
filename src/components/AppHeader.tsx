@@ -87,6 +87,10 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
   const profiles = useProfileStore((s) => s.profiles);
   const pinnedIds = usePinnedConnectionsStore((s) => s.pinnedIds);
   const isMac = useMemo(() => isMacPlatform(), []);
+  // The tab that holds the strip's single tab stop: the last one focused,
+  // else the active connection. Switching connections resets it.
+  const [focusedTabId, setFocusedTabId] = useState<string | null>(null);
+  useEffect(() => setFocusedTabId(null), [activeProfileScreen]);
   const [newTabMenu, setNewTabMenu] = useState<{ x: number; y: number } | null>(
     null
   );
@@ -146,20 +150,34 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
     );
   }, []);
 
-  useLayoutEffect(() => {
+  const revealActiveTab = useCallback(() => {
     const el = stripRef.current;
     const active = el?.querySelector<HTMLElement>('[aria-selected="true"]');
     active?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
     updateHidden();
-  }, [activeProfileScreen, profileTabs.length, updateHidden]);
+  }, [updateHidden]);
 
+  useLayoutEffect(() => {
+    revealActiveTab();
+  }, [activeProfileScreen, profileTabs.length, revealActiveTab]);
+
+  // A narrower strip may hide the active tab: bring it back. Only a change of
+  // width does this, so scrolling through the tabs by hand is left alone.
   useEffect(() => {
     const el = stripRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(updateHidden);
+    let width = el.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (el.clientWidth !== width) {
+        width = el.clientWidth;
+        revealActiveTab();
+      } else {
+        updateHidden();
+      }
+    });
     observer.observe(el);
     return () => observer.disconnect();
-  }, [updateHidden]);
+  }, [revealActiveTab, updateHidden]);
 
   const handleStripWheel = useCallback((e: WheelEvent) => {
     const el = stripRef.current;
@@ -175,8 +193,19 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
     [setActiveProfileScreen]
   );
 
-  const handleTabClose = useCallback((tabId: string) => {
-    void requestCloseConnectionTab(tabId);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const handleTabClose = useCallback(async (tabId: string) => {
+    // Closing from the keyboard (a focused tab or its menu) keeps focus in
+    // the strip instead of dropping it on the page when the tab goes away.
+    const active = document.activeElement;
+    const fromHeader = !!active && !!rootRef.current?.contains(active);
+    await requestCloseConnectionTab(tabId);
+    if (!fromHeader) return;
+    const now = document.activeElement;
+    if (now && now !== document.body && now.isConnected) return;
+    stripRef.current
+      ?.querySelector<HTMLElement>('[role="tab"][tabindex="0"]')
+      ?.focus();
   }, []);
 
   const closeTabs = useCallback(
@@ -275,6 +304,13 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
     ];
   }, [profiles, pinnedIds, setActiveProfileScreen]);
 
+  const tabStopId =
+    (focusedTabId && profileTabs.some((t) => t.id === focusedTabId)
+      ? focusedTabId
+      : profileTabs.some((t) => t.id === activeProfileScreen)
+        ? activeProfileScreen
+        : profileTabs[0]?.id) ?? null;
+
   const menuItems: MenuItem[] = ctx
     ? [
         {
@@ -315,6 +351,7 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
 
   return (
     <div
+      ref={rootRef}
       class="relative z-20 h-11 w-full shrink-0 border-b border-slate-200 select-none"
       onMouseDown={handleHeaderMouseDown}
     >
@@ -390,11 +427,7 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
                 const modeInfo =
                   mode === "default" ? null : querySafetyModeInfo(mode);
                 const unsaved = connectionTabHasChanges(tab.id);
-                // The strip's single tab stop: the active tab, else the first.
-                const isTabStop =
-                  isActive ||
-                  (tabIndex === 0 &&
-                    !profileTabs.some((t) => t.id === activeProfileScreen));
+                const isTabStop = tab.id === tabStopId;
 
                 return (
                   <div
@@ -416,6 +449,7 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
                       handleTabSelect(tab.id);
                     }}
                     onKeyDown={(e) => handleTabKeyDown(e, tab, tabIndex)}
+                    onFocus={() => setFocusedTabId(tab.id)}
                     onMouseDown={(e) => {
                       // No autoscroll on a middle press; its release closes.
                       if (e.button === 1) e.preventDefault();
@@ -560,6 +594,7 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
         y={newTabMenu?.y ?? 0}
         items={newTabItems}
         onClose={() => setNewTabMenu(null)}
+        autoFocus
       />
       <ContextMenu
         open={!!ctx}
@@ -567,6 +602,7 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
         y={ctx?.y ?? 0}
         items={menuItems}
         onClose={() => setCtx(null)}
+        autoFocus
       />
     </div>
   );

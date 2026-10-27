@@ -19,7 +19,7 @@ import {
   requestOpenSettings,
 } from "src/lib/settings/openSettings";
 import { isMacPlatform } from "src/stores/keyboardShortcuts";
-import { connectionTabShortcutTarget } from "src/lib/tabs/connectionTabShortcuts";
+import { handleConnectionTabShortcut } from "src/lib/tabs/handleConnectionTabShortcut";
 
 const loadConnectionScreen = () =>
   import("src/screens/connection/ConnectionScreen").then((module) => ({
@@ -63,20 +63,7 @@ export function MainLayout() {
   useEffect(() => {
     const isMac = isMacPlatform();
     const onKeyDown = (event: KeyboardEvent) => {
-      const { profileTabs, activeProfileScreen } = useScreenStore.getState();
-      const tabTarget = connectionTabShortcutTarget(
-        event,
-        isMac,
-        profileTabs.map((tab) => tab.id),
-        activeProfileScreen
-      );
-      if (tabTarget) {
-        event.preventDefault();
-        // Switching away would leave an open dialog or menu behind.
-        if (isModalDialogOpen()) return;
-        setActiveProfileScreen(tabTarget);
-        return;
-      }
+      if (handleConnectionTabShortcut(event, isMac)) return;
       if (!isOpenSettingsShortcut(event, isMac)) return;
       event.preventDefault();
       // Another dialog is open (New Group, a form…): leave it alone rather than

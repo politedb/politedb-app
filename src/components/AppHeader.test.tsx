@@ -199,4 +199,108 @@ describe("AppHeader connection tabs", () => {
     expect(second.contains(dots[0]!)).toBe(true);
     expect(second.getAttribute("title")).toContain("Unsaved changes");
   });
+
+  it("moves the tab stop with focus, and back to the active tab on a switch", () => {
+    render(<AppHeader />);
+    const tabs = () => screen.getAllByRole("tab");
+    tabs()[0]!.focus();
+    fireEvent.keyDown(tabs()[0]!, { key: "ArrowRight" });
+    expect(tabs().map((t) => t.tabIndex)).toEqual([-1, 0, -1]);
+    fireEvent.keyDown(tabs()[1]!, { key: "Home" });
+    expect(tabs().map((t) => t.tabIndex)).toEqual([0, -1, -1]);
+    fireEvent.keyDown(tabs()[0]!, { key: "End" });
+    expect(tabs().map((t) => t.tabIndex)).toEqual([-1, -1, 0]);
+
+    // Switched elsewhere (a shortcut, the sidebar): the stop follows.
+    act(() => useScreenStore.setState({ activeProfileScreen: "tab-2" }));
+    expect(tabs().map((t) => t.tabIndex)).toEqual([-1, 0, -1]);
+
+    // The focused tab goes away: the stop falls back to the active one.
+    tabs()[2]!.focus();
+    act(() =>
+      useScreenStore.setState({
+        profileTabs: useScreenStore.getState().profileTabs.slice(0, 2),
+      })
+    );
+    expect(tabs().map((t) => t.tabIndex)).toEqual([-1, 0]);
+  });
+
+  it("focuses the tab menu opened from the keyboard and gives focus back", () => {
+    render(<AppHeader />);
+    const first = screen.getAllByRole("tab")[0]!;
+    first.focus();
+    fireEvent.keyDown(first, { key: "F10", shiftKey: true });
+    const items = screen.getAllByRole("menuitem");
+    expect(document.activeElement).toBe(items[0]);
+    fireEvent.keyDown(items[0]!, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(items[1]);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("menuitem")).toBeNull();
+    expect(document.activeElement).toBe(first);
+  });
+
+  it("focuses the first entry of the + menu", () => {
+    useProfileStore.setState({
+      profiles: [{ id: "a", label: "Analytics", engine: "postgres" }] as never,
+    });
+    render(<AppHeader />);
+    fireEvent.click(screen.getByRole("button", { name: "Open a connection" }));
+    const item = screen.getByRole("menuitem", { name: /Analytics/ });
+    expect(document.activeElement).toBe(item);
+  });
+
+  it("keeps focus in the strip after closing a tab from its menu", async () => {
+    closeTab.mockImplementation(async (id: string) => {
+      const state = useScreenStore.getState();
+      useScreenStore.setState({
+        profileTabs: state.profileTabs.filter((t) => t.id !== id),
+      });
+    });
+    render(<AppHeader />);
+    const second = screen.getAllByRole("tab")[1]!;
+    second.focus();
+    fireEvent.keyDown(second, { key: "F10", shiftKey: true });
+    await act(async () => {
+      fireEvent.click(screen.getAllByRole("menuitem")[0]!);
+    });
+    expect(closeTab).toHaveBeenCalledWith("tab-2");
+    expect(document.activeElement?.getAttribute("role")).toBe("tab");
+    expect(document.activeElement?.textContent).toContain("prod-analytics");
+    closeTab.mockReset();
+  });
+
+  it("brings the active tab back when the strip gets narrower", () => {
+    let onResize!: () => void;
+    const observe = vi.fn();
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(cb: () => void) {
+          onResize = cb;
+        }
+        observe = observe;
+        disconnect() {}
+      }
+    );
+    try {
+      render(<AppHeader />);
+      const strip = screen.getByRole("tablist");
+      scrollIntoView.mockClear();
+      // Same width (a tab added or scrolled): no jump back.
+      onResize();
+      expect(scrollIntoView).not.toHaveBeenCalled();
+      Object.defineProperty(strip, "clientWidth", {
+        configurable: true,
+        value: 240,
+      });
+      onResize();
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      const contexts = scrollIntoView.mock.contexts;
+      expect((contexts[0] as HTMLElement).getAttribute("aria-selected")).toBe(
+        "true"
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });
