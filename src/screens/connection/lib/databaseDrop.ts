@@ -144,14 +144,18 @@ export function databaseChangeCheck(
 
   return {
     prepare: async () => {
-      const refused = await ensureAllowed();
-      if (refused) return refused;
-      if (change.kind !== "drop") return null;
+      if (change.kind !== "drop") return ensureAllowed();
       for (const id of otherTabsOnDatabase(profileId, change.name, tabId)) {
+        // Each tab is closed in the same turn as a passing check: nothing
+        // more is closed once the change is no longer allowed.
+        for (;;) {
+          const refused = await ensureAllowed();
+          if (refused) return refused;
+          const now = stateRefusal();
+          if (now) return now;
+          if (!needsTouchId()) break;
+        }
         await requestCloseConnectionTab(id);
-        // Nothing more is closed once the change is no longer allowed.
-        const after = await ensureAllowed();
-        if (after) return after;
       }
       return ensureAllowed();
     },

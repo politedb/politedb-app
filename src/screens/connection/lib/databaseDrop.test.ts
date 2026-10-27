@@ -336,3 +336,102 @@ describe("changes after each wait", () => {
     expect(check.checkNow()).toContain("is still open");
   });
 });
+
+describe("changes queued between waits", () => {
+  const drop = { kind: "drop", name: "test1" } as const;
+
+  /** The home tab as it is when a tab is closed. */
+  const homeAtClose: Array<Record<string, unknown>> = [];
+
+  /** After the first close resolves, a change lands `depth` microtasks later. */
+  function changeQueuedAfterClose(
+    depth: number,
+    patch: Record<string, unknown>
+  ) {
+    const apply = () =>
+      setTabs(
+        useScreenStore
+          .getState()
+          .profileTabs.map((tab) =>
+            tab.id === "home" ? { ...tab, ...patch } : tab
+          ) as never
+      );
+    const later = (n: number) =>
+      n === 0 ? apply() : queueMicrotask(() => later(n - 1));
+    const close = m.close.getMockImplementation()!;
+    m.close.mockImplementation(async (id: string) => {
+      homeAtClose.push({
+        ...useScreenStore
+          .getState()
+          .profileTabs.find((tab) => tab.id === "home"),
+      });
+      await close(id);
+      if (id === "t1") later(depth);
+    });
+  }
+
+  beforeEach(() => {
+    homeAtClose.length = 0;
+    setTabs([
+      {
+        id: "home",
+        profileId: "p1",
+        label: "Athena",
+        runtimeConnectionId: "c1",
+      },
+      { id: "t1", profileId: "p1", databaseOverride: "test1" },
+      { id: "t1b", profileId: "p1", databaseOverride: "test1" },
+    ]);
+  });
+
+  const switches: Array<[string, Record<string, unknown>]> = [
+    ["Production", { querySafetyMode: "production" }],
+    ["Lock", { isLocked: true }],
+    ["a reconnect", { runtimeConnectionId: "c2" }],
+    ["the dropped database", { databaseOverride: "test1" }],
+  ];
+
+  for (const depth of [0, 1, 2, 3, 4, 6]) {
+    it.each(switches)(
+      `closes a tab only while allowed: switch to %s after ${depth} microtasks`,
+      async (_, patch) => {
+        changeQueuedAfterClose(depth, patch);
+        expect(
+          await beforeDatabaseChange("home", "p1", "postgres", drop, "c1")
+        ).not.toBeNull();
+        // Every close happened before the switch landed.
+        for (const home of homeAtClose) {
+          expect(home).not.toMatchObject(patch);
+        }
+      }
+    );
+  }
+
+  for (const depth of [0, 1, 2, 3]) {
+    it(`asks for Touch ID before closing on in Safe (${depth} microtasks)`, async () => {
+      const order: string[] = [];
+      m.touchId.mockImplementation(async () => {
+        order.push("touch-id");
+      });
+      changeQueuedAfterClose(depth, { querySafetyMode: "safe" });
+      const close = m.close.getMockImplementation()!;
+      m.close.mockImplementation(async (id: string) => {
+        order.push(`${id}:${homeAtClose.length}`);
+        await close(id);
+      });
+      expect(
+        await beforeDatabaseChange("home", "p1", "postgres", drop, "c1")
+      ).toBeNull();
+      expect(m.touchId).toHaveBeenCalledTimes(1);
+      // A tab closed while Safe was on comes after Touch ID.
+      const safeClose = homeAtClose.findIndex(
+        (home) => home.querySafetyMode === "safe"
+      );
+      if (safeClose >= 0) {
+        expect(order.indexOf("touch-id")).toBeLessThan(
+          order.indexOf(`t1b:${safeClose}`)
+        );
+      }
+    });
+  }
+});
