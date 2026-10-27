@@ -25,6 +25,7 @@ vi.mock("../hooks/useConnectionHealthCheck", () => ({
   }),
 }));
 vi.mock("../hooks/useDatabaseBackup", () => ({
+  canBackupDatabase: () => true,
   useDatabaseBackup: () => ({
     dbBackupRunning: false,
     dbRestoreRunning: false,

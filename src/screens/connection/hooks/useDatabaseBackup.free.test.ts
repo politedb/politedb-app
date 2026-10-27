@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { LicenseState } from "src/lib/tauri";
 import { useLicenseStore } from "src/stores/license";
 import { useProUpgradeStore } from "src/stores/proUpgrade";
+import { useScreenStore } from "src/stores/screen";
 
 const mocks = vi.hoisted(() => ({
   openDialog: vi.fn(),
@@ -25,6 +26,7 @@ vi.mock("src/lib/tauri/query", () => ({
 }));
 vi.mock("../workspace/ConnectionRuntimeContext", () => ({
   useConnectionRuntimeCtx: () => ({
+    profileId: "t1",
     runtimeConnectionId: "conn_1",
     engine: "postgres",
     metaKey: "meta",
@@ -46,6 +48,9 @@ beforeEach(() => {
   mocks.saveDialog.mockResolvedValue(null);
   mocks.metadataLoad.mockRejectedValue(new Error("stop"));
   useProUpgradeStore.setState({ feature: null });
+  useScreenStore.setState({
+    profileTabs: [{ id: "t1", profileId: "p1", label: "db" } as never],
+  });
 });
 
 describe("useDatabaseBackup is free", () => {

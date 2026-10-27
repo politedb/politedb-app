@@ -1,5 +1,10 @@
 import { useCallback, useState } from "preact/hooks";
-import { openDialog, saveDialog, showMessage } from "src/lib/system-dialog";
+import {
+  confirmDialog,
+  openDialog,
+  saveDialog,
+  showMessage,
+} from "src/lib/system-dialog";
 import { writeFile, readFile } from "src/lib/system-fs";
 
 import { startSqlQueryStream, runSqlQuery } from "src/lib/tauri/query";
@@ -16,6 +21,9 @@ import type { ConnectionCreateInput } from "src/lib/tauri";
 import { useConnectionRuntimeCtx } from "../workspace/ConnectionRuntimeContext";
 import { formatSqlInsertChunk } from "./sqlInsertLiteral";
 import { showToast } from "src/stores/toast";
+import { useScreenStore } from "src/stores/screen";
+import { securityTouchIdAuthenticate } from "src/lib/tauri/security";
+import { dumpRunGate, tabSafetyModeNow } from "src/lib/dump/dumpRestoreSafety";
 import {
   packSqlToDumb,
   unpackDumpBytes,
@@ -579,6 +587,15 @@ async function buildMysqlTableStructure(args: {
   return ensureSqlEndsWithSemicolon(createSql);
 }
 
+/**
+ * Engines whose backup holds the table structure (CREATE TABLE …) as well as
+ * the rows. For the others it would hold rows only, which cannot be restored
+ * into an empty database, so backup is not offered.
+ */
+export function canBackupDatabase(engine: string | undefined): boolean {
+  return engine === "postgres" || engine === "mysql" || engine === "mariadb";
+}
+
 export function useDatabaseBackup() {
   const rt = useConnectionRuntimeCtx();
   const [dbBackupRunning, setDbBackupRunning] = useState(false);
@@ -587,6 +604,13 @@ export function useDatabaseBackup() {
   const onBackupDatabase = useCallback(
     async (databaseName?: string) => {
       if (!rt.runtimeConnectionId) return;
+      if (!canBackupDatabase(rt.engine)) {
+        void showMessage(
+          "Database backup is available for PostgreSQL, MySQL and MariaDB.",
+          { title: "Backup database", kind: "info" }
+        );
+        return;
+      }
 
       setDbBackupRunning(true);
 
@@ -748,21 +772,32 @@ export function useDatabaseBackup() {
 
   const runSqlDumpImport = useCallback(
     async (
-      onRefresh?: () => void,
-      opts?: {
-        dialogTitle?: string;
-        successToast?: string;
-        /**
-         * Checked after the confirmation, right before anything runs (the
-         * tab may have been locked while the file was being chosen).
-         */
-        canRun?: () => boolean;
+      onRefresh: (() => void) | undefined,
+      opts: {
+        action: "restore" | "import";
+        dialogTitle: string;
+        successToast: string;
+        /** The tab whose safety mode applies; the active one by default. */
+        tabId?: string;
+        /** The database the dump goes into, named in the confirmation. */
+        database?: string;
       }
     ) => {
       if (!rt.runtimeConnectionId) return;
+      const { action } = opts;
+      const tabId = opts.tabId ?? rt.profileId;
+      const errorTitle =
+        action === "restore" ? "Restore error" : "Import error";
+
+      // Lock and Production refuse before a file is even chosen…
+      const early = dumpRunGate(tabSafetyModeNow(tabId), null, action);
+      if (early.kind === "blocked") {
+        void showMessage(early.message, { title: errorTitle, kind: "warning" });
+        return;
+      }
 
       const path = await openDialog({
-        title: opts?.dialogTitle ?? "Restore database from dump",
+        title: opts.dialogTitle,
         multiple: false,
         directory: false,
         filters: [
@@ -775,6 +810,7 @@ export function useDatabaseBackup() {
 
       setDbRestoreRunning(true);
 
+      let applied = 0;
       try {
         const fileBytes = await readFile(path);
         const unpacked = await unpackDumpBytes(fileBytes);
@@ -791,25 +827,58 @@ export function useDatabaseBackup() {
           }
         }
 
-        const statements = splitSqlStatements(sql);
+        const statements = splitSqlStatements(sql)
+          .map((statement) => statement.text.trim())
+          .filter(Boolean);
         if (!statements.length) {
           throw new Error("No SQL statements found in selected file.");
         }
 
-        const ok = window.confirm(
-          `This will execute ${statements.length} SQL statements on current database. Continue?`
+        const tab = useScreenStore
+          .getState()
+          .profileTabs.find((item) => item.id === tabId);
+        const target = [tab?.label, opts.database ? `(${opts.database})` : ""]
+          .filter(Boolean)
+          .join(" ");
+        const fileName = path.split(/[\\/]/).pop() || path;
+        const verb = action === "restore" ? "Restore" : "Import";
+        const ok = await confirmDialog(
+          `${verb} "${fileName}"${target ? ` into ${target}` : ""}?\n\nThis runs ${statements.length} SQL statement${statements.length === 1 ? "" : "s"} on the database. They do not run in a transaction and cannot be undone.`,
+          {
+            title: opts.dialogTitle,
+            kind: "warning",
+            okLabel: verb,
+            cancelLabel: "Cancel",
+          }
         );
         if (!ok) return;
-        if (opts?.canRun && !opts.canRun()) {
-          showToast("The tab is locked: nothing was imported.", {
-            tone: "info",
+
+        // …and everything is checked again right before running, on the
+        // statements themselves (the mode may have changed meanwhile).
+        const gate = dumpRunGate(tabSafetyModeNow(tabId), statements, action);
+        if (gate.kind === "blocked") {
+          void showMessage(gate.message, {
+            title: errorTitle,
+            kind: "warning",
           });
           return;
         }
+        if (gate.kind === "touch-id") {
+          try {
+            await securityTouchIdAuthenticate(gate.prompt);
+          } catch (err) {
+            const reason = err instanceof Error ? err.message : String(err);
+            void showMessage(
+              `Touch ID authentication failed, so nothing was run: ${reason}`,
+              { title: errorTitle, kind: "warning" }
+            );
+            return;
+          }
+        }
 
+        let skipped = 0;
         for (let i = 0; i < statements.length; i++) {
-          const statementSql = statements[i].text.trim();
-          if (!statementSql) continue;
+          const statementSql = statements[i]!;
 
           try {
             if (rt.engine === "postgres") {
@@ -821,13 +890,17 @@ export function useDatabaseBackup() {
                   table: parsed.table,
                   constraint: parsed.constraint,
                 });
-                if (exists) continue;
+                if (exists) {
+                  skipped++;
+                  continue;
+                }
               }
             }
 
             await runSqlQuery(rt.runtimeConnectionId, statementSql, {
               timeoutMs: 120_000,
             });
+            applied++;
           } catch (err) {
             if (
               rt.engine === "postgres" &&
@@ -835,43 +908,58 @@ export function useDatabaseBackup() {
             ) {
               // Keep restore progressing even if existing data violates FK
               // or FK already exists with incompatible shape.
+              skipped++;
               continue;
             }
 
             if (isIgnorableRestoreError(statementSql, err)) {
+              skipped++;
               continue;
             }
 
             const reason =
               err instanceof Error ? err.message : "Unknown restore error";
+            const before =
+              applied === 0
+                ? "Nothing before it had changed the database."
+                : applied === 1
+                  ? "The statement before it already ran and stays in the database."
+                  : `The ${applied} statements before it already ran and stay in the database.`;
             throw new Error(
-              `Restore failed at statement ${i + 1}/${statements.length}: ${reason}\nSQL: ${shortSql(statementSql)}`
+              `Stopped at statement ${i + 1} of ${statements.length}: ${reason}\n${before}\nSQL: ${shortSql(statementSql)}`
             );
           }
         }
 
         await rt.refreshSchemaAndTables();
         onRefresh?.();
-        showToast(opts?.successToast ?? "Database restore completed.", {
-          tone: "success",
-        });
+        if (skipped > 0) {
+          showToast(
+            `${opts.successToast} ${skipped} statement${skipped === 1 ? " was" : "s were"} skipped: objects that already existed or foreign keys the data did not allow.`,
+            { tone: "info" }
+          );
+        } else {
+          showToast(opts.successToast, { tone: "success" });
+        }
       } catch (err) {
         const message =
           err instanceof Error ? err.message : "SQL dump import failed.";
-        void showMessage(message, { title: "Restore error", kind: "error" });
+        void showMessage(message, { title: errorTitle, kind: "error" });
       } finally {
         setDbRestoreRunning(false);
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rt.runtimeConnectionId, rt.refreshSchemaAndTables]
+    [rt.runtimeConnectionId, rt.refreshSchemaAndTables, rt.profileId]
   );
 
   const onRestoreDatabase = useCallback(
-    async (onRefresh?: () => void) => {
+    async (onRefresh?: () => void, database?: string) => {
       await runSqlDumpImport(onRefresh, {
+        action: "restore",
         dialogTitle: "Restore database from dump",
-        successToast: "Database restore completed.",
+        successToast: "Database restored.",
+        database,
       });
     },
     [runSqlDumpImport]
@@ -879,11 +967,12 @@ export function useDatabaseBackup() {
 
   // Table-level SQL dump import, like database backup and restore, is free.
   const onImportSqlDump = useCallback(
-    async (onRefresh?: () => void, opts?: { canRun?: () => boolean }) => {
+    async (onRefresh?: () => void, opts?: { tabId?: string }) => {
       await runSqlDumpImport(onRefresh, {
+        action: "import",
         dialogTitle: "Import SQL dump",
         successToast: "SQL dump imported.",
-        canRun: opts?.canRun,
+        tabId: opts?.tabId,
       });
     },
     [runSqlDumpImport]
