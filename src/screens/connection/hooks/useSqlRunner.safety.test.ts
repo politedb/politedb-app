@@ -90,4 +90,17 @@ describe("the SQL editor splitting PostgreSQL text", () => {
     expect(sql.startsWith("SELECT E'a'")).toBe(true);
     expect(sql).toContain("DELETE FROM victim");
   });
+
+  it("never runs the text of an E-string continued after a vertical tab", async () => {
+    // The backend rejects the statement; nothing else may be dispatched.
+    mocks.validate.mockRejectedValueOnce(new Error("syntax error"));
+    const { onRunSql } = await run(
+      "SELECT E'a'\v\n'\\'; DELETE FROM victim; --';",
+      "postgres",
+      false
+    );
+    for (const call of onRunSql.mock.calls as unknown as [{ sql: string }][]) {
+      expect(call[0].sql.trimStart().startsWith("DELETE")).toBe(false);
+    }
+  });
 });

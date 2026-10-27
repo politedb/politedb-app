@@ -39,8 +39,11 @@ function scanPgDollarTag(sql: string, i: number) {
  * "--" comments): 'a'<newline>'b' is 'ab', read in the first part's
  * escape mode (E'…' or not).
  */
+// Vertical tab counts as whitespace on both sides of the newline
+// (PostgreSQL 17 non_newline_space); older versions reject it, which only
+// makes the whole statement fail.
 const PG_STRING_CONTINUATION =
-  /^(?:[ \t\f]|--[^\n\r]*)*[\n\r](?:[ \t\n\r\f\v]+|--[^\n\r]*[\n\r])*$/;
+  /^(?:[ \t\f\v]|--[^\n\r]*)*[\n\r](?:[ \t\n\r\f\v]+|--[^\n\r]*[\n\r])*$/;
 
 function scanDollarTag(sql: string, i: number) {
   // expects sql[i] === '$'

@@ -253,4 +253,20 @@ SELECT 2;`;
       "SELECT 2",
     ]);
   });
+
+  // Every PostgreSQL whitespace before and after the newline, every newline.
+  const before = ["", " ", "\t", "\f", "\v", " \v\t", " -- note"];
+  const newlines = ["\n", "\r", "\r\n"];
+  const after = ["", " ", "\t", "\f", "\v", "\n", "-- note\n "];
+  it.each(
+    before.flatMap((b) =>
+      newlines.flatMap((nl) => after.map((a) => [b, nl, a] as const))
+    )
+  )("continues an E-string across %j %j %j", (b, nl, a) => {
+    const sql = `SELECT E'a'${b}${nl}${a}'\\'; DELETE FROM victim; --'; SELECT 2;`;
+    const out = pg(sql);
+    expect(out).toHaveLength(2);
+    expect(out[0]).toContain("DELETE FROM victim");
+    expect(out[1]).toBe("SELECT 2");
+  });
 });
