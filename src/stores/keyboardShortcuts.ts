@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { CONNECTION_TAB_SHORTCUTS } from "src/lib/tabs/connectionTabShortcuts";
 
 export type ShortcutActionId =
   | "openSearch"
@@ -67,11 +68,22 @@ const DEFAULT_SHORTCUTS = SHORTCUT_DEFINITIONS.reduce((acc, item) => {
  * App-wide shortcuts handled outside this store (src/layout). They cannot be
  * assigned to an action, or one key press would run two things.
  */
-const RESERVED_SHORTCUTS: Record<string, string> = { "Mod+,": "Settings" };
+const RESERVED_SHORTCUTS: Record<string, string> = {
+  "Mod+,": "Settings",
+  ...CONNECTION_TAB_SHORTCUTS,
+};
+
+let reservedByBinding: Map<string, string> | null = null;
 
 /** What a reserved binding opens ("Settings"), or undefined when free. */
 export function reservedShortcutOwner(binding: string): string | undefined {
-  return RESERVED_SHORTCUTS[normalizeShortcutBinding(binding)];
+  reservedByBinding ??= new Map(
+    Object.entries(RESERVED_SHORTCUTS).map(([key, owner]) => [
+      normalizeShortcutBinding(key),
+      owner,
+    ])
+  );
+  return reservedByBinding.get(normalizeShortcutBinding(binding));
 }
 
 /** Whether a binding is the shortcut's built-in one (nothing to reset). */

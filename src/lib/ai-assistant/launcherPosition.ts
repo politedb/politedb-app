@@ -8,19 +8,21 @@ export const DEFAULT_LAUNCHER_POSITION: LauncherPosition = {
 
 /** Gap kept between the button and the window edges. */
 const EDGE = 8;
+/** The button never sits lower than this, so it stays clear of the status bar. */
+const MIN_BOTTOM = DEFAULT_LAUNCHER_POSITION.bottom;
 const STORAGE_KEY = "politedb.assistant-launcher-position.v1";
 
-/** Keeps the whole button inside a window of the given size. */
+/** Keeps the whole button inside a window of the given size, above the status bar. */
 export function clampLauncherPosition(
   position: LauncherPosition,
   viewport: { width: number; height: number },
   size: number
 ): LauncherPosition {
-  const clamp = (value: number, max: number) =>
-    Math.min(Math.max(value, EDGE), Math.max(EDGE, max - size - EDGE));
+  const clamp = (value: number, min: number, max: number) =>
+    Math.min(Math.max(value, min), Math.max(min, max - size - EDGE));
   return {
-    right: Math.round(clamp(position.right, viewport.width)),
-    bottom: Math.round(clamp(position.bottom, viewport.height)),
+    right: Math.round(clamp(position.right, EDGE, viewport.width)),
+    bottom: Math.round(clamp(position.bottom, MIN_BOTTOM, viewport.height)),
   };
 }
 

@@ -20,9 +20,10 @@ describe("app status bar model", () => {
     expect(model.right).toEqual(["PoliteDB v1.7.0"]);
   });
 
-  it("shows engine and query mode for a live connection", () => {
+  it("shows engine, name and query mode for a live connection", () => {
     const model = buildAppStatusBarModel({
       isConnectionTab: true,
+      label: "Local SQLite",
       engine: "sqlite",
       connected: true,
       querySafetyMode: "production",
@@ -32,7 +33,8 @@ describe("app status bar model", () => {
     });
 
     expect(model.dot).toBe("connected");
-    expect(model.left).toEqual(["Connected: SQLite", "Query mode: Production"]);
+    expect(model.left).toEqual(["Connected: SQLite", "Local SQLite"]);
+    expect(model.mode).toBe("production");
     expect(model.right).toEqual(["PoliteDB v1.7.0"]);
   });
 
@@ -48,6 +50,7 @@ describe("app status bar model", () => {
 
     expect(model.dot).toBe("connecting");
     expect(model.left).toEqual(["Connecting: Postgres"]);
+    expect(model.mode).toBeUndefined();
     expect(model.right).toEqual(["PoliteDB v1.7.0-dev"]);
   });
 });

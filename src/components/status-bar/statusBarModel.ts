@@ -8,6 +8,8 @@ export type AppStatusBarDot = "connected" | "connecting" | "idle";
 export type AppStatusBarModel = {
   dot: AppStatusBarDot;
   left: string[];
+  /** The live connection's query safety mode, shown as a badge. */
+  mode?: QuerySafetyMode;
   right: string[];
 };
 
@@ -30,6 +32,8 @@ export function formatAppVersionLabel(version: string, isDev: boolean): string {
 
 export function buildAppStatusBarModel(input: {
   isConnectionTab: boolean;
+  /** The connection tab's name. */
+  label?: string;
   engine?: DatabaseEngine;
   connected: boolean;
   querySafetyMode?: QuerySafetyMode;
@@ -57,9 +61,7 @@ export function buildAppStatusBarModel(input: {
   }
 
   const left = [`Connected: ${engineLabel}`];
-  if (input.querySafetyMode) {
-    left.push(querySafetyStatusLabel(input.querySafetyMode));
-  }
+  if (input.label) left.push(input.label);
 
-  return { dot: "connected", left, right };
+  return { dot: "connected", left, mode: input.querySafetyMode, right };
 }
