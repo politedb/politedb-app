@@ -134,10 +134,37 @@ function isIgnorableRestoreError(sql: string, err: unknown): boolean {
   );
 }
 
-function shortSql(sql: string, max = 2_000): string {
-  const s = sql.replace(/\s+/g, " ").trim();
-  if (s.length <= max) return s;
-  return `${s.slice(0, max)}…`;
+function clip(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max).trimEnd()}…`;
+}
+
+/**
+ * A failed statement for the stop dialog: what it was, not its data. Leading
+ * "-- …" section comments are dropped and INSERT values cut off, so a
+ * statement of thousands of rows stays one line.
+ */
+export function restoreStatementLabel(sql: string, max = 160): string {
+  const head = sql
+    .replace(/^(?:\s*--[^\n]*(?:\n|$))+/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const values = /^INSERT\b.*?\)\s*VALUES\b/i.exec(head);
+  return clip(values ? `${values[0]} …` : head, max);
+}
+
+/**
+ * A server error for the stop dialog: its first lines (message, DETAIL,
+ * HINT), each kept short, so a "Failing row contains (…)" detail or a long
+ * message cannot push the dialog past the screen.
+ */
+export function restoreErrorSummary(message: string): string {
+  const lines = message
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const kept = lines.slice(0, 3).map((line) => clip(line, 240));
+  if (lines.length > kept.length) kept.push("…");
+  return kept.join("\n") || "Unknown restore error";
 }
 
 function parsePgAlterAddConstraint(sql: string): {
@@ -1312,10 +1339,11 @@ export function useDatabaseBackup() {
               continue;
             }
 
-            const reason =
-              err instanceof Error ? err.message : "Unknown restore error";
+            const reason = restoreErrorSummary(
+              err instanceof Error ? err.message : ""
+            );
             throw new Error(
-              `Stopped at statement ${i + 1} of ${statements.length}: ${reason}\n${describeApplied()}\nSQL: ${shortSql(statementSql)}`
+              `Stopped at statement ${i + 1} of ${statements.length}: ${reason}\n\n${describeApplied()}\n\nStatement: ${restoreStatementLabel(statementSql)}`
             );
           }
         }

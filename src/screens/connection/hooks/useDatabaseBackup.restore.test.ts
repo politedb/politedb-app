@@ -51,7 +51,12 @@ vi.mock("../workspace/ConnectionRuntimeContext", () => ({
   }),
 }));
 
-import { canBackupDatabase, useDatabaseBackup } from "./useDatabaseBackup";
+import {
+  canBackupDatabase,
+  restoreErrorSummary,
+  restoreStatementLabel,
+  useDatabaseBackup,
+} from "./useDatabaseBackup";
 
 const DUMP =
   "CREATE TABLE a (id int);\nINSERT INTO a VALUES (1);\nINSERT INTO a VALUES (2);";
@@ -202,6 +207,31 @@ INSERT INTO "public"."t" ("a","b") VALUES ('x', 'y');`,
     expect(ran[0]).toContain(";DROP TABLE victim;--')");
   });
 
+  it("keeps the stop message short: no row data, no long details", async () => {
+    const rows = Array.from(
+      { length: 200 },
+      (_, i) => `('id-${i}', 'Customer ${i}', NULL)`
+    ).join(", ");
+    m.unpack.mockResolvedValue({
+      sql: `-- Data public.products\n-- Data public.users\nINSERT INTO "public"."users" ("id", "name", "role") VALUES ${rows};`,
+      engine: "postgres",
+    });
+    m.runSqlQuery.mockRejectedValueOnce(
+      new Error(
+        `null value in column "role" violates not-null constraint\nDETAIL: Failing row contains (${"x, ".repeat(300)}).\nHINT: check\nCONTEXT: more`
+      )
+    );
+    await restore();
+    const [message] = m.showMessage.mock.calls[0]!;
+    expect(message).toContain(
+      'Statement: INSERT INTO "public"."users" ("id", "name", "role") VALUES …'
+    );
+    expect(message).not.toContain("Customer 1");
+    expect(message).not.toContain("-- Data");
+    expect(message).not.toContain("CONTEXT");
+    expect(message.length).toBeLessThan(1_000);
+  });
+
   it("says what already ran when it stops partway", async () => {
     m.runSqlQuery
       .mockResolvedValueOnce({})
@@ -307,5 +337,27 @@ describe("a stop before anything ran", () => {
     await restore(onRefresh);
     expect(m.refresh).not.toHaveBeenCalled();
     expect(onRefresh).not.toHaveBeenCalled();
+  });
+});
+
+describe("stop message parts", () => {
+  it("labels a statement by its head", () => {
+    expect(
+      restoreStatementLabel("-- Structure public.a\nCREATE TABLE a (id int)")
+    ).toBe("CREATE TABLE a (id int)");
+    expect(restoreStatementLabel("x".repeat(500)).length).toBeLessThanOrEqual(
+      161
+    );
+    expect(restoreStatementLabel("INSERT INTO t VALUES (1)")).toBe(
+      "INSERT INTO t VALUES (1)"
+    );
+  });
+
+  it("keeps an error's first three lines, each short", () => {
+    expect(restoreErrorSummary("a\nb\nc\nd")).toBe("a\nb\nc\n…");
+    expect(restoreErrorSummary("y".repeat(1_000)).length).toBeLessThanOrEqual(
+      241
+    );
+    expect(restoreErrorSummary("")).toBe("Unknown restore error");
   });
 });
