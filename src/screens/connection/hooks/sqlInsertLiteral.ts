@@ -1,5 +1,13 @@
 /** SQL literal helpers for database backup INSERT statements. */
 
+import {
+  isPostgresArrayType,
+  pgArrayCastType,
+  pgArrayValueSql,
+} from "src/lib/sql/pgArrayLiteral";
+
+export { isPostgresArrayType, pgArrayCastType };
+
 /**
  * Quote a string as an SQL literal.
  * Postgres: a value with a backslash is written as an E'…' string with the
@@ -20,56 +28,26 @@ export function sqlQuoteString(value: string, engine?: string): string {
   return `'${value.replace(/\\/g, "\\\\").replace(/'/g, "''")}'`;
 }
 
-export function isPostgresArrayType(dbType: string): boolean {
-  const t = (dbType ?? "").toLowerCase().trim();
-  if (!t) return false;
-  return t.startsWith("_") || t.endsWith("[]");
-}
-
 export function isPostgresJsonType(dbType: string): boolean {
   const t = (dbType ?? "").toLowerCase().trim();
   return t === "json" || t === "jsonb";
 }
 
-/** Map Postgres type name (`_text`, `text[]`) to a cast target like `text[]`. */
-export function pgArrayCastType(dbType: string): string {
-  const t = (dbType ?? "").toLowerCase().trim();
-  if (!t) return "text[]";
-  if (t.endsWith("[]")) return t;
-  if (t.startsWith("_")) return `${t.slice(1)}[]`;
-  return "text[]";
-}
-
 /**
  * Convert a JSON array string (how PoliteDB stores PG arrays in CellValue::Json)
- * into `ARRAY[...]::elem[]` SQL that Postgres accepts on restore.
+ * into SQL that Postgres accepts on restore: ARRAY[...]::elem[] for built-in
+ * element types, an array literal typed by the column for others (enums).
  */
 export function jsonArrayToPgArraySql(
   jsonText: string,
   dbType: string,
   engine = "postgres"
 ): string {
-  const cast = pgArrayCastType(dbType);
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(jsonText);
-  } catch {
-    return `${sqlQuoteString(jsonText, engine)}::${cast}`;
-  }
-
-  if (!Array.isArray(parsed)) {
-    return `${sqlQuoteString(jsonText, engine)}::${cast}`;
-  }
-
-  const elems = parsed.map((item) => {
-    if (item === null) return "NULL";
-    if (typeof item === "boolean") return item ? "TRUE" : "FALSE";
-    if (typeof item === "number" && Number.isFinite(item)) return String(item);
-    if (typeof item === "string") return sqlQuoteString(item, engine);
-    return sqlQuoteString(JSON.stringify(item), engine);
-  });
-
-  return `ARRAY[${elems.join(", ")}]::${cast}`;
+  const quote = (text: string) => sqlQuoteString(text, engine);
+  return (
+    pgArrayValueSql(jsonText, dbType, quote) ??
+    `${quote(jsonText)}::${pgArrayCastType(dbType)}`
+  );
 }
 
 type CellObj = { t?: string; v?: unknown };
