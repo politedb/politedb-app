@@ -435,6 +435,9 @@ type PgTypeRow = {
   extensionSchema: string;
   /** Domains: sequences their default uses, as JSON [{schema, name}]. */
   sequences: string;
+  /** Set when an extension owns the domain's collation. */
+  collationExtension: string;
+  collationExtensionSchema: string;
 };
 
 /** CREATE COLLATION for a collation's catalog row (any PostgreSQL 13+). */
@@ -452,7 +455,13 @@ function createCollationSql(
   const text = (key: string) =>
     typeof def[key] === "string" && def[key] ? (def[key] as string) : "";
   const options: string[] = [];
-  if (def.collprovider === "i") {
+  if (def.collprovider === "b") {
+    // PostgreSQL 17's builtin provider.
+    options.push(
+      "provider = builtin",
+      `locale = ${qLiteral(text("colllocale"))}`
+    );
+  } else if (def.collprovider === "i") {
     // The ICU locale moved: collcollate (≤14), colliculocale (15–16),
     // colllocale (17+).
     const locale =
@@ -461,11 +470,16 @@ function createCollationSql(
     if (text("collicurules")) {
       options.push(`rules = ${qLiteral(text("collicurules"))}`);
     }
-  } else {
+  } else if (def.collprovider === "c") {
     options.push(
       "provider = libc",
       `lc_collate = ${qLiteral(text("collcollate"))}`,
       `lc_ctype = ${qLiteral(text("collctype"))}`
+    );
+  } else {
+    // Never reinterpret a provider as another: say so instead.
+    throw new Error(
+      `The collation ${schema}.${name} uses a provider backups cannot recreate (${String(def.collprovider)}).`
     );
   }
   if (def.collisdeterministic === false) options.push("deterministic = false");
@@ -554,7 +568,22 @@ export async function buildPostgresTypesSql(args: {
         JOIN pg_namespace sn ON sn.oid = sq.relnamespace
         WHERE d.classid = 'pg_type'::regclass
           AND d.objid = t.oid
-          AND d.refclassid = 'pg_class'::regclass)
+          AND d.refclassid = 'pg_class'::regclass),
+      (SELECT ce.extname
+        FROM pg_depend cd
+        JOIN pg_extension ce ON ce.oid = cd.refobjid
+        WHERE cd.classid = 'pg_collation'::regclass
+          AND cd.objid = co.oid
+          AND cd.refclassid = 'pg_extension'::regclass
+          AND cd.deptype = 'e'),
+      (SELECT cen.nspname
+        FROM pg_depend cd
+        JOIN pg_extension ce ON ce.oid = cd.refobjid
+        JOIN pg_namespace cen ON cen.oid = ce.extnamespace
+        WHERE cd.classid = 'pg_collation'::regclass
+          AND cd.objid = co.oid
+          AND cd.refclassid = 'pg_extension'::regclass
+          AND cd.deptype = 'e')
     FROM (SELECT DISTINCT type_oid FROM walk) w
     JOIN pg_type t ON t.oid = w.type_oid
     JOIN pg_namespace n ON n.oid = t.typnamespace
@@ -590,6 +619,8 @@ export async function buildPostgresTypesSql(args: {
     extension: cellToString(r?.[14], true) ?? "",
     extensionSchema: cellToString(r?.[15], true) ?? "",
     sequences: cellToString(r?.[16], true) ?? "",
+    collationExtension: cellToString(r?.[17], true) ?? "",
+    collationExtensionSchema: cellToString(r?.[18], true) ?? "",
   }));
 
   const schemas = new Set(
@@ -655,7 +686,11 @@ export async function buildPostgresTypesSql(args: {
         )
       );
     }
-    if (row.collationDef && row.collationSchema && row.collationName) {
+    if (row.collationExtension) {
+      // An extension's collation comes with the extension.
+      extensions.set(row.collationExtension, row.collationExtensionSchema);
+      addSchema(row.collationExtensionSchema);
+    } else if (row.collationDef && row.collationSchema && row.collationName) {
       addSchema(row.collationSchema);
       collations.set(
         ident(row.collationSchema, row.collationName),

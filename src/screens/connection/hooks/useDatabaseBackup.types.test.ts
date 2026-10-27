@@ -30,6 +30,8 @@ function row(p: {
   extension?: string;
   extensionSchema?: string;
   sequences?: string;
+  collationExtension?: string;
+  collationExtensionSchema?: string;
 }) {
   return [
     p.oid,
@@ -49,6 +51,8 @@ function row(p: {
     p.extension ?? null,
     p.extensionSchema ?? null,
     p.sequences ?? null,
+    p.collationExtension ?? null,
+    p.collationExtensionSchema ?? null,
   ];
 }
 
@@ -186,6 +190,11 @@ describe("buildPostgresTypesSql", () => {
       `(provider = icu, locale = 'de-DE')`,
     ],
     [
+      "a builtin collation (PostgreSQL 17)",
+      { collprovider: "b", colllocale: "C.UTF-8", collisdeterministic: true },
+      `(provider = builtin, locale = 'C.UTF-8')`,
+    ],
+    [
       "a libc collation",
       {
         collprovider: "c",
@@ -213,6 +222,48 @@ describe("buildPostgresTypesSql", () => {
         'CREATE SCHEMA IF NOT EXISTS "custom";',
         `CREATE COLLATION IF NOT EXISTS "custom"."ordering" ${options};`,
         'CREATE DOMAIN "public"."code" AS text COLLATE "custom"."ordering";',
+        "",
+      ].join("\n")
+    );
+  });
+
+  it("refuses a collation provider it cannot recreate", async () => {
+    await expect(
+      build([
+        row({
+          oid: "13",
+          name: "code",
+          kind: "d",
+          baseSql: "text",
+          collation: '"custom"."odd"',
+          collationDef: JSON.stringify({ collprovider: "x" }),
+          collationSchema: "custom",
+          collationName: "odd",
+        }),
+      ])
+    ).rejects.toThrow("custom.odd uses a provider backups cannot recreate");
+  });
+
+  it("installs the extension owning a domain's collation instead of copying it", async () => {
+    const sql = await build([
+      row({
+        oid: "14",
+        name: "code",
+        kind: "d",
+        baseSql: "text",
+        collation: '"ext"."nice"',
+        collationDef: JSON.stringify({ collprovider: "i", colllocale: "und" }),
+        collationSchema: "ext",
+        collationName: "nice",
+        collationExtension: "nicecoll",
+        collationExtensionSchema: "ext",
+      }),
+    ]);
+    expect(sql).toBe(
+      [
+        'CREATE SCHEMA IF NOT EXISTS "ext";',
+        'CREATE EXTENSION IF NOT EXISTS "nicecoll" WITH SCHEMA "ext";',
+        'CREATE DOMAIN "public"."code" AS text COLLATE "ext"."nice";',
         "",
       ].join("\n")
     );
