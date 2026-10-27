@@ -153,7 +153,20 @@ describe("isMutatingStatement for a known engine", () => {
     }
   );
 
-  it("reads other or unknown engines both ways, erring towards a write", () => {
+  it.each(["sqlite", "oracle", "d1", "turso", "sqlserver", undefined])(
+    "catches a write hidden by comments a standard engine reads differently (%s)",
+    (engine) => {
+      // "--x" is a comment; "/* /* */" closes at the first "*/".
+      expect(isMutatingStatement("--x\n/* /* */ DELETE FROM t", engine)).toBe(
+        true
+      );
+      expect(isMutatingStatement("--x\n/* /* */ DROP TABLE t", engine)).toBe(
+        true
+      );
+    }
+  );
+
+  it("reads other or unknown engines every way, erring towards a write", () => {
     expect(isMutatingStatement("SELECT 1 # note INTO backup\n;")).toBe(true);
     expect(
       isMutatingStatement("SELECT 1 # note INTO backup\n;", "sqlite")

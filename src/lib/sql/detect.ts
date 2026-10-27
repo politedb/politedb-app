@@ -81,7 +81,48 @@ const GLOBAL_SETTING_RE = new RegExp(
 const DML_KEYWORD_RE = keywordRe("INSERT|UPDATE|DELETE|MERGE");
 const INTO_RE = keywordRe("INTO");
 
-type Dialect = "postgres" | "mysql";
+type Dialect = "postgres" | "mysql" | "standard";
+
+/** How a dialect writes comments and quotes. */
+const DIALECT_RULES: Record<
+  Dialect,
+  {
+    /** Block comments nest. */
+    nestedComments: boolean;
+    /** "--" starts a comment even without whitespace after it. */
+    dashCommentAnywhere: boolean;
+    /** "#" starts a line comment. */
+    hashComments: boolean;
+    /** $tag$…$tag$ quotes text; E'…' strings take backslash escapes. */
+    postgresQuotes: boolean;
+    /** With backslash escapes on, they apply to "…" as well as '…'. */
+    escapesDoubleQuoted: boolean;
+  }
+> = {
+  postgres: {
+    nestedComments: true,
+    dashCommentAnywhere: true,
+    hashComments: false,
+    postgresQuotes: true,
+    escapesDoubleQuoted: false,
+  },
+  mysql: {
+    nestedComments: false,
+    dashCommentAnywhere: false,
+    hashComments: true,
+    postgresQuotes: false,
+    escapesDoubleQuoted: true,
+  },
+  // SQLite, D1, Turso, Oracle and other engines: "--" always comments,
+  // block comments do not nest, "#" is not a comment.
+  standard: {
+    nestedComments: false,
+    dashCommentAnywhere: true,
+    hashComments: false,
+    postgresQuotes: false,
+    escapesDoubleQuoted: false,
+  },
+};
 
 /**
  * The statement's executable text as one dialect reads it: quoted strings
@@ -96,6 +137,8 @@ type Dialect = "postgres" | "mysql";
  * - mysql: block comments do not nest, "#" starts a comment, "--" only
  *   when followed by whitespace; a backslash escapes in '…' and "…" unless
  *   the session's sql_mode has NO_BACKSLASH_ESCAPES.
+ * - standard (SQLite, D1, Turso, Oracle…): block comments do not nest,
+ *   "--" always starts a comment, "#" is not one.
  *
  * Whether a backslash escapes depends on the session, which is not known
  * here, so `backslashEscapes` selects one of the two readings.
@@ -105,7 +148,7 @@ function executableText(
   dialect: Dialect,
   backslashEscapes: boolean
 ): string | null {
-  const pg = dialect === "postgres";
+  const rules = DIALECT_RULES[dialect];
   const len = s.length;
   let out = "";
   let i = 0;
@@ -115,11 +158,14 @@ function executableText(
   };
   while (i < len) {
     const c = s[i]!;
-    if (s.startsWith("--", i) && (pg || i + 2 >= len || /\s/.test(s[i + 2]!))) {
+    if (
+      s.startsWith("--", i) &&
+      (rules.dashCommentAnywhere || i + 2 >= len || /\s/.test(s[i + 2]!))
+    ) {
       lineComment();
       continue;
     }
-    if (c === "#" && !pg) {
+    if (c === "#" && rules.hashComments) {
       lineComment();
       continue;
     }
@@ -128,7 +174,7 @@ function executableText(
       i += 2;
       let depth = 1;
       while (i < len && depth > 0) {
-        if (pg && s.startsWith("/*", i)) {
+        if (rules.nestedComments && s.startsWith("/*", i)) {
           depth++;
           i += 2;
         } else if (s.startsWith("*/", i)) {
@@ -143,12 +189,15 @@ function executableText(
     }
     if (c === "'" || c === '"' || c === "`") {
       // PostgreSQL E'…' (e'…') strings always take backslash escapes.
-      const escapes = pg
-        ? c === "'" &&
-          (backslashEscapes ||
-            (/[eE]/.test(s[i - 1] ?? "") &&
-              !/[\p{L}\p{N}_$]/u.test(s[i - 2] ?? "")))
-        : backslashEscapes && c !== "`";
+      const escapes =
+        c === "`"
+          ? false
+          : c === '"'
+            ? backslashEscapes && rules.escapesDoubleQuoted
+            : backslashEscapes ||
+              (rules.postgresQuotes &&
+                /[eE]/.test(s[i - 1] ?? "") &&
+                !/[\p{L}\p{N}_$]/u.test(s[i - 2] ?? ""));
       i++;
       while (i < len) {
         if (escapes && s[i] === "\\") {
@@ -169,7 +218,11 @@ function executableText(
       out += " ";
       continue;
     }
-    if (pg && c === "$" && !/[\p{L}\p{N}_$]/u.test(s[i - 1] ?? "")) {
+    if (
+      rules.postgresQuotes &&
+      c === "$" &&
+      !/[\p{L}\p{N}_$]/u.test(s[i - 1] ?? "")
+    ) {
       const tag = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(s.slice(i))?.[0];
       if (tag) {
         const end = s.indexOf(tag, i + tag.length);
@@ -227,13 +280,13 @@ function codeIsWrite(code: string): boolean {
 
 /**
  * How to read a statement for an engine: by its own dialect when it is
- * PostgreSQL or MySQL/MariaDB, else (other or unknown engines) both ways,
- * counting a write seen by either.
+ * PostgreSQL or MySQL/MariaDB, else (other or unknown engines) every way,
+ * counting a write seen by any.
  */
 function dialectsFor(engine?: string): readonly Dialect[] {
   if (engine === "postgres") return ["postgres"];
   if (engine === "mysql" || engine === "mariadb") return ["mysql"];
-  return ["postgres", "mysql"];
+  return ["postgres", "mysql", "standard"];
 }
 
 /**
