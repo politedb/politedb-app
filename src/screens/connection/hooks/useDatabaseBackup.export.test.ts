@@ -5,6 +5,7 @@ const m = vi.hoisted(() => ({
   startSqlQueryStream: vi.fn(),
   subscribe: vi.fn(),
   cancel: vi.fn(),
+  unsubscribe: vi.fn(),
 }));
 vi.mock("src/lib/tauri/query", () => ({
   startSqlQueryStream: m.startSqlQueryStream,
@@ -47,6 +48,7 @@ beforeEach(() => {
 function exportWith(drive: (h: Handlers) => void) {
   m.subscribe.mockImplementation(async (_opId: string, h: Handlers) => {
     queueMicrotask(() => drive(h));
+    return m.unsubscribe;
   });
   const parts: string[] = [];
   const done = exportTableToSqlParts({
@@ -75,16 +77,21 @@ describe("exportTableToSqlParts", () => {
     });
     await done;
     expect(parts.join("")).toContain("::numeric[]");
+    await vi.waitFor(() => expect(m.unsubscribe).toHaveBeenCalled());
   });
 
   it("fails, and stops the stream, when a chunk cannot be written", async () => {
     const { done, parts } = exportWith((h) => {
       // Rows that do not match their column list cannot be written.
       h.onChunk({ rows: "not rows" as never, columns: [] });
+      // Late chunks after the failure are not kept.
+      h.onChunk(chunk("{1.25}"));
       h.onDone();
     });
     await expect(done).rejects.toBeTruthy();
+    expect(m.cancel).toHaveBeenCalledTimes(1);
     expect(m.cancel).toHaveBeenCalledWith("op1");
     expect(parts.join("")).not.toContain("INSERT");
+    await vi.waitFor(() => expect(m.unsubscribe).toHaveBeenCalled());
   });
 });

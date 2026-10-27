@@ -547,6 +547,8 @@ export async function exportTableToSqlParts(args: {
   schema: string;
   tableName: string;
   columns: string[];
+  /** PostgreSQL: the table has a GENERATED ALWAYS identity column. */
+  overridingSystemValue?: boolean;
 }) {
   const { append, connectionId, engine, schema, tableName, columns } = args;
 
@@ -568,15 +570,25 @@ export async function exportTableToSqlParts(args: {
     let columnNames = columns;
     let columnTypes: string[] = columns.map(() => "");
 
+    // Set once subscribed; a failure may come first (replayed chunks).
+    let unsubscribe: (() => void) | null = null;
+    let stopListening = false;
+    const stop = () => {
+      stopListening = true;
+      unsubscribe?.();
+    };
+
     const done = () => {
       if (completed) return;
       completed = true;
+      stop();
       resolve();
     };
 
     const fail = (err: unknown) => {
       if (completed) return;
       completed = true;
+      stop();
       reject(err);
     };
 
@@ -610,30 +622,38 @@ export async function exportTableToSqlParts(args: {
         columnTypes,
         rows,
         qIdent: (name, eng) => qIdent(name, eng as any),
+        overridingSystemValue: args.overridingSystemValue,
       });
       if (!content) return;
       append(content);
     };
 
-    void operationBus.subscribe(opId, {
-      onChunk: (chunk) => {
-        // A chunk that cannot be written fails the backup: finishing
-        // without it would save a file missing those rows.
-        try {
-          appendChunk(chunk);
-        } catch (err) {
-          fail(err);
-          // Stop the stream too: it would wait for this chunk's ack.
-          void operationCancel(opId).catch(() => {});
-        }
-      },
-      onDone: () => done(),
-      onError: (err) => {
-        fail(
-          typeof err === "string" ? new Error(err) : (err ?? "EXPORT_FAILED")
-        );
-      },
-    });
+    void operationBus
+      .subscribe(opId, {
+        onChunk: (chunk) => {
+          // Nothing more is kept once the export has failed.
+          if (completed) return;
+          // A chunk that cannot be written fails the backup: finishing
+          // without it would save a file missing those rows. The rows
+          // still coming are not needed, so the query is cancelled.
+          try {
+            appendChunk(chunk);
+          } catch (err) {
+            fail(err);
+            void operationCancel(opId).catch(() => {});
+          }
+        },
+        onDone: () => done(),
+        onError: (err) => {
+          fail(
+            typeof err === "string" ? new Error(err) : (err ?? "EXPORT_FAILED")
+          );
+        },
+      })
+      .then((off) => {
+        unsubscribe = off;
+        if (stopListening) off();
+      });
   });
 }
 
@@ -973,12 +993,30 @@ export async function buildPostgresTypesSql(args: {
   return `${schemasSql}${extensionsSql}${collationsSql}${sequencesSql}${enumsSql}${domainsSql}`;
 }
 
-async function buildPostgresTableStructure(args: {
+type PostgresTableStructure = {
+  preDataSql: string;
+  postDataSql: string;
+  /** Stored generated columns: computed on restore, so not inserted. */
+  generatedColumns: string[];
+  /** A GENERATED ALWAYS identity column: inserts override it. */
+  identityAlways: boolean;
+  /** setval for owned sequences, run after the rows are restored. */
+  sequenceValuesSql: string;
+};
+
+export async function buildPostgresTableStructure(args: {
   connectionId: string;
   schema: string;
   tableName: string;
-}): Promise<{ preDataSql: string; postDataSql: string }> {
+}): Promise<PostgresTableStructure> {
   const { connectionId, schema, tableName } = args;
+  const empty: PostgresTableStructure = {
+    preDataSql: "",
+    postDataSql: "",
+    generatedColumns: [],
+    identityAlways: false,
+    sequenceValuesSql: "",
+  };
 
   const oidRes = await runSqlQuery(
     connectionId,
@@ -993,9 +1031,7 @@ async function buildPostgresTableStructure(args: {
   );
 
   const oid = Number(cellToString(oidRes.rows?.[0]?.[0], true));
-  if (!Number.isFinite(oid) || oid <= 0) {
-    return { preDataSql: "", postDataSql: "" };
-  }
+  if (!Number.isFinite(oid) || oid <= 0) return empty;
 
   const colsRes = await runSqlQuery(
     connectionId,
@@ -1004,7 +1040,9 @@ async function buildPostgresTableStructure(args: {
         a.attname,
         pg_catalog.format_type(a.atttypid, a.atttypmod) AS data_type,
         a.attnotnull,
-        pg_get_expr(d.adbin, d.adrelid) AS default_expr
+        pg_get_expr(d.adbin, d.adrelid) AS default_expr,
+        a.attidentity::text,
+        a.attgenerated::text
       FROM pg_attribute a
       LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
       WHERE a.attrelid = ${oid}
@@ -1014,22 +1052,37 @@ async function buildPostgresTableStructure(args: {
     `
   );
 
+  const generatedColumns: string[] = [];
+  const identityColumns: string[] = [];
+  let identityAlways = false;
   const columns = (colsRes.rows ?? [])
     .map((r: any) => {
       const name = cellToString(r?.[0]) ?? "";
       const dataType = cellToString(r?.[1]) ?? "";
       const notNull = cellToBool(r?.[2]);
-      const defaultExpr = normalizePostgresDefaultExpr(
-        cellToString(r?.[3], true) ?? ""
-      );
+      const expr = cellToString(r?.[3], true) ?? "";
+      const identity = cellToString(r?.[4], true) ?? "";
+      const generated = cellToString(r?.[5], true) ?? "";
       if (!name || !dataType) return "";
-      return `  ${qIdent(name, "postgres")} ${dataType}${defaultExpr ? ` DEFAULT ${defaultExpr}` : ""}${notNull ? " NOT NULL" : ""}`;
+      const col = `  ${qIdent(name, "postgres")} ${dataType}`;
+      const nn = notNull ? " NOT NULL" : "";
+      // A stored generated column: computed again on restore, never inserted.
+      if (generated === "s") {
+        generatedColumns.push(name);
+        return `${col} GENERATED ALWAYS AS (${expr}) STORED${nn}`;
+      }
+      // An identity column: its sequence is created with it.
+      if (identity === "a" || identity === "d") {
+        identityColumns.push(name);
+        if (identity === "a") identityAlways = true;
+        return `${col} GENERATED ${identity === "a" ? "ALWAYS" : "BY DEFAULT"} AS IDENTITY${nn}`;
+      }
+      const defaultExpr = normalizePostgresDefaultExpr(expr);
+      return `${col}${defaultExpr ? ` DEFAULT ${defaultExpr}` : ""}${nn}`;
     })
     .filter(Boolean);
 
-  if (columns.length === 0) {
-    return { preDataSql: "", postDataSql: "" };
-  }
+  if (columns.length === 0) return empty;
 
   const tableIdent = `${qIdent(schema, "postgres")}.${qIdent(tableName, "postgres")}`;
   const createTableSql =
@@ -1080,6 +1133,38 @@ async function buildPostgresTableStructure(args: {
   }
 
   let preDataSql = `${sequenceCreateSql}${createTableSql}${sequenceOwnedBySql}`;
+
+  // Where each owned sequence (serial or identity) stands, set again after
+  // the rows are restored; otherwise it starts over and the next insert
+  // collides with a restored key. The restored sequence is found by its
+  // column, since an identity sequence's name may differ there.
+  const ownedColumns = new Set(identityColumns);
+  for (const row of seqRes.rows ?? []) {
+    const col = cellToString(row?.[2]) ?? "";
+    if (col) ownedColumns.add(col);
+  }
+  let sequenceValuesSql = "";
+  for (const col of ownedColumns) {
+    const sequenceFor = `pg_get_serial_sequence(${qLiteral(tableIdent)}, ${qLiteral(col)})`;
+    try {
+      const nameRes = await runSqlQuery(connectionId, `SELECT ${sequenceFor};`);
+      // Already a quoted, schema-qualified name.
+      const seq = cellToString(nameRes.rows?.[0]?.[0], true) ?? "";
+      if (!seq) continue;
+      const res = await runSqlQuery(
+        connectionId,
+        `SELECT last_value::text, is_called FROM ${seq};`
+      );
+      const last = cellToString(res.rows?.[0]?.[0], true) ?? "";
+      if (!/^-?\d+$/.test(last)) continue;
+      const isCalled = cellToBool(res.rows?.[0]?.[1]);
+      sequenceValuesSql += ensureSqlEndsWithSemicolon(
+        `SELECT pg_catalog.setval(${sequenceFor}, ${last}, ${isCalled ? "true" : "false"})`
+      );
+    } catch {
+      // Not readable (privileges): the sequence restarts from its start.
+    }
+  }
 
   const constraintsRes = await runSqlQuery(
     connectionId,
@@ -1136,7 +1221,13 @@ async function buildPostgresTableStructure(args: {
     postDataSql += ensureSqlEndsWithSemicolon(idxDef);
   }
 
-  return { preDataSql, postDataSql };
+  return {
+    preDataSql,
+    postDataSql,
+    generatedColumns,
+    identityAlways,
+    sequenceValuesSql,
+  };
 }
 
 async function buildMysqlTableStructure(args: {
@@ -1233,6 +1324,7 @@ export function useDatabaseBackup() {
         const postDataSqlChunks: string[] = [];
         const preDataByTable = new Map<string, string>();
         const columnsByTable = new Map<string, string[]>();
+        const identityAlwaysTables = new Set<string>();
 
         if (rt.engine === "mysql" || rt.engine === "mariadb") {
           appendSql("\nSET FOREIGN_KEY_CHECKS = 0;\n");
@@ -1241,6 +1333,7 @@ export function useDatabaseBackup() {
         for (const table of orderedTables) {
           let structureSql = "";
           let postDataSql = "";
+          let generatedColumns: string[] = [];
 
           if (rt.engine === "postgres") {
             const pgStruct = await buildPostgresTableStructure({
@@ -1249,7 +1342,12 @@ export function useDatabaseBackup() {
               tableName: table.name,
             });
             structureSql = pgStruct.preDataSql;
-            postDataSql = pgStruct.postDataSql;
+            // Sequences are set after every table's rows, with the rest.
+            postDataSql = pgStruct.postDataSql + pgStruct.sequenceValuesSql;
+            generatedColumns = pgStruct.generatedColumns;
+            if (pgStruct.identityAlways) {
+              identityAlwaysTables.add(`${table.schema}.${table.name}`);
+            }
           } else if (rt.engine === "mysql" || rt.engine === "mariadb") {
             structureSql = await buildMysqlTableStructure({
               connectionId: rt.runtimeConnectionId,
@@ -1281,6 +1379,8 @@ export function useDatabaseBackup() {
               .filter(Boolean);
           }
 
+          // Generated columns are computed again on restore.
+          columns = columns.filter((c) => !generatedColumns.includes(c));
           if (!columns.length) continue;
           columnsByTable.set(key, columns);
         }
@@ -1319,6 +1419,7 @@ export function useDatabaseBackup() {
             schema: table.schema,
             tableName: table.name,
             columns,
+            overridingSystemValue: identityAlwaysTables.has(key),
           });
         }
 

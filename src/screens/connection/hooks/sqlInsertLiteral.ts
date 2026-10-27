@@ -153,6 +153,11 @@ export function formatSqlInsertChunk(args: {
   columnTypes?: string[];
   rows: unknown[][];
   qIdent: (name: string, engine?: any) => string;
+  /**
+   * PostgreSQL: the table has a GENERATED ALWAYS identity column, whose
+   * backed-up values are inserted as they were.
+   */
+  overridingSystemValue?: boolean;
 }): string {
   const {
     engine,
@@ -162,6 +167,7 @@ export function formatSqlInsertChunk(args: {
     columnTypes = [],
     rows,
     qIdent,
+    overridingSystemValue,
   } = args;
   if (!rows.length) return "";
 
@@ -179,5 +185,6 @@ export function formatSqlInsertChunk(args: {
     })
     .join(",\n");
 
-  return `INSERT INTO ${tableIdent} (${colList}) VALUES\n${values};\n`;
+  const overriding = overridingSystemValue ? " OVERRIDING SYSTEM VALUE" : "";
+  return `INSERT INTO ${tableIdent} (${colList})${overriding} VALUES\n${values};\n`;
 }
