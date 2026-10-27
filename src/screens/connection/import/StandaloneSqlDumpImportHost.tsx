@@ -1,5 +1,4 @@
 import { useEffect, useRef } from "preact/hooks";
-import { useScreenStore } from "src/stores/screen";
 import { useDatabaseBackup } from "../hooks/useDatabaseBackup";
 import type { StandaloneExportTarget } from "../export/standalone-export/types";
 import { forgetImportedTableRows } from "./standaloneImport";
@@ -27,12 +26,10 @@ export function StandaloneSqlDumpImportHost(props: {
     runningRef.current = true;
     const tabId = profileScreenId;
     const table = { schema: target.schema, name: target.tableName };
+    // The originating tab's safety mode (Lock, Production, Safe) applies,
+    // read again right before anything runs.
     void onImportSqlDump(() => forgetImportedTableRows(tabId, table), {
-      canRun: () =>
-        !(
-          useScreenStore.getState().profileTabs.find((t) => t.id === tabId)
-            ?.isLocked ?? false
-        ),
+      tabId,
     }).finally(() => {
       runningRef.current = false;
     });

@@ -1,4 +1,5 @@
 import type { DatabaseEngine } from "src/types";
+import { isPostgresArrayType, pgArrayValueSql } from "./pgArrayLiteral";
 import { decodeBytesB64 } from "src/utils/convert";
 import { isSqliteLike } from "src/utils/sqliteLike";
 
@@ -811,6 +812,16 @@ export function formatSqlValue(
   }
 
   raw = coerceNonBlobBytesToText(raw, dbType);
+
+  // PostgreSQL arrays are held as JSON array text; text that is not one
+  // (an array literal typed in the editor) stays a string literal.
+  if (engine === "postgres" && isPostgresArrayType(dbType)) {
+    const arraySql = pgArrayValueSql(
+      typeof raw === "string" ? raw : JSON.stringify(raw),
+      (text) => sqlStringLiteral(text, engine)
+    );
+    if (arraySql) return arraySql;
+  }
 
   if (isJsonColumnType(dbType)) {
     const jsonText = normalizeJsonValue(raw);

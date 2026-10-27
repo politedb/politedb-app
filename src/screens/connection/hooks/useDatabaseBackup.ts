@@ -1,5 +1,10 @@
 import { useCallback, useState } from "preact/hooks";
-import { openDialog, saveDialog, showMessage } from "src/lib/system-dialog";
+import {
+  confirmDialog,
+  openDialog,
+  saveDialog,
+  showMessage,
+} from "src/lib/system-dialog";
 import { writeFile, readFile } from "src/lib/system-fs";
 
 import { startSqlQueryStream, runSqlQuery } from "src/lib/tauri/query";
@@ -11,15 +16,34 @@ import {
   qLiteral,
 } from "src/lib/queries/sql";
 import { cellToString } from "src/utils/convert";
-import { splitSqlStatements } from "src/components/editor/splitSqlStatements";
+import {
+  splitDialectFor,
+  splitSqlStatements,
+} from "src/components/editor/splitSqlStatements";
 import type { ConnectionCreateInput } from "src/lib/tauri";
 import { useConnectionRuntimeCtx } from "../workspace/ConnectionRuntimeContext";
-import { formatSqlInsertChunk } from "./sqlInsertLiteral";
+import { formatSqlInsertChunk, sqlQuoteString } from "./sqlInsertLiteral";
 import { showToast } from "src/stores/toast";
+import { useScreenStore } from "src/stores/screen";
+import { securityTouchIdAuthenticate } from "src/lib/tauri/security";
+import { dumpRunGate, tabSafetyModeNow } from "src/lib/dump/dumpRestoreSafety";
 import {
   packSqlToDumb,
   unpackDumpBytes,
 } from "src/lib/dump/politedbDumbFormat";
+
+/**
+ * A schema-qualified name for a "-- …" comment line in a dump. Names may
+ * legally hold line breaks; written raw, the rest of the name would end the
+ * comment and run as SQL on restore. Control characters become spaces so
+ * the comment stays one line.
+ */
+export function dumpCommentName(schema: string, name: string): string {
+  return `${schema}.${name}`.replace(
+    /[\u0000-\u001f\u007f\u0085\u2028\u2029]/g,
+    " "
+  );
+}
 
 function cellToBool(cell: unknown): boolean {
   if (typeof cell === "boolean") return cell;
@@ -78,15 +102,25 @@ function normalizeEngineNameForCompare(engine: string): string {
 
 function isIgnorableRestoreError(sql: string, err: unknown): boolean {
   const stmt = sql.trim().toUpperCase();
-  const msg = String(
-    err instanceof Error ? err.message : (err ?? "")
-  ).toLowerCase();
+  // Only the error's own first line, with quoted names blanked: a DETAIL
+  // line or an object named "already exists" must not pass for a
+  // duplicate.
+  const msg = (
+    String(err instanceof Error ? err.message : (err ?? "")).split("\n")[0] ??
+    ""
+  )
+    .replace(/"(?:[^"]|"")*"|'(?:[^']|'')*'|`[^`]*`/g, '""')
+    .toLowerCase();
 
+  // A dump statement starts with its "-- Structure …" comment line.
+  const head = stmt.replace(/^(?:\s*--[^\n]*\n)+/, "").trimStart();
   const isDdl =
-    stmt.startsWith("CREATE TABLE") ||
-    stmt.startsWith("CREATE SCHEMA") ||
-    stmt.startsWith("CREATE INDEX") ||
-    stmt.startsWith("ALTER TABLE");
+    head.startsWith("CREATE TABLE") ||
+    head.startsWith("CREATE SCHEMA") ||
+    head.startsWith("CREATE TYPE") ||
+    head.startsWith("CREATE DOMAIN") ||
+    head.startsWith("CREATE INDEX") ||
+    head.startsWith("ALTER TABLE");
 
   if (!isDdl) return false;
 
@@ -100,10 +134,61 @@ function isIgnorableRestoreError(sql: string, err: unknown): boolean {
   );
 }
 
-function shortSql(sql: string, max = 2_000): string {
-  const s = sql.replace(/\s+/g, " ").trim();
-  if (s.length <= max) return s;
-  return `${s.slice(0, max)}…`;
+/** Long text cut in the middle, keeping its start and its end. */
+function clip(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const tail = Math.floor(max / 3);
+  return `${text.slice(0, max - tail).trimEnd()} … ${text.slice(-tail).trimStart()}`;
+}
+
+/**
+ * A failed statement for the stop dialog: what it was, not its rows.
+ * Leading comments are dropped and an INSERT is cut after VALUES, so a
+ * statement of thousands of rows stays one line. DDL keeps its head (names,
+ * types, defaults) up to the limit.
+ */
+export function restoreStatementLabel(sql: string, max = 160): string {
+  const head = sql
+    .replace(/^(?:\s*(?:--[^\n\r]*(?:\r\n?|\n|$)|\/\*[\s\S]*?\*\/))+/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!head) return "(comment only)";
+  const values = /^INSERT\b.*?\bVALUES\b/i.exec(head);
+  if (values) return `${clip(values[0], max)} …`;
+  return clip(head, max);
+}
+
+/**
+ * A server error for the stop dialog, kept short so a "Failing row contains
+ * (…)" detail or a long message cannot push the dialog past the screen: the
+ * message line, then its first DETAIL and first HINT lines wherever they
+ * are (CONTEXT, WHERE and other lines are left out), each cut in the
+ * middle: at most about 1,000 characters in all. Values the
+ * server echoes (a failing row, a duplicate key) stay, cut: they say which
+ * row failed. The dialog is local and nothing is logged.
+ */
+export function restoreErrorSummary(error: unknown): string {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : "";
+  const lines = message
+    .split(/\r\n?|\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const [first, ...rest] = lines;
+  if (!first) return "Unknown restore error";
+  // The first DETAIL and the first HINT only: a message repeating them
+  // (or a failing row holding line breaks) stays bounded.
+  const detail = rest.find((line) => /^DETAIL:/i.test(line));
+  const hint = rest.find((line) => /^HINT:/i.test(line));
+  const kept = [first, detail, hint]
+    .filter((line): line is string => !!line)
+    .map((line) => clip(line, 300));
+  if (kept.length < lines.length) kept.push("…");
+  return kept.join("\n");
 }
 
 function parsePgAlterAddConstraint(sql: string): {
@@ -393,6 +478,342 @@ async function exportTableToSqlParts(args: {
   });
 }
 
+type PgTypeRow = {
+  oid: string;
+  schema: string;
+  name: string;
+  kind: string;
+  /** Domains: base type SQL, and the type it is built on (array → element). */
+  baseSql: string;
+  baseOid: string;
+  notNull: boolean;
+  defaultExpr: string;
+  checks: string;
+  /** Enums: quoted labels, possibly none. */
+  labels: string;
+  /** Domains: COLLATE clause target when it differs from the base's. */
+  collation: string;
+  /** A collation outside pg_catalog: its catalog row as JSON, to recreate. */
+  collationDef: string;
+  collationSchema: string;
+  collationName: string;
+  /** Set when an extension owns the type. */
+  extension: string;
+  extensionSchema: string;
+  /** Domains: sequences their default uses, as JSON [{schema, name}]. */
+  sequences: string;
+  /** Set when an extension owns the domain's collation. */
+  collationExtension: string;
+  collationExtensionSchema: string;
+};
+
+/** CREATE COLLATION for a collation's catalog row (any PostgreSQL 13+). */
+function createCollationSql(
+  schema: string,
+  name: string,
+  defJson: string
+): string {
+  let def: Record<string, unknown>;
+  try {
+    def = JSON.parse(defJson) as Record<string, unknown>;
+  } catch {
+    return "";
+  }
+  const text = (key: string) =>
+    typeof def[key] === "string" && def[key] ? (def[key] as string) : "";
+  const options: string[] = [];
+  if (def.collprovider === "b") {
+    // PostgreSQL 17's builtin provider.
+    options.push(
+      "provider = builtin",
+      `locale = ${sqlQuoteString(text("colllocale"), "postgres")}`
+    );
+  } else if (def.collprovider === "i") {
+    // The ICU locale moved: collcollate (≤14), colliculocale (15–16),
+    // colllocale (17+).
+    const locale =
+      text("colllocale") || text("colliculocale") || text("collcollate");
+    options.push(
+      "provider = icu",
+      `locale = ${sqlQuoteString(locale, "postgres")}`
+    );
+    if (text("collicurules")) {
+      options.push(
+        `rules = ${sqlQuoteString(text("collicurules"), "postgres")}`
+      );
+    }
+  } else if (def.collprovider === "c") {
+    options.push(
+      "provider = libc",
+      `lc_collate = ${sqlQuoteString(text("collcollate"), "postgres")}`,
+      `lc_ctype = ${sqlQuoteString(text("collctype"), "postgres")}`
+    );
+  } else {
+    // Never reinterpret a provider as another: say so instead.
+    throw new Error(
+      `The collation ${schema}.${name} uses a provider backups cannot recreate (${String(def.collprovider)}).`
+    );
+  }
+  if (def.collisdeterministic === false) options.push("deterministic = false");
+  return ensureSqlEndsWithSemicolon(
+    `CREATE COLLATION IF NOT EXISTS ${qIdent(schema, "postgres")}.${qIdent(name, "postgres")} (${options.join(", ")})`
+  );
+}
+
+/**
+ * What the backed-up tables need before they can be created: their schemas
+ * (other than public), the extensions that own types they use, the
+ * sequences domain defaults use, then the enum types and domains their
+ * columns use — followed through arrays and domain bases to any depth, with
+ * every domain after the domain it is built on.
+ *
+ * Composite and range types are not recreated.
+ */
+export async function buildPostgresTypesSql(args: {
+  connectionId: string;
+  tables: ReadonlyArray<{ schema: string; name: string }>;
+}): Promise<string> {
+  const { connectionId, tables } = args;
+  if (!tables.length) return "";
+
+  const tableList = tables
+    .map((t) => `(${qLiteral(t.schema)}, ${qLiteral(t.name)})`)
+    .join(", ");
+  const res = await runSqlQuery(
+    connectionId,
+    `
+    WITH RECURSIVE walk(type_oid) AS (
+      SELECT a.atttypid
+      FROM pg_attribute a
+      JOIN pg_class c ON c.oid = a.attrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE (n.nspname, c.relname) IN (${tableList})
+        AND a.attnum > 0
+        AND NOT a.attisdropped
+      UNION
+      SELECT next.oid
+      FROM walk w
+      JOIN pg_type t ON t.oid = w.type_oid
+      CROSS JOIN LATERAL (VALUES
+        (CASE WHEN t.typcategory = 'A' THEN t.typelem END),
+        (NULLIF(t.typbasetype, 0))
+      ) AS next(oid)
+      WHERE next.oid IS NOT NULL AND next.oid <> 0
+    )
+    SELECT
+      t.oid::text,
+      n.nspname,
+      t.typname,
+      t.typtype::text,
+      CASE WHEN t.typtype = 'd'
+        THEN pg_catalog.format_type(t.typbasetype, t.typtypmod) END,
+      CASE WHEN bt.typcategory = 'A' THEN bt.typelem ELSE bt.oid END::text,
+      t.typnotnull,
+      pg_get_expr(t.typdefaultbin, 0),
+      (SELECT string_agg(
+          'CONSTRAINT ' || quote_ident(c.conname) || ' ' ||
+            pg_get_constraintdef(c.oid),
+          ' ' ORDER BY c.conname)
+        FROM pg_constraint c
+        -- CHECK only: NOT NULL comes from typnotnull (PostgreSQL 17 also
+        -- records it as a constraint).
+        WHERE c.contypid = t.oid AND c.contype = 'c'),
+      CASE WHEN t.typtype = 'e' THEN coalesce(
+        (SELECT string_agg(quote_literal(e.enumlabel), ', '
+            ORDER BY e.enumsortorder)
+          FROM pg_enum e WHERE e.enumtypid = t.oid), '') END,
+      CASE WHEN t.typtype = 'd' AND t.typcollation <> 0
+          AND t.typcollation IS DISTINCT FROM bt.typcollation
+        THEN quote_ident(cn.nspname) || '.' || quote_ident(co.collname) END,
+      CASE WHEN t.typtype = 'd' AND t.typcollation <> 0
+          AND t.typcollation IS DISTINCT FROM bt.typcollation
+          AND cn.nspname <> 'pg_catalog'
+        THEN to_jsonb(co)::text END,
+      cn.nspname,
+      co.collname,
+      x.extname,
+      xn.nspname,
+      (SELECT json_agg(json_build_object(
+          'schema', sn.nspname, 'name', sq.relname))::text
+        FROM pg_depend d
+        JOIN pg_class sq ON sq.oid = d.refobjid AND sq.relkind = 'S'
+        JOIN pg_namespace sn ON sn.oid = sq.relnamespace
+        WHERE d.classid = 'pg_type'::regclass
+          AND d.objid = t.oid
+          AND d.refclassid = 'pg_class'::regclass),
+      (SELECT ce.extname
+        FROM pg_depend cd
+        JOIN pg_extension ce ON ce.oid = cd.refobjid
+        WHERE cd.classid = 'pg_collation'::regclass
+          AND cd.objid = co.oid
+          AND cd.refclassid = 'pg_extension'::regclass
+          AND cd.deptype = 'e'),
+      (SELECT cen.nspname
+        FROM pg_depend cd
+        JOIN pg_extension ce ON ce.oid = cd.refobjid
+        JOIN pg_namespace cen ON cen.oid = ce.extnamespace
+        WHERE cd.classid = 'pg_collation'::regclass
+          AND cd.objid = co.oid
+          AND cd.refclassid = 'pg_extension'::regclass
+          AND cd.deptype = 'e')
+    FROM (SELECT DISTINCT type_oid FROM walk) w
+    JOIN pg_type t ON t.oid = w.type_oid
+    JOIN pg_namespace n ON n.oid = t.typnamespace
+    LEFT JOIN pg_type bt ON bt.oid = t.typbasetype
+    LEFT JOIN pg_collation co ON co.oid = t.typcollation
+    LEFT JOIN pg_namespace cn ON cn.oid = co.collnamespace
+    LEFT JOIN pg_depend xd
+      ON xd.classid = 'pg_type'::regclass
+     AND xd.objid = t.oid
+     AND xd.refclassid = 'pg_extension'::regclass
+     AND xd.deptype = 'e'
+    LEFT JOIN pg_extension x ON x.oid = xd.refobjid
+    LEFT JOIN pg_namespace xn ON xn.oid = x.extnamespace
+    WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+    ORDER BY n.nspname, t.typname;`
+  );
+
+  const rows: PgTypeRow[] = (res.rows ?? []).map((r: any) => ({
+    oid: cellToString(r?.[0]) ?? "",
+    schema: cellToString(r?.[1]) ?? "",
+    name: cellToString(r?.[2]) ?? "",
+    kind: cellToString(r?.[3]) ?? "",
+    baseSql: cellToString(r?.[4], true) ?? "",
+    baseOid: cellToString(r?.[5], true) ?? "",
+    notNull: cellToBool(r?.[6]),
+    defaultExpr: cellToString(r?.[7], true) ?? "",
+    checks: cellToString(r?.[8], true) ?? "",
+    labels: cellToString(r?.[9], true) ?? "",
+    collation: cellToString(r?.[10], true) ?? "",
+    collationDef: cellToString(r?.[11], true) ?? "",
+    collationSchema: cellToString(r?.[12], true) ?? "",
+    collationName: cellToString(r?.[13], true) ?? "",
+    extension: cellToString(r?.[14], true) ?? "",
+    extensionSchema: cellToString(r?.[15], true) ?? "",
+    sequences: cellToString(r?.[16], true) ?? "",
+    collationExtension: cellToString(r?.[17], true) ?? "",
+    collationExtensionSchema: cellToString(r?.[18], true) ?? "",
+  }));
+
+  const schemas = new Set(
+    tables.map((t) => t.schema).filter((name) => name !== "public")
+  );
+  const addSchema = (name: string) => {
+    if (name && name !== "public") schemas.add(name);
+  };
+  const ident = (schema: string, name: string) =>
+    `${qIdent(schema, "postgres")}.${qIdent(name, "postgres")}`;
+
+  // Types an extension owns come with the extension, not one by one.
+  const extensions = new Map<string, string>();
+  for (const row of rows) {
+    if (!row.extension) continue;
+    extensions.set(row.extension, row.extensionSchema);
+    addSchema(row.extensionSchema);
+  }
+  const own = rows.filter((row) => !row.extension && row.schema && row.name);
+
+  let enumsSql = "";
+  for (const row of own) {
+    if (row.kind !== "e") continue;
+    addSchema(row.schema);
+    enumsSql += ensureSqlEndsWithSemicolon(
+      `CREATE TYPE ${ident(row.schema, row.name)} AS ENUM (${row.labels})`
+    );
+  }
+
+  // Each domain after the domain it is built on.
+  const domains = own.filter((row) => row.kind === "d" && row.baseSql);
+  const byOid = new Map(domains.map((row) => [row.oid, row]));
+  const ordered: PgTypeRow[] = [];
+  const placed = new Set<string>();
+  const place = (row: PgTypeRow, path: Set<string>) => {
+    if (placed.has(row.oid) || path.has(row.oid)) return;
+    path.add(row.oid);
+    const base = byOid.get(row.baseOid);
+    if (base) place(base, path);
+    placed.add(row.oid);
+    ordered.push(row);
+  };
+  for (const row of domains) place(row, new Set());
+
+  const sequences = new Map<string, string>();
+  const collations = new Map<string, string>();
+  let domainsSql = "";
+  for (const row of ordered) {
+    addSchema(row.schema);
+    let deps: Array<{ schema?: string; name?: string }> = [];
+    try {
+      deps = row.sequences ? JSON.parse(row.sequences) : [];
+    } catch {
+      deps = [];
+    }
+    for (const dep of deps) {
+      if (!dep.schema || !dep.name) continue;
+      addSchema(dep.schema);
+      sequences.set(
+        ident(dep.schema, dep.name),
+        ensureSqlEndsWithSemicolon(
+          `CREATE SEQUENCE IF NOT EXISTS ${ident(dep.schema, dep.name)}`
+        )
+      );
+    }
+    if (row.collationExtension) {
+      // An extension's collation comes with the extension.
+      extensions.set(row.collationExtension, row.collationExtensionSchema);
+      addSchema(row.collationExtensionSchema);
+    } else if (row.collationDef && row.collationSchema && row.collationName) {
+      addSchema(row.collationSchema);
+      collations.set(
+        ident(row.collationSchema, row.collationName),
+        createCollationSql(
+          row.collationSchema,
+          row.collationName,
+          row.collationDef
+        )
+      );
+    }
+    domainsSql += ensureSqlEndsWithSemicolon(
+      `CREATE DOMAIN ${ident(row.schema, row.name)} AS ${row.baseSql}` +
+        `${row.collation ? ` COLLATE ${row.collation}` : ""}` +
+        `${row.defaultExpr ? ` DEFAULT ${row.defaultExpr}` : ""}` +
+        `${row.notNull ? " NOT NULL" : ""}` +
+        `${row.checks ? ` ${row.checks}` : ""}`
+    );
+  }
+
+  const schemasSql = [...schemas]
+    .sort()
+    .map((schema) =>
+      ensureSqlEndsWithSemicolon(
+        `CREATE SCHEMA IF NOT EXISTS ${qIdent(schema, "postgres")}`
+      )
+    )
+    .join("");
+  const extensionsSql = [...extensions]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([name, schema]) =>
+      ensureSqlEndsWithSemicolon(
+        `CREATE EXTENSION IF NOT EXISTS ${qIdent(name, "postgres")}` +
+          (schema ? ` WITH SCHEMA ${qIdent(schema, "postgres")}` : "")
+      )
+    )
+    .join("");
+  // Sequences are owned by their tables later.
+  const byName = ([a]: [string, string], [b]: [string, string]) =>
+    a.localeCompare(b);
+  const sequencesSql = [...sequences]
+    .sort(byName)
+    .map(([, sql]) => sql)
+    .join("");
+  const collationsSql = [...collations]
+    .sort(byName)
+    .map(([, sql]) => sql)
+    .join("");
+
+  return `${schemasSql}${extensionsSql}${collationsSql}${sequencesSql}${enumsSql}${domainsSql}`;
+}
+
 async function buildPostgresTableStructure(args: {
   connectionId: string;
   schema: string;
@@ -579,6 +1000,15 @@ async function buildMysqlTableStructure(args: {
   return ensureSqlEndsWithSemicolon(createSql);
 }
 
+/**
+ * Engines whose backup holds the table structure (CREATE TABLE …) as well as
+ * the rows. For the others it would hold rows only, which cannot be restored
+ * into an empty database, so backup is not offered.
+ */
+export function canBackupDatabase(engine: string | undefined): boolean {
+  return engine === "postgres" || engine === "mysql" || engine === "mariadb";
+}
+
 export function useDatabaseBackup() {
   const rt = useConnectionRuntimeCtx();
   const [dbBackupRunning, setDbBackupRunning] = useState(false);
@@ -587,6 +1017,13 @@ export function useDatabaseBackup() {
   const onBackupDatabase = useCallback(
     async (databaseName?: string) => {
       if (!rt.runtimeConnectionId) return;
+      if (!canBackupDatabase(rt.engine)) {
+        void showMessage(
+          "Database backup is available for PostgreSQL, MySQL and MariaDB.",
+          { title: "Backup database", kind: "info" }
+        );
+        return;
+      }
 
       setDbBackupRunning(true);
 
@@ -668,7 +1105,7 @@ export function useDatabaseBackup() {
 
           if (postDataSql) {
             postDataSqlChunks.push(
-              `\n-- Post-data ${table.schema}.${table.name}\n${postDataSql}`
+              `\n-- Post-data ${dumpCommentName(table.schema, table.name)}\n${postDataSql}`
             );
           }
 
@@ -689,13 +1126,22 @@ export function useDatabaseBackup() {
           columnsByTable.set(key, columns);
         }
 
+        // Phase 0: schemas and the types the tables use (PostgreSQL)
+        if (rt.engine === "postgres") {
+          const typesSql = await buildPostgresTypesSql({
+            connectionId: rt.runtimeConnectionId,
+            tables: orderedTables,
+          });
+          if (typesSql) appendSql(`\n-- Schemas and types\n${typesSql}`);
+        }
+
         // Phase 1: create all tables (and non-FK constraints)
         for (const table of orderedTables) {
           const key = `${table.schema}.${table.name}`;
           const structureSql = preDataByTable.get(key) ?? "";
           if (!structureSql) continue;
           appendSql(
-            `\n-- Structure ${table.schema}.${table.name}\n${structureSql}`
+            `\n-- Structure ${dumpCommentName(table.schema, table.name)}\n${structureSql}`
           );
         }
 
@@ -705,7 +1151,7 @@ export function useDatabaseBackup() {
           const columns = columnsByTable.get(key) ?? [];
           if (!columns.length) continue;
 
-          appendSql(`\n-- Data ${table.schema}.${table.name}\n`);
+          appendSql(`\n-- Data ${dumpCommentName(table.schema, table.name)}\n`);
 
           await exportTableToSqlParts({
             append: appendSql,
@@ -748,21 +1194,32 @@ export function useDatabaseBackup() {
 
   const runSqlDumpImport = useCallback(
     async (
-      onRefresh?: () => void,
-      opts?: {
-        dialogTitle?: string;
-        successToast?: string;
-        /**
-         * Checked after the confirmation, right before anything runs (the
-         * tab may have been locked while the file was being chosen).
-         */
-        canRun?: () => boolean;
+      onRefresh: (() => void) | undefined,
+      opts: {
+        action: "restore" | "import";
+        dialogTitle: string;
+        successToast: string;
+        /** The tab whose safety mode applies; the active one by default. */
+        tabId?: string;
+        /** The database the dump goes into, named in the confirmation. */
+        database?: string;
       }
     ) => {
       if (!rt.runtimeConnectionId) return;
+      const { action } = opts;
+      const tabId = opts.tabId ?? rt.profileId;
+      const errorTitle =
+        action === "restore" ? "Restore error" : "Import error";
+
+      // Lock and Production refuse before a file is even chosen…
+      const early = dumpRunGate(tabSafetyModeNow(tabId), action);
+      if (early.kind === "blocked") {
+        void showMessage(early.message, { title: errorTitle, kind: "warning" });
+        return;
+      }
 
       const path = await openDialog({
-        title: opts?.dialogTitle ?? "Restore database from dump",
+        title: opts.dialogTitle,
         multiple: false,
         directory: false,
         filters: [
@@ -775,6 +1232,7 @@ export function useDatabaseBackup() {
 
       setDbRestoreRunning(true);
 
+      let applied = 0;
       try {
         const fileBytes = await readFile(path);
         const unpacked = await unpackDumpBytes(fileBytes);
@@ -791,25 +1249,76 @@ export function useDatabaseBackup() {
           }
         }
 
-        const statements = splitSqlStatements(sql);
+        // Split by the engine's own quoting rules: read the PostgreSQL way,
+        // a backslash in a string is text, and data can never end a string
+        // early and turn the rest into statements.
+        const statements = splitSqlStatements(sql, {
+          dialect: splitDialectFor(rt.engine),
+        })
+          .map((statement) => statement.text.trim())
+          .filter(Boolean);
         if (!statements.length) {
           throw new Error("No SQL statements found in selected file.");
         }
 
-        const ok = window.confirm(
-          `This will execute ${statements.length} SQL statements on current database. Continue?`
+        const tab = useScreenStore
+          .getState()
+          .profileTabs.find((item) => item.id === tabId);
+        const target = [tab?.label, opts.database ? `(${opts.database})` : ""]
+          .filter(Boolean)
+          .join(" ");
+        const fileName = path.split(/[\\/]/).pop() || path;
+        const verb = action === "restore" ? "Restore" : "Import";
+        const ok = await confirmDialog(
+          `${verb} "${fileName}"${target ? ` into ${target}` : ""}?\n\nThis runs ${statements.length} SQL statement${statements.length === 1 ? "" : "s"} on the database. They do not run in a transaction and cannot be undone.`,
+          {
+            title: opts.dialogTitle,
+            kind: "warning",
+            okLabel: verb,
+            cancelLabel: "Cancel",
+          }
         );
         if (!ok) return;
-        if (opts?.canRun && !opts.canRun()) {
-          showToast("The tab is locked: nothing was imported.", {
-            tone: "info",
-          });
+
+        // …and checked again before every statement, on the originating
+        // tab's live mode: it may change during the confirmation, Touch ID
+        // or the run itself. Touch ID is asked once, when first needed.
+        let authenticated = false;
+        const ensureAllowed = async (): Promise<string | null> => {
+          for (;;) {
+            const gate = dumpRunGate(
+              tabSafetyModeNow(tabId),
+              action,
+              applied > 0
+            );
+            if (gate.kind === "blocked") return gate.message;
+            if (gate.kind === "run" || authenticated) return null;
+            try {
+              await securityTouchIdAuthenticate(gate.prompt);
+              authenticated = true;
+            } catch (err) {
+              const reason = err instanceof Error ? err.message : String(err);
+              return `Touch ID authentication failed, so ${applied > 0 ? "nothing more" : "nothing"} was run: ${reason}`;
+            }
+          }
+        };
+        const describeApplied = () =>
+          applied === 0
+            ? "Nothing before it had changed the database."
+            : applied === 1
+              ? "The statement before it already ran and stays in the database."
+              : `The ${applied} statements before it already ran and stay in the database.`;
+
+        const refused = await ensureAllowed();
+        if (refused) {
+          void showMessage(refused, { title: errorTitle, kind: "warning" });
           return;
         }
 
+        let skipped = 0;
+        let stopped: { message: string; index: number } | null = null;
         for (let i = 0; i < statements.length; i++) {
-          const statementSql = statements[i].text.trim();
-          if (!statementSql) continue;
+          const statementSql = statements[i]!;
 
           try {
             if (rt.engine === "postgres") {
@@ -821,13 +1330,23 @@ export function useDatabaseBackup() {
                   table: parsed.table,
                   constraint: parsed.constraint,
                 });
-                if (exists) continue;
+                if (exists) {
+                  skipped++;
+                  continue;
+                }
               }
+            }
+
+            const blocked = await ensureAllowed();
+            if (blocked) {
+              stopped = { message: blocked, index: i };
+              break;
             }
 
             await runSqlQuery(rt.runtimeConnectionId, statementSql, {
               timeoutMs: 120_000,
             });
+            applied++;
           } catch (err) {
             if (
               rt.engine === "postgres" &&
@@ -835,43 +1354,64 @@ export function useDatabaseBackup() {
             ) {
               // Keep restore progressing even if existing data violates FK
               // or FK already exists with incompatible shape.
+              skipped++;
               continue;
             }
 
             if (isIgnorableRestoreError(statementSql, err)) {
+              skipped++;
               continue;
             }
 
-            const reason =
-              err instanceof Error ? err.message : "Unknown restore error";
+            const reason = restoreErrorSummary(err);
             throw new Error(
-              `Restore failed at statement ${i + 1}/${statements.length}: ${reason}\nSQL: ${shortSql(statementSql)}`
+              `Stopped at statement ${i + 1} of ${statements.length}: ${reason}\n\n${describeApplied()}\n\nStatement: ${restoreStatementLabel(statementSql)}`
             );
           }
         }
 
+        if (stopped) {
+          // What already ran is in the database: show it.
+          if (applied > 0) {
+            await rt.refreshSchemaAndTables();
+            onRefresh?.();
+          }
+          void showMessage(
+            `${stopped.message}\nStopped before statement ${stopped.index + 1} of ${statements.length}. ${describeApplied()}`,
+            { title: errorTitle, kind: "warning" }
+          );
+          return;
+        }
+
         await rt.refreshSchemaAndTables();
         onRefresh?.();
-        showToast(opts?.successToast ?? "Database restore completed.", {
-          tone: "success",
-        });
+        if (skipped > 0) {
+          showToast(
+            `${opts.successToast} ${skipped} statement${skipped === 1 ? " was" : "s were"} skipped: objects that already existed or foreign keys the data did not allow.`,
+            { tone: "info" }
+          );
+        } else {
+          showToast(opts.successToast, { tone: "success" });
+        }
       } catch (err) {
         const message =
           err instanceof Error ? err.message : "SQL dump import failed.";
-        void showMessage(message, { title: "Restore error", kind: "error" });
+        void showMessage(message, { title: errorTitle, kind: "error" });
       } finally {
         setDbRestoreRunning(false);
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rt.runtimeConnectionId, rt.refreshSchemaAndTables]
+    [rt.runtimeConnectionId, rt.refreshSchemaAndTables, rt.profileId, rt.engine]
   );
 
   const onRestoreDatabase = useCallback(
-    async (onRefresh?: () => void) => {
+    async (onRefresh?: () => void, database?: string) => {
       await runSqlDumpImport(onRefresh, {
+        action: "restore",
         dialogTitle: "Restore database from dump",
-        successToast: "Database restore completed.",
+        successToast: "Database restored.",
+        database,
       });
     },
     [runSqlDumpImport]
@@ -879,11 +1419,12 @@ export function useDatabaseBackup() {
 
   // Table-level SQL dump import, like database backup and restore, is free.
   const onImportSqlDump = useCallback(
-    async (onRefresh?: () => void, opts?: { canRun?: () => boolean }) => {
+    async (onRefresh?: () => void, opts?: { tabId?: string }) => {
       await runSqlDumpImport(onRefresh, {
+        action: "import",
         dialogTitle: "Import SQL dump",
         successToast: "SQL dump imported.",
-        canRun: opts?.canRun,
+        tabId: opts?.tabId,
       });
     },
     [runSqlDumpImport]

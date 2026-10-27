@@ -53,21 +53,7 @@ describe("StandaloneSqlDumpImportHost", () => {
       schema: "public",
       name: "users",
     });
-    expect(opts.canRun()).toBe(true);
-  });
-
-  it("refuses to run once the tab is locked", async () => {
-    render(
-      <StandaloneSqlDumpImportHost
-        profileScreenId="t1"
-        target={target}
-        onClearTarget={vi.fn()}
-      />
-    );
-    await waitFor(() => expect(mocks.importSqlDump).toHaveBeenCalled());
-    useScreenStore.setState({
-      profileTabs: [{ id: "t1", isLocked: true } as never],
-    });
-    expect(mocks.importSqlDump.mock.calls[0]![1].canRun()).toBe(false);
+    // The originating tab's safety mode decides, read when it runs.
+    expect(opts).toEqual({ tabId: "t1" });
   });
 });

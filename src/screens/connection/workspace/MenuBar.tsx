@@ -46,7 +46,10 @@ import type { ConnectionCreateInput } from "src/lib/tauri";
 import { type QuerySafetyMode } from "@root/src/lib/queries/querySafety";
 import { v4 as uuid } from "uuid";
 import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
-import { useDatabaseBackup } from "../hooks/useDatabaseBackup";
+import {
+  canBackupDatabase,
+  useDatabaseBackup,
+} from "../hooks/useDatabaseBackup";
 import { useProGate } from "src/hooks/useProGate";
 import { useConnectionHealthCheck } from "../hooks/useConnectionHealthCheck";
 import { MetaPill } from "src/components/common/MetaPill";
@@ -783,10 +786,19 @@ export function MenuBar({
           <div class="mx-1 h-5 w-px bg-neutral-200" />
 
           <IconButton
-            title={dbBackupRunning ? "Backing up..." : "Backup database"}
+            title={
+              !canBackupDatabase(rt.engine)
+                ? "Backup is available for PostgreSQL, MySQL and MariaDB"
+                : dbBackupRunning
+                  ? "Backing up..."
+                  : "Backup database"
+            }
             onClick={() => void onBackupDatabase(connectionInfo?.database)}
             disabled={
-              !rt.runtimeConnectionId || dbBackupRunning || dbRestoreRunning
+              !rt.runtimeConnectionId ||
+              !canBackupDatabase(rt.engine) ||
+              dbBackupRunning ||
+              dbRestoreRunning
             }
           >
             <BackupIcon className="size-4.5 text-neutral-700" />
@@ -794,7 +806,9 @@ export function MenuBar({
 
           <IconButton
             title={dbRestoreRunning ? "Restoring..." : "Restore database"}
-            onClick={() => void onRestoreDatabase(onRefresh)}
+            onClick={() =>
+              void onRestoreDatabase(onRefresh, connectionInfo?.database)
+            }
             disabled={
               !!activeTab?.isLocked ||
               !rt.runtimeConnectionId ||
@@ -898,6 +912,8 @@ export function MenuBar({
         open={dbDialogOpen}
         engine={connectionInfo?.engine}
         runtimeConnectionId={runtimeConnectionId}
+        tabId={activeTab?.id}
+        profileId={activeTab?.profileId}
         onOpenDatabase={onOpenDatabase}
         onClose={() => setDbDialogOpen(false)}
       />

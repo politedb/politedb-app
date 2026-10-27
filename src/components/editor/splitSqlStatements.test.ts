@@ -131,3 +131,149 @@ describe("splitSqlStatements", () => {
     expect(out[1]).toBe("select * from `t`");
   });
 });
+
+describe("splitSqlStatements for PostgreSQL", () => {
+  const pg = (sql: string) =>
+    splitSqlStatements(sql, { dialect: "postgres" }).map((s) => s.text);
+
+  it("never lets a backslash in data end a string early", () => {
+    // A dump row whose first value is a single backslash: PostgreSQL reads
+    // '\' as a whole string, so the ";" inside the second value is data.
+    const sql = String.raw`INSERT INTO "public"."t" ("a","b") VALUES ('\', ';DROP TABLE victim;--');
+SELECT 1;`;
+    expect(pg(sql)).toEqual([
+      String.raw`INSERT INTO "public"."t" ("a","b") VALUES ('\', ';DROP TABLE victim;--')`,
+      "SELECT 1",
+    ]);
+  });
+
+  it("keeps backslash escapes in E-strings", () => {
+    expect(pg(String.raw`SELECT E'it\'s; ok'; SELECT 2;`)).toEqual([
+      String.raw`SELECT E'it\'s; ok'`,
+      "SELECT 2",
+    ]);
+    expect(pg(String.raw`SELECT e'a\\'; SELECT 2;`)).toEqual([
+      String.raw`SELECT e'a\\'`,
+      "SELECT 2",
+    ]);
+  });
+
+  it("does not take a name ending in E for an E-string", () => {
+    expect(pg(String.raw`SELECT type'a\'; SELECT 2;`)).toEqual([
+      String.raw`SELECT type'a\'`,
+      "SELECT 2",
+    ]);
+  });
+
+  it("reads a backslash in a quoted identifier as text", () => {
+    expect(pg(String.raw`CREATE TYPE "a\" AS ENUM ('x'); SELECT 2;`)).toEqual([
+      String.raw`CREATE TYPE "a\" AS ENUM ('x')`,
+      "SELECT 2",
+    ]);
+  });
+
+  it("follows nested block comments", () => {
+    expect(pg("/* a /* b; */ c; */ SELECT 1; SELECT 2;")).toEqual([
+      "/* a /* b; */ c; */ SELECT 1",
+      "SELECT 2",
+    ]);
+  });
+
+  it("keeps the backslash escapes of other engines by default", () => {
+    const sql = String.raw`INSERT INTO t VALUES ('a\'b;c'); SELECT 2;`;
+    expect(splitSqlStatements(sql).map((s) => s.text)).toEqual([
+      String.raw`INSERT INTO t VALUES ('a\'b;c')`,
+      "SELECT 2",
+    ]);
+  });
+
+  it("keeps an E-string's escapes in its continuation lines", () => {
+    // PostgreSQL reads 'a' + newline + '…' as one string, still in E mode:
+    // the DELETE is data.
+    const sql = String.raw`SELECT E'a'
+'\'; DELETE FROM victim; --';
+SELECT 2;`;
+    expect(pg(sql)).toEqual([
+      String.raw`SELECT E'a'
+'\'; DELETE FROM victim; --'`,
+      "SELECT 2",
+    ]);
+    // A "--" comment line may sit between the parts.
+    expect(
+      pg(String.raw`SELECT E'a' -- note
+'\'; x'; SELECT 2;`)
+    ).toEqual([
+      String.raw`SELECT E'a' -- note
+'\'; x'`,
+      "SELECT 2",
+    ]);
+  });
+
+  it("does not continue a plain string in E mode", () => {
+    expect(
+      pg(String.raw`SELECT 'a'
+'\'; SELECT 2;`)
+    ).toEqual([
+      String.raw`SELECT 'a'
+'\'`,
+      "SELECT 2",
+    ]);
+  });
+
+  it("does not take a non-ASCII name ending in e for an E-string", () => {
+    expect(pg(String.raw`SELECT ée'a\'; SELECT 2;`)).toEqual([
+      String.raw`SELECT ée'a\'`,
+      "SELECT 2",
+    ]);
+  });
+
+  it("reads dollar quotes by identifier rules", () => {
+    // A non-ASCII tag is a tag.
+    expect(pg("SELECT $é$one;DROP TABLE victim;--$é$; SELECT 2;")).toEqual([
+      "SELECT $é$one;DROP TABLE victim;--$é$",
+      "SELECT 2",
+    ]);
+    // $tag$ inside an identifier is part of the identifier.
+    expect(pg("SELECT foo$tag$; SELECT 2;")).toEqual([
+      "SELECT foo$tag$",
+      "SELECT 2",
+    ]);
+    // A parameter like $1 never opens a quote.
+    expect(pg("SELECT $1$; SELECT 2;")).toEqual(["SELECT $1$", "SELECT 2"]);
+  });
+
+  it("ends a line comment at a carriage return and ignores backticks", () => {
+    expect(pg("SELECT 1 -- note\rDELETE FROM t; SELECT 2;")).toEqual([
+      "SELECT 1 -- note\rDELETE FROM t",
+      "SELECT 2",
+    ]);
+    // MySQL and SQLite end it only at a line feed: the DELETE stays in the
+    // comment's fragment there too, as the classifier reads it.
+    expect(
+      splitSqlStatements("SELECT 1 -- \r' \n; DELETE FROM t; -- '").map(
+        (s) => s.text
+      )
+    ).toEqual(["SELECT 1 -- \r'", "DELETE FROM t", "-- '"]);
+    expect(pg("SELECT '`'; SELECT `; SELECT 2;")).toEqual([
+      "SELECT '`'",
+      "SELECT `",
+      "SELECT 2",
+    ]);
+  });
+
+  // Every PostgreSQL whitespace before and after the newline, every newline.
+  const before = ["", " ", "\t", "\f", "\v", " \v\t", " -- note"];
+  const newlines = ["\n", "\r", "\r\n"];
+  const after = ["", " ", "\t", "\f", "\v", "\n", "-- note\n "];
+  it.each(
+    before.flatMap((b) =>
+      newlines.flatMap((nl) => after.map((a) => [b, nl, a] as const))
+    )
+  )("continues an E-string across %j %j %j", (b, nl, a) => {
+    const sql = `SELECT E'a'${b}${nl}${a}'\\'; DELETE FROM victim; --'; SELECT 2;`;
+    const out = pg(sql);
+    expect(out).toHaveLength(2);
+    expect(out[0]).toContain("DELETE FROM victim");
+    expect(out[1]).toBe("SELECT 2");
+  });
+});

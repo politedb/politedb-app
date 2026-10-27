@@ -20,6 +20,16 @@ import {
 import { DatabaseEditorDialog } from "./DatabaseEditorDialog";
 import { ContextMenu, MenuItem } from "src/components/common/ContextMenu";
 import { showMessage } from "src/lib/system-dialog";
+import {
+  databaseChangeCheck,
+  describeDropError,
+  dropFromOwnDatabase,
+  tabsOnDatabase,
+} from "src/screens/connection/lib/databaseDrop";
+import type {
+  DatabaseChange,
+  DatabaseChangeCheck,
+} from "src/hooks/useDatabases";
 
 type MenuState = {
   x: number;
@@ -31,6 +41,9 @@ interface Props {
   open: boolean;
   engine?: DatabaseEngine;
   runtimeConnectionId?: string;
+  /** The connection tab the dialog belongs to. */
+  tabId?: string;
+  profileId?: string;
   onOpenDatabase?: (dbName: string) => Promise<void>;
   onClose: () => void;
 }
@@ -39,6 +52,8 @@ export function DatabaseManagerDialog({
   open,
   engine,
   runtimeConnectionId,
+  tabId,
+  profileId,
   onOpenDatabase,
   onClose,
 }: Props) {
@@ -68,7 +83,27 @@ export function DatabaseManagerDialog({
     engine,
     runtimeConnectionId,
     onOpenDatabase,
+    beforeChange: useCallback(
+      (change: DatabaseChange): DatabaseChangeCheck =>
+        tabId && profileId
+          ? databaseChangeCheck(
+              tabId,
+              profileId,
+              engine,
+              change,
+              runtimeConnectionId
+            )
+          : { prepare: async () => null, checkNow: () => null },
+      [tabId, profileId, engine, runtimeConnectionId]
+    ),
   });
+
+  // Other tabs of this connection using the database a drop is asked for.
+  const otherTabsOnDropDb =
+    dropConfirmDb && profileId
+      ? tabsOnDatabase(profileId, dropConfirmDb).filter((id) => id !== tabId)
+          .length
+      : 0;
 
   const closeEditor = () => {
     setEditorMode(null);
@@ -127,6 +162,14 @@ export function DatabaseManagerDialog({
       onClick: () => {
         if (!menuState) return;
         setSelectedDb(menuState.dbName);
+        const own = tabId
+          ? dropFromOwnDatabase(tabId, engine, menuState.dbName)
+          : null;
+        if (own) {
+          setMenuState(null);
+          void showMessage(own, { title: "Drop database", kind: "warning" });
+          return;
+        }
         setDropConfirmDb(menuState.dbName);
         setDropConfirmName("");
         setMenuState(null);
@@ -297,6 +340,13 @@ export function DatabaseManagerDialog({
             </span>
             ? This cannot be undone.
           </p>
+          {otherTabsOnDropDb > 0 ? (
+            <p className="text-xs text-neutral-800">
+              {otherTabsOnDropDb === 1
+                ? "Its open tab will be closed first."
+                : `Its ${otherTabsOnDropDb} open tabs will be closed first.`}
+            </p>
+          ) : null}
         </DialogContent>
         <DialogFooter className="pt-1">
           <Button
@@ -314,9 +364,12 @@ export function DatabaseManagerDialog({
             className="border border-blue-500"
             onClick={() => {
               if (!dropConfirmDb) return;
-              onDropDbByName(dropConfirmDb);
+              const name = dropConfirmDb;
               setDropConfirmDb(null);
               setDropConfirmName("");
+              void onDropDbByName(name, (message) =>
+                describeDropError(message, name)
+              );
             }}
             disabled={busy || dropConfirmName.trim() !== (dropConfirmDb ?? "")}
           >
