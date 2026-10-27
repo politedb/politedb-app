@@ -98,9 +98,13 @@ export function MainScreen() {
 
   // Kept in a store: this screen unmounts while a connection tab is open, and
   // coming back must not reset search, sort, layout or the chosen group.
-  const searchQuery = useMainViewStore((s) => s.searchQuery);
-  const setSearchQuery = useMainViewStore((s) => s.setSearchQuery);
   const activeNav = useMainViewStore((s) => s.activeNav);
+  // The search box filters only the page it was typed on.
+  const searchQuery = useMainViewStore(
+    (s) => s.searchQueryByNav[activeNav] ?? ""
+  );
+  const setSearchQueryFor = useMainViewStore((s) => s.setSearchQuery);
+  const setSearchQuery = (query: string) => setSearchQueryFor(activeNav, query);
   const setActiveNav = useMainViewStore((s) => s.setActiveNav);
   const viewMode = useMainViewStore((s) => s.viewMode);
   const setViewMode = useMainViewStore((s) => s.setViewMode);
@@ -526,6 +530,8 @@ export function MainScreen() {
                 knownProfileIds={knownProfileIds}
                 onOpenConnection={openProfileInTab}
                 onShowConnection={(profileId) => {
+                  // Show it even if the Connections search would hide it.
+                  setSearchQueryFor("connections", "");
                   setActiveNav("connections");
                   selectProfile(profileId);
                 }}
