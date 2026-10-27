@@ -89,3 +89,28 @@ it("inserts an enum array row from the grid", () => {
     `INSERT INTO "app"."users" ("role", "roles")\nVALUES ('admin', '{"admin",NULL}');`,
   ]);
 });
+
+describe("PostgreSQL grid strings with backslashes", () => {
+  it("are E'…' strings, the same with standard_conforming_strings on or off", () => {
+    expect(formatSqlValue("a\\b 'q'", "text", "postgres")).toBe(
+      String.raw`E'a\\b ''q'''`
+    );
+    expect(formatSqlValue("plain 'q'", "text", "postgres")).toBe(
+      "'plain ''q'''"
+    );
+    // Array elements escape quotes with backslashes too.
+    expect(
+      formatSqlValue({ t: "Json", v: '["q\\"x", null]' }, "_text", "postgres")
+    ).toBe(String.raw`E'{"q\\"x",NULL}'`);
+    // bytea[] elements arrive as \x hex text.
+    expect(
+      formatSqlValue(
+        { t: "Json", v: '["\\\\x00ff", null]' },
+        "_bytea",
+        "postgres"
+      )
+    ).toBe(String.raw`E'{"\\\\x00ff",NULL}'`);
+    // Other engines keep their quoting.
+    expect(formatSqlValue("a\\b", "text", "sqlite")).toBe("'a\\b'");
+  });
+});

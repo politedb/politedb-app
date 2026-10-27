@@ -191,7 +191,9 @@ impl ColDecoder {
 
             ColDecoder::ByteaArray => match row.try_get::<usize, Option<Vec<Option<Vec<u8>>>>>(idx)
             {
-                Ok(Some(arr)) => json_array(arr.into_iter().map(|x| x.map(|v| B64.encode(v)))),
+                // Each element in PostgreSQL's text form (\x hex), so the
+                // array reads back as the same bytes when written again.
+                Ok(Some(arr)) => json_array(arr.into_iter().map(|x| x.map(|v| bytea_hex(&v)))),
                 Ok(None) => CellValue::Null,
                 Err(_) => fallback_to_text_or_bytes(row, idx),
             },
@@ -293,6 +295,16 @@ fn cell_to_json(c: CellValue) -> serde_json::Value {
         CellValue::Json(v) => serde_json::Value::String(v),
         CellValue::BytesB64(v) => serde_json::Value::String(v),
     }
+}
+
+/// A bytea value in PostgreSQL's hex text form (`\x00ff`).
+fn bytea_hex(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(2 + bytes.len() * 2);
+    out.push_str("\\x");
+    for b in bytes {
+        out.push_str(&format!("{b:02x}"));
+    }
+    out
 }
 
 /// A PostgreSQL enum value. Its binary form is the label's UTF-8 text, but
@@ -468,6 +480,12 @@ mod tests {
     }
 
     #[test]
+    fn bytea_hex_is_postgres_text_form() {
+        assert_eq!(bytea_hex(&[0x00, 0xff, 0x27]), "\\x00ff27");
+        assert_eq!(bytea_hex(&[]), "\\x");
+    }
+
+    #[test]
     fn enum_labels_decode_as_text() {
         let ty = enum_type();
         assert!(<EnumLabel as FromSql>::accepts(&ty));
@@ -503,14 +521,15 @@ mod tests {
             .batch_execute(
                 "DROP TABLE IF EXISTS zz_codec_users; DROP TYPE IF EXISTS zz_codec_role;
                  CREATE TYPE zz_codec_role AS ENUM ('admin', 'customer');
-                 CREATE TABLE zz_codec_users (role zz_codec_role, roles zz_codec_role[]);
+                 CREATE TABLE zz_codec_users (role zz_codec_role, roles zz_codec_role[], bya bytea[]);
                  INSERT INTO zz_codec_users VALUES
-                   ('customer', ARRAY['admin', NULL]::zz_codec_role[]), (NULL, NULL);",
+                   ('customer', ARRAY['admin', NULL]::zz_codec_role[], ARRAY['\\x00ff'::bytea, NULL]),
+                   (NULL, NULL, NULL);",
             )
             .await
             .unwrap();
         let stmt = client
-            .prepare("SELECT role, roles FROM zz_codec_users ORDER BY role NULLS LAST")
+            .prepare("SELECT role, roles, bya FROM zz_codec_users ORDER BY role NULLS LAST")
             .await
             .unwrap();
         let (_, decoders) = build_meta_and_decoders(&stmt);
@@ -526,6 +545,7 @@ mod tests {
 
         assert!(matches!(&cells[0][0], CellValue::Str(s) if s == "customer"));
         assert!(matches!(&cells[0][1], CellValue::Json(s) if s == r#"["admin",null]"#));
+        assert!(matches!(&cells[0][2], CellValue::Json(s) if s == r#"["\\x00ff",null]"#));
         assert!(matches!(cells[1][0], CellValue::Null));
         assert!(matches!(cells[1][1], CellValue::Null));
     }
