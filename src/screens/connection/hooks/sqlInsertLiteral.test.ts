@@ -11,16 +11,16 @@ function qIdent(name: string, _engine: string) {
 }
 
 describe("jsonArrayToPgArraySql", () => {
-  it("converts JSON string array to ARRAY[]::text[]", () => {
-    expect(jsonArrayToPgArraySql('["*"]', "_text")).toBe("ARRAY['*']::text[]");
+  it("converts a JSON string array to an array literal", () => {
+    expect(jsonArrayToPgArraySql('["*"]', "_text")).toBe(`'{"*"}'`);
     expect(
       jsonArrayToPgArraySql('["view_category","edit_post"]', "text[]")
-    ).toBe("ARRAY['view_category', 'edit_post']::text[]");
+    ).toBe(`'{"view_category","edit_post"}'`);
   });
 
   it("handles nulls, bools, numbers, and quotes", () => {
     expect(jsonArrayToPgArraySql('[null, true, 2, "a\'b"]', "_text")).toBe(
-      "ARRAY[NULL, TRUE, 2, 'a''b']::text[]"
+      `'{NULL,"true","2","a''b"}'`
     );
   });
 });
@@ -40,7 +40,7 @@ describe("formatSqlInsertValue", () => {
         { t: "Json", v: '["*"]' },
         { dbType: "_text", engine: "postgres" }
       )
-    ).toBe("ARRAY['*']::text[]");
+    ).toBe(`'{"*"}'`);
   });
 
   it("keeps JSON quoted for jsonb columns", () => {
@@ -115,7 +115,7 @@ describe("formatSqlInsertChunk", () => {
     expect(sql).toContain(
       `INSERT INTO "public"."permission_groups" ("id", "name", "permissions") VALUES`
     );
-    expect(sql).toContain(`(1, 'Super Admin', ARRAY['*']::text[])`);
+    expect(sql).toContain(`(1, 'Super Admin', '{"*"}')`);
     expect(sql).not.toContain("'[\"*\"]'");
   });
 });

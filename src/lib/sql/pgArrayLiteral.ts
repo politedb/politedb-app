@@ -18,47 +18,6 @@ export function pgArrayCastType(dbType: string): string {
   return "text[]";
 }
 
-/**
- * Built-in element types (pg_catalog, always on the search path): their
- * arrays are written ARRAY[…]::type[]. Any other type (an enum, a domain,
- * an extension type) may be in another schema or need quoting, which the
- * reported name does not say, so its arrays are written as an array
- * literal whose type comes from the destination column.
- */
-const BUILTIN_ELEMENT_TYPES = new Set([
-  "bool",
-  "int2",
-  "int4",
-  "int8",
-  "float4",
-  "float8",
-  "numeric",
-  "money",
-  "oid",
-  "text",
-  "varchar",
-  "bpchar",
-  "char",
-  "name",
-  "uuid",
-  "date",
-  "time",
-  "timetz",
-  "timestamp",
-  "timestamptz",
-  "interval",
-  "json",
-  "jsonb",
-  "bytea",
-  "inet",
-  "cidr",
-  "macaddr",
-  "macaddr8",
-  "bit",
-  "varbit",
-  "xml",
-]);
-
 /** An element of a PostgreSQL array literal ({…} text). */
 function arrayLiteralElement(item: unknown): string {
   if (item === null || item === undefined) return "NULL";
@@ -78,10 +37,15 @@ function arrayLiteralElement(item: unknown): string {
  * SQL for a PostgreSQL array value given as JSON array text, or null when
  * the text is not a JSON array (the caller keeps its own handling).
  * `quote` writes an SQL string literal the caller's way.
+ *
+ * Always an array literal ('{…}') whose type comes from the destination
+ * column (INSERT target, SET column, WHERE comparison), never a cast: the
+ * reported type name has no schema and is lowercased by some callers, so
+ * a cast could name another type (an enum "Text" in another schema is not
+ * text). Nested JSON arrays become multidimensional literals.
  */
 export function pgArrayValueSql(
   jsonText: string,
-  dbType: string,
   quote: (text: string) => string
 ): string | null {
   let parsed: unknown;
@@ -91,19 +55,5 @@ export function pgArrayValueSql(
     return null;
   }
   if (!Array.isArray(parsed)) return null;
-
-  const cast = pgArrayCastType(dbType);
-  const element = cast.slice(0, -2);
-  if (!BUILTIN_ELEMENT_TYPES.has(element)) {
-    return quote(`{${parsed.map(arrayLiteralElement).join(",")}}`);
-  }
-
-  const elems = parsed.map((item) => {
-    if (item === null) return "NULL";
-    if (typeof item === "boolean") return item ? "TRUE" : "FALSE";
-    if (typeof item === "number" && Number.isFinite(item)) return String(item);
-    if (typeof item === "string") return quote(item);
-    return quote(JSON.stringify(item));
-  });
-  return `ARRAY[${elems.join(", ")}]::${cast}`;
+  return quote(`{${parsed.map(arrayLiteralElement).join(",")}}`);
 }

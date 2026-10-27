@@ -818,7 +818,6 @@ export function formatSqlValue(
   if (engine === "postgres" && isPostgresArrayType(dbType)) {
     const arraySql = pgArrayValueSql(
       typeof raw === "string" ? raw : JSON.stringify(raw),
-      dbType!,
       (text) => sqlStringLiteral(text, engine)
     );
     if (arraySql) return arraySql;

@@ -7,33 +7,24 @@ import { jsonArrayToPgArraySql } from "src/screens/connection/hooks/sqlInsertLit
 const quote = (text: string) => `'${text.replace(/'/g, "''")}'`;
 
 describe("pgArrayValueSql", () => {
-  it("writes built-in element types as ARRAY[…]::type[]", () => {
-    expect(pgArrayValueSql('["a", null, "it\'s"]', "_text", quote)).toBe(
-      "ARRAY['a', NULL, 'it''s']::text[]"
+  it("writes every array as a literal typed by the destination column", () => {
+    expect(pgArrayValueSql('["a", null, "it\'s"]', quote)).toBe(
+      `'{"a",NULL,"it''s"}'`
     );
-    expect(pgArrayValueSql("[1, 2]", "_int4", quote)).toBe(
-      "ARRAY[1, 2]::int4[]"
+    expect(pgArrayValueSql("[1, 2, true]", quote)).toBe(`'{"1","2","true"}'`);
+    expect(pgArrayValueSql('["admin", null]', quote)).toBe(`'{"admin",NULL}'`);
+    expect(pgArrayValueSql("[]", quote)).toBe("'{}'");
+    expect(pgArrayValueSql("[[1, null], [3, 4]]", quote)).toBe(
+      `'{{"1",NULL},{"3","4"}}'`
     );
-  });
-
-  it("writes other element types (enums) as a literal typed by the column", () => {
-    // Mixed case and other schemas are not in the reported name: no cast.
-    expect(pgArrayValueSql('["admin", null]', "_UserRole", quote)).toBe(
-      `'{"admin",NULL}'`
-    );
-    expect(pgArrayValueSql("[]", "_role", quote)).toBe("'{}'");
     expect(
-      pgArrayValueSql(
-        '["a,b", "NULL", "q\\"x", "b\\\\s", "{}"]',
-        "_mood",
-        quote
-      )
-    ).toBe(String.raw`'{"a,b","NULL","q\"x","b\\s","{}"}'`);
+      pgArrayValueSql('["a,b", "NULL", "q\\"x", "b\\\\s", "{}", ""]', quote)
+    ).toBe(String.raw`'{"a,b","NULL","q\"x","b\\s","{}",""}'`);
   });
 
   it("leaves text that is not a JSON array to the caller", () => {
-    expect(pgArrayValueSql("{admin}", "_role", quote)).toBeNull();
-    expect(pgArrayValueSql('"x"', "_role", quote)).toBeNull();
+    expect(pgArrayValueSql("{admin}", quote)).toBeNull();
+    expect(pgArrayValueSql('"x"', quote)).toBeNull();
   });
 });
 
@@ -58,7 +49,11 @@ describe("enum arrays in backups and table edits", () => {
     ).toBe(`'{"admin",NULL}'`);
     expect(
       formatSqlValue({ t: "Json", v: '["a",null]' }, "_text", "postgres")
-    ).toBe("ARRAY['a', NULL]::text[]");
+    ).toBe(`'{"a",NULL}'`);
+    // An enum named like a built-in type is not cast to that type.
+    expect(
+      formatSqlValue({ t: "Json", v: '["admin",null]' }, "_Text", "postgres")
+    ).toBe(`'{"admin",NULL}'`);
     // An array literal typed in the editor stays as typed.
     expect(formatSqlValue("{admin,customer}", "_user_role", "postgres")).toBe(
       "'{admin,customer}'"

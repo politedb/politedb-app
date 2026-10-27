@@ -35,8 +35,8 @@ export function isPostgresJsonType(dbType: string): boolean {
 
 /**
  * Convert a JSON array string (how PoliteDB stores PG arrays in CellValue::Json)
- * into SQL that Postgres accepts on restore: ARRAY[...]::elem[] for built-in
- * element types, an array literal typed by the column for others (enums).
+ * into SQL that Postgres accepts on restore: an array literal typed by the
+ * destination column.
  */
 export function jsonArrayToPgArraySql(
   jsonText: string,
@@ -45,7 +45,7 @@ export function jsonArrayToPgArraySql(
 ): string {
   const quote = (text: string) => sqlQuoteString(text, engine);
   return (
-    pgArrayValueSql(jsonText, dbType, quote) ??
+    pgArrayValueSql(jsonText, quote) ??
     `${quote(jsonText)}::${pgArrayCastType(dbType)}`
   );
 }
