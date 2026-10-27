@@ -4,7 +4,7 @@ use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use chrono::FixedOffset;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime};
 use std::net::IpAddr;
-use tokio_postgres::types::{FromSql, Type};
+use tokio_postgres::types::{FromSql, Kind, Type};
 use tokio_postgres::{Row, Statement};
 
 #[derive(Clone, Copy)]
@@ -295,21 +295,51 @@ fn cell_to_json(c: CellValue) -> serde_json::Value {
     }
 }
 
+/// A PostgreSQL enum value. Its binary form is the label's UTF-8 text, but
+/// `String` only accepts the built-in text types, so enums need their own
+/// reader (without it they decoded as NULL, and backups lost them).
+struct EnumLabel(String);
+
+impl<'a> FromSql<'a> for EnumLabel {
+    fn from_sql(
+        _ty: &Type,
+        raw: &'a [u8],
+    ) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+        Ok(EnumLabel(std::str::from_utf8(raw)?.to_owned()))
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        matches!(ty.kind(), Kind::Enum(_))
+    }
+}
+
 #[inline]
 fn fallback_to_text_or_bytes(row: &Row, idx: usize) -> CellValue {
-    // 1) Prefer TEXT representation (works for many enums/domains/extensions/ranges)
+    // 1) Prefer TEXT representation (works for many domains/extensions/ranges)
     match row.try_get::<usize, Option<String>>(idx) {
         Ok(Some(s)) => return CellValue::Str(s),
         Ok(None) => return CellValue::Null,
         Err(_) => {}
     }
 
-    // 2) JSON-ish
+    // 2) Enums and enum arrays, by their labels
+    match row.try_get::<usize, Option<EnumLabel>>(idx) {
+        Ok(Some(v)) => return CellValue::Str(v.0),
+        Ok(None) => return CellValue::Null,
+        Err(_) => {}
+    }
+    match row.try_get::<usize, Option<Vec<Option<EnumLabel>>>>(idx) {
+        Ok(Some(arr)) => return json_array(arr.into_iter().map(|x| x.map(|v| v.0))),
+        Ok(None) => return CellValue::Null,
+        Err(_) => {}
+    }
+
+    // 3) JSON-ish
     if let Ok(Some(j)) = row.try_get::<usize, Option<serde_json::Value>>(idx) {
         return CellValue::Json(j.to_string());
     }
 
-    // 3) Last-resort: bytes base64
+    // 4) Last-resort: bytes base64
     match row.try_get::<usize, Option<Vec<u8>>>(idx) {
         Ok(Some(b)) => CellValue::BytesB64(B64.encode(b)),
         Ok(None) => CellValue::Null,
@@ -422,4 +452,81 @@ pub fn row_to_cells_with_decoders(row: &Row, decoders: &[ColDecoder]) -> Vec<Cel
         out.push(d.decode(row, i));
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn enum_type() -> Type {
+        Type::new(
+            "user_role".into(),
+            90_001,
+            Kind::Enum(vec!["admin".into(), "customer".into()]),
+            "public".into(),
+        )
+    }
+
+    #[test]
+    fn enum_labels_decode_as_text() {
+        let ty = enum_type();
+        assert!(<EnumLabel as FromSql>::accepts(&ty));
+        assert!(!<EnumLabel as FromSql>::accepts(&Type::INT4));
+        let v = EnumLabel::from_sql(&ty, "customer".as_bytes()).unwrap();
+        assert_eq!(v.0, "customer");
+
+        let array = Type::new(
+            "_user_role".into(),
+            90_002,
+            Kind::Array(ty),
+            "public".into(),
+        );
+        assert!(<Vec<Option<EnumLabel>> as FromSql>::accepts(&array));
+        // Text types keep their own reader.
+        assert!(!<String as FromSql>::accepts(&enum_type()));
+    }
+
+    /// Live check against a disposable PostgreSQL (never a customer database):
+    /// `HEALTH_PG_URL=postgres://user:pass@127.0.0.1:55432/postgres \
+    ///  cargo test row_codec_enum_live -- --ignored`
+    /// Creates and drops the type `zz_codec_role` and table `zz_codec_users`.
+    #[tokio::test]
+    #[ignore]
+    async fn row_codec_enum_live() {
+        let cfg: tokio_postgres::Config = std::env::var("HEALTH_PG_URL")
+            .expect("set HEALTH_PG_URL")
+            .parse()
+            .expect("valid HEALTH_PG_URL");
+        let (client, conn) = cfg.connect(tokio_postgres::NoTls).await.unwrap();
+        tokio::spawn(conn);
+        client
+            .batch_execute(
+                "DROP TABLE IF EXISTS zz_codec_users; DROP TYPE IF EXISTS zz_codec_role;
+                 CREATE TYPE zz_codec_role AS ENUM ('admin', 'customer');
+                 CREATE TABLE zz_codec_users (role zz_codec_role, roles zz_codec_role[]);
+                 INSERT INTO zz_codec_users VALUES
+                   ('customer', ARRAY['admin', NULL]::zz_codec_role[]), (NULL, NULL);",
+            )
+            .await
+            .unwrap();
+        let stmt = client
+            .prepare("SELECT role, roles FROM zz_codec_users ORDER BY role NULLS LAST")
+            .await
+            .unwrap();
+        let (_, decoders) = build_meta_and_decoders(&stmt);
+        let rows = client.query(&stmt, &[]).await.unwrap();
+        let cells: Vec<Vec<CellValue>> = rows
+            .iter()
+            .map(|r| row_to_cells_with_decoders(r, &decoders))
+            .collect();
+        client
+            .batch_execute("DROP TABLE zz_codec_users; DROP TYPE zz_codec_role;")
+            .await
+            .unwrap();
+
+        assert!(matches!(&cells[0][0], CellValue::Str(s) if s == "customer"));
+        assert!(matches!(&cells[0][1], CellValue::Json(s) if s == r#"["admin",null]"#));
+        assert!(matches!(cells[1][0], CellValue::Null));
+        assert!(matches!(cells[1][1], CellValue::Null));
+    }
 }
