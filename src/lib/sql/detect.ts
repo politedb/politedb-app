@@ -90,12 +90,21 @@ type Dialect = "postgres" | "mysql";
  * /*M! … *\/) runs code.
  *
  * - postgres (and standard SQL): block comments nest, "--" always starts a
- *   comment, "#" is an operator, a backslash escapes only in E'…' strings,
- *   $tag$…$tag$ quotes text.
+ *   comment, "#" is an operator, $tag$…$tag$ quotes text; a backslash
+ *   escapes in E'…' strings, and in every '…' string when the session has
+ *   standard_conforming_strings off.
  * - mysql: block comments do not nest, "#" starts a comment, "--" only
- *   when followed by whitespace, a backslash escapes in '…' and "…".
+ *   when followed by whitespace; a backslash escapes in '…' and "…" unless
+ *   the session's sql_mode has NO_BACKSLASH_ESCAPES.
+ *
+ * Whether a backslash escapes depends on the session, which is not known
+ * here, so `backslashEscapes` selects one of the two readings.
  */
-function executableText(s: string, dialect: Dialect): string | null {
+function executableText(
+  s: string,
+  dialect: Dialect,
+  backslashEscapes: boolean
+): string | null {
   const pg = dialect === "postgres";
   const len = s.length;
   let out = "";
@@ -133,12 +142,13 @@ function executableText(s: string, dialect: Dialect): string | null {
       continue;
     }
     if (c === "'" || c === '"' || c === "`") {
-      // PostgreSQL E'…' (e'…') strings take backslash escapes.
+      // PostgreSQL E'…' (e'…') strings always take backslash escapes.
       const escapes = pg
         ? c === "'" &&
-          /[eE]/.test(s[i - 1] ?? "") &&
-          !/[\p{L}\p{N}_$]/u.test(s[i - 2] ?? "")
-        : c !== "`";
+          (backslashEscapes ||
+            (/[eE]/.test(s[i - 1] ?? "") &&
+              !/[\p{L}\p{N}_$]/u.test(s[i - 2] ?? "")))
+        : backslashEscapes && c !== "`";
       i++;
       while (i < len) {
         if (escapes && s[i] === "\\") {
@@ -234,9 +244,12 @@ function dialectsFor(engine?: string): readonly Dialect[] {
 export function isMutatingStatement(sql: string, engine?: string) {
   if (!sql) return false;
   for (const dialect of dialectsFor(engine)) {
-    const text = executableText(sql, dialect);
-    if (text === null) return true;
-    if (codeIsWrite(text.replace(/\s+/g, " ").trim())) return true;
+    // Both settings of the session's backslash handling.
+    for (const backslashEscapes of [false, true]) {
+      const text = executableText(sql, dialect, backslashEscapes);
+      if (text === null) return true;
+      if (codeIsWrite(text.replace(/\s+/g, " ").trim())) return true;
+    }
   }
   return false;
 }

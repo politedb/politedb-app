@@ -78,8 +78,6 @@ describe("isMutatingStatement", () => {
     "WITH t AS (SELECT 1 /* DELETE */) SELECT * FROM t;",
     'SELECT "into" FROM a;',
     "SELECT $1::int;",
-    // PostgreSQL E'…' strings escape quotes with a backslash.
-    "SELECT E'it\\'s INTO text';",
     // "$" belongs to the identifier: no INTO/DELETE token here.
     "SELECT cost$into FROM a;",
     "WITH t AS (SELECT cost$delete FROM a) SELECT * FROM t;",
@@ -110,6 +108,8 @@ describe("isMutatingStatement for a known engine", () => {
     "SELECT $$ /*! text */ $$;",
     // "--" starts a PostgreSQL comment without a space after it.
     "SELECT 1 --note INTO backup\n;",
+    // E'…' strings always escape quotes with a backslash.
+    "SELECT E'it\\'s INTO text';",
   ])("reads %s as PostgreSQL", (sql) => {
     expect(isMutatingStatement(sql, "postgres")).toBe(false);
   });
@@ -137,6 +137,21 @@ describe("isMutatingStatement for a known engine", () => {
       )
     ).toBe(true);
   });
+
+  it.each<[string, string]>([
+    // MySQL/MariaDB with NO_BACKSLASH_ESCAPES: the backslash is text and
+    // the quote after it ends the string.
+    ["SELECT 'a\\' INTO OUTFILE '/tmp/x';", "mysql"],
+    ["SELECT 'a\\' INTO OUTFILE '/tmp/x';", "mariadb"],
+    // PostgreSQL with standard_conforming_strings off: the backslash
+    // escapes the quote.
+    ["SELECT 'a\\'b' INTO backup_x;", "postgres"],
+  ])(
+    "catches %s on %s whichever way the session treats backslashes",
+    (sql, engine) => {
+      expect(isMutatingStatement(sql, engine)).toBe(true);
+    }
+  );
 
   it("reads other or unknown engines both ways, erring towards a write", () => {
     expect(isMutatingStatement("SELECT 1 # note INTO backup\n;")).toBe(true);

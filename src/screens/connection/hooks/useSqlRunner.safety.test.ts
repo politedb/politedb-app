@@ -44,7 +44,8 @@ async function run(sql: string, engine: DatabaseEngine, locked: boolean) {
   await act(async () => {
     await hook.result.current.startRun({ windowId, sql });
   });
-  return onRunSql;
+  const runs = JSON.stringify(hook.result.current.sqlRuns);
+  return { onRunSql, runs };
 }
 
 beforeEach(() => {
@@ -57,9 +58,13 @@ describe("the SQL editor in Lock mode", () => {
     ["SELECT 1 # 2 INTO backup_x", "postgres"],
     ["SELECT 1--1 INTO OUTFILE '/tmp/x'", "mysql"],
     ["EXPLAIN ANALYZE DELETE FROM a", "postgres"],
+    ["SELECT 'a\\' INTO OUTFILE '/tmp/x'", "mariadb"],
+    ["SELECT 'a\\'b' INTO backup_x", "postgres"],
   ])("blocks the hidden write %s on %s", async (sql, engine) => {
-    const onRunSql = await run(sql, engine, true);
+    const { onRunSql, runs } = await run(sql, engine, true);
     expect(onRunSql).not.toHaveBeenCalled();
+    // Blocked by Lock, not by some other early exit.
+    expect(runs).toContain("This profile tab is locked");
   });
 
   it.each<[string, DatabaseEngine]>([
@@ -67,7 +72,7 @@ describe("the SQL editor in Lock mode", () => {
     ["SELECT 1 --note INTO backup\n", "postgres"],
     ["SELECT 1 # note INTO backup\n", "mysql"],
   ])("runs the read %s on %s", async (sql, engine) => {
-    const onRunSql = await run(sql, engine, true);
+    const { onRunSql } = await run(sql, engine, true);
     expect(onRunSql).toHaveBeenCalledTimes(1);
   });
 });
