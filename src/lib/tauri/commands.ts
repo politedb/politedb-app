@@ -69,6 +69,11 @@ export const CMD = {
   operationCancel: "operation_cancel",
   operationChunkAck: "operation_chunk_ack",
 
+  // PostgreSQL sessions held across calls
+  sqlSessionBegin: "sql_session_begin",
+  sqlSessionExecute: "sql_session_execute",
+  sqlSessionEnd: "sql_session_end",
+
   // Draft sql management
   draftSqlLoad: "sql_draft_load",
   draftSqlSave: "sql_draft_save",

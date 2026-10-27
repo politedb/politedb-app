@@ -11,6 +11,8 @@ const m = vi.hoisted(() => ({
   startSqlQueryStream: vi.fn(),
   subscribe: vi.fn(),
   cancel: vi.fn(),
+  sessionBegin: vi.fn(),
+  sessionEnd: vi.fn(),
 }));
 
 vi.mock("src/lib/system-dialog", () => ({
@@ -35,6 +37,11 @@ vi.mock("src/lib/tauri/operationBus", () => ({
   operationBus: { subscribe: m.subscribe },
 }));
 vi.mock("src/lib/tauri/operation", () => ({ operationCancel: m.cancel }));
+vi.mock("src/lib/tauri/sqlSession", () => ({
+  sqlSessionBegin: m.sessionBegin,
+  sqlSessionEnd: m.sessionEnd,
+  sqlSessionExecute: vi.fn(),
+}));
 vi.mock("../workspace/ConnectionRuntimeContext", () => ({
   useConnectionRuntimeCtx: () => ({
     profileId: "t1",
@@ -75,6 +82,11 @@ beforeEach(() => {
   m.runSqlQuery.mockResolvedValue({ rows: [] });
   m.startSqlQueryStream.mockResolvedValue("op1");
   m.cancel.mockResolvedValue(undefined);
+  m.sessionBegin.mockResolvedValue({
+    sessionId: "s1",
+    snapshotId: "00000003-1",
+  });
+  m.sessionEnd.mockResolvedValue(undefined);
   useScreenStore.setState({
     profileTabs: [{ id: "t1", profileId: "p1", label: "db" } as never],
   });
@@ -100,6 +112,15 @@ describe("database backup file", () => {
     const { result } = renderHook(() => useDatabaseBackup());
     await act(() => result.current.onBackupDatabase("db"));
     expect(m.writeFile).toHaveBeenCalledTimes(1);
+    // Every query of the backup reads the session's snapshot.
+    expect(m.sessionBegin).toHaveBeenCalledWith("conn_1", "snapshot");
+    expect(m.startSqlQueryStream.mock.calls[0]![2]).toMatchObject({
+      snapshotId: "00000003-1",
+    });
+    for (const call of m.runSqlQuery.mock.calls) {
+      expect(call[2]).toMatchObject({ snapshotId: "00000003-1" });
+    }
+    expect(m.sessionEnd).toHaveBeenCalledWith("s1", false);
     const sql = m.pack.mock.calls[0]![0].sql as string;
     expect(sql).toContain(
       `INSERT INTO "public"."t" ("id", "note") VALUES\n  ('1', 'a''b');`

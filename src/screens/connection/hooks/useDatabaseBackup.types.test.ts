@@ -600,3 +600,16 @@ describe("buildPostgresTableStructure: generated and identity columns", () => {
     );
   });
 });
+
+describe("catalog queries", () => {
+  it("quote a name holding a backslash as an E'' literal", async () => {
+    m.runSqlQuery
+      .mockResolvedValueOnce({ rows: [[{ t: "Bool", v: true }]] })
+      .mockResolvedValueOnce({ rows: [] });
+    await postgresMoneyColumns("c1", "s\\'x", "t");
+    const sql = m.runSqlQuery.mock.calls[1]![1] as string;
+    // With standard_conforming_strings off a plain '…' would end at \'.
+    expect(sql).toContain(String.raw`n.nspname = E's\\''x'`);
+    expect(sql).toContain("c.relname = 't'");
+  });
+});

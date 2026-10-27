@@ -38,6 +38,11 @@ export type RunSqlOptions = {
    * back the same elsewhere (backups).
    */
   canonicalTextOutput?: boolean;
+  /**
+   * PostgreSQL: read this exported snapshot (sqlSessionBegin "snapshot"),
+   * so separate queries see one database state.
+   */
+  snapshotId?: string;
 };
 
 const SQL_BUSY_RETRY_MAX = 8;
@@ -318,6 +323,7 @@ export async function runSqlQuery(
             statement_timeout_ms: opts?.statementTimeoutMs,
             lock_timeout_ms: opts?.lockTimeoutMs,
             read_only: opts?.readOnly,
+            snapshot_id: opts?.snapshotId,
             client_mode: "direct",
           },
         },
@@ -491,6 +497,7 @@ export async function startSqlQueryStream(
           max_rows: opts?.maxRows,
           client_mode: "stream",
           canonical_text_output: opts?.canonicalTextOutput,
+          snapshot_id: opts?.snapshotId,
         },
       },
       signal

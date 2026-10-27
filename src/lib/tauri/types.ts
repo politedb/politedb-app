@@ -391,6 +391,8 @@ export type SqlQueryPayload = {
   read_only?: boolean;
   /** PostgreSQL only: fixed text formats (ISO dates, exact floats). */
   canonical_text_output?: boolean;
+  /** PostgreSQL only: read this exported snapshot. */
+  snapshot_id?: string;
   client_mode?: "direct" | "stream";
 };
 

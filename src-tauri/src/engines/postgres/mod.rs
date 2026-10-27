@@ -6,3 +6,4 @@ pub mod explain_analyze;
 pub mod operation;
 pub mod row_codec;
 pub mod session_signal;
+pub mod sql_session;

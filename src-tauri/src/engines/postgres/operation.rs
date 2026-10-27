@@ -179,6 +179,24 @@ pub async fn run_pg_sql_query(
         }
     };
 
+    // Optional shared snapshot: must come first in the transaction.
+    if let Some(snapshot) = sql_input.snapshot_id.as_deref() {
+        let set = if super::sql_session::is_snapshot_id(snapshot) {
+            tx.batch_execute(&format!(
+                "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY; \
+                 SET TRANSACTION SNAPSHOT '{snapshot}'"
+            ))
+            .await
+            .map_err(|e| format_pg_error(&e, &sql_input.sql))
+        } else {
+            Err("INVALID_SNAPSHOT_ID".to_string())
+        };
+        if let Err(message) = set {
+            emit_error(&ctx.app, op_id, message, started_at.elapsed().as_millis());
+            return;
+        }
+    }
+
     // Optional read-only: applies to this transaction (must run before any
     // query in it). `default_transaction_read_only` would only affect later ones.
     if sql_input.read_only.unwrap_or(false) {
@@ -532,7 +550,7 @@ pub(crate) fn pg_error_text(e: &tokio_postgres::Error) -> String {
 /// `"db error"`; the actionable Postgres text lives on the `DbError` source
 /// (`message`, `detail`, `hint`). Prefer that (and optional SQL caret) so
 /// callers — including Health Inspector — never surface `"ROW_STREAM_FAILED: db error"`.
-fn format_pg_error(e: &tokio_postgres::Error, sql: &str) -> String {
+pub(crate) fn format_pg_error(e: &tokio_postgres::Error, sql: &str) -> String {
     format_pg_error_after_prefix(e, sql, 0)
 }
 

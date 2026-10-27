@@ -11,6 +11,11 @@ import { startSqlQueryStream, runSqlQuery } from "src/lib/tauri/query";
 import { operationBus } from "src/lib/tauri/operationBus";
 import { operationCancel } from "src/lib/tauri/operation";
 import {
+  sqlSessionBegin,
+  sqlSessionEnd,
+  sqlSessionExecute,
+} from "src/lib/tauri/sqlSession";
+import {
   tableColumnsQuery,
   tableExportQuery,
   qIdent,
@@ -224,6 +229,15 @@ function parsePgAlterAddConstraint(sql: string): {
   };
 }
 
+/**
+ * A PostgreSQL string literal for catalog queries: E'…' with doubled
+ * backslashes when the text holds one, so a name with a backslash stays
+ * one literal even where the server has standard_conforming_strings off.
+ */
+function pgLiteral(value: string): string {
+  return qLiteral(value, "postgres");
+}
+
 function isPgAddForeignKeyStatement(sql: string): boolean {
   const s = sql.trim().toUpperCase();
   return (
@@ -247,9 +261,9 @@ async function pgConstraintExists(args: {
       FROM pg_constraint c
       JOIN pg_class t ON t.oid = c.conrelid
       JOIN pg_namespace n ON n.oid = t.relnamespace
-      WHERE n.nspname = ${qLiteral(schema)}
-        AND t.relname = ${qLiteral(table)}
-        AND c.conname = ${qLiteral(constraint)}
+      WHERE n.nspname = ${pgLiteral(schema)}
+        AND t.relname = ${pgLiteral(table)}
+        AND c.conname = ${pgLiteral(constraint)}
       LIMIT 1;
     `,
     { timeoutMs: 30_000 }
@@ -264,6 +278,61 @@ type BackupTable = {
   kind?: string;
 };
 
+/**
+ * The snapshot a running PostgreSQL backup reads, by runtime connection:
+ * its catalog queries and row streams all see one database state, even
+ * while others write. Set for the duration of a backup only.
+ */
+const backupSnapshots = new Map<string, string>();
+
+/** A query of a backup, reading its snapshot when it has one. */
+function backupQuery(
+  connectionId: string,
+  sql: string,
+  opts?: Parameters<typeof runSqlQuery>[2]
+) {
+  const snapshotId = backupSnapshots.get(connectionId);
+  const withSnapshot = snapshotId ? { ...opts, snapshotId } : opts;
+  return withSnapshot
+    ? runSqlQuery(connectionId, sql, withSnapshot)
+    : runSqlQuery(connectionId, sql);
+}
+
+/**
+ * Tables a dump inserts into that already exist and have rows (PostgreSQL),
+ * as written in the dump ("schema"."table"). Only dump INSERT targets of
+ * that exact quoted form are checked.
+ */
+async function pgTablesWithRows(
+  connectionId: string,
+  statements: string[]
+): Promise<string[]> {
+  const targets = new Set<string>();
+  for (const statement of statements) {
+    const head = statement.replace(/^(?:\s*--[^\n]*\n)+/, "").trimStart();
+    const m = /^INSERT INTO ("(?:[^"]|"")+"\."(?:[^"]|"")+")/.exec(head);
+    if (m) targets.add(m[1]!);
+  }
+  const found: string[] = [];
+  for (const table of targets) {
+    try {
+      const res = await runSqlQuery(
+        connectionId,
+        `SELECT to_regclass(${pgLiteral(table)}) IS NOT NULL;`
+      );
+      if (!cellToBool(res.rows?.[0]?.[0])) continue;
+      const rows = await runSqlQuery(
+        connectionId,
+        `SELECT EXISTS (SELECT 1 FROM ${table});`
+      );
+      if (cellToBool(rows.rows?.[0]?.[0])) found.push(table);
+    } catch {
+      // Not readable here: the restore itself will say.
+    }
+  }
+  return found;
+}
+
 function tableNodeKey(t: { schema: string; name: string }) {
   return `${t.schema}.${t.name}`;
 }
@@ -276,7 +345,7 @@ async function loadForeignKeyDeps(args: {
   const e = engine.toLowerCase();
 
   if (e === "postgres") {
-    const res = await runSqlQuery(
+    const res = await backupQuery(
       connectionId,
       `
         SELECT
@@ -312,7 +381,7 @@ async function loadForeignKeyDeps(args: {
   }
 
   if (e === "mysql" || e === "mariadb") {
-    const res = await runSqlQuery(
+    const res = await backupQuery(
       connectionId,
       `
         SELECT
@@ -471,7 +540,7 @@ export async function postgresMoneyColumns(
   tableName: string
 ): Promise<PostgresMoneyColumns> {
   // Multiranges (and pg_range.rngmultitypid) exist from PostgreSQL 14.
-  const versionRes = await runSqlQuery(
+  const versionRes = await backupQuery(
     connectionId,
     "SELECT current_setting('server_version_num')::int >= 140000;"
   );
@@ -484,7 +553,7 @@ export async function postgresMoneyColumns(
   // Walks each column's type: domains (no step), arrays ("a"), composite
   // fields ("c"), ranges and multiranges ("r"), down to money. A walk cut
   // at the depth limit is reported ("!"): unchecked is not money-free.
-  const res = await runSqlQuery(
+  const res = await backupQuery(
     connectionId,
     `
       WITH RECURSIVE walk(attname, oid, steps, hops) AS (
@@ -492,8 +561,8 @@ export async function postgresMoneyColumns(
         FROM pg_attribute a
         JOIN pg_class c ON c.oid = a.attrelid
         JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = ${qLiteral(schema)}
-          AND c.relname = ${qLiteral(tableName)}
+        WHERE n.nspname = ${pgLiteral(schema)}
+          AND c.relname = ${pgLiteral(tableName)}
           AND a.attnum > 0
           AND NOT a.attisdropped
         UNION
@@ -563,6 +632,7 @@ export async function exportTableToSqlParts(args: {
     batchSize: 250,
     maxRows: 10_000_000,
     canonicalTextOutput: engine === "postgres",
+    snapshotId: backupSnapshots.get(connectionId),
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -756,9 +826,9 @@ export async function buildPostgresTypesSql(args: {
   if (!tables.length) return "";
 
   const tableList = tables
-    .map((t) => `(${qLiteral(t.schema)}, ${qLiteral(t.name)})`)
+    .map((t) => `(${pgLiteral(t.schema)}, ${pgLiteral(t.name)})`)
     .join(", ");
-  const res = await runSqlQuery(
+  const res = await backupQuery(
     connectionId,
     `
     WITH RECURSIVE walk(type_oid) AS (
@@ -1003,7 +1073,7 @@ export async function postgresGeneratedOnlyRowsSql(
   tableName: string
 ): Promise<string> {
   const tableIdent = `${qIdent(schema, "postgres")}.${qIdent(tableName, "postgres")}`;
-  const res = await runSqlQuery(
+  const res = await backupQuery(
     connectionId,
     `SELECT count(*)::text FROM ${tableIdent};`
   );
@@ -1045,14 +1115,14 @@ export async function buildPostgresTableStructure(args: {
     sequenceValuesSql: "",
   };
 
-  const oidRes = await runSqlQuery(
+  const oidRes = await backupQuery(
     connectionId,
     `
       SELECT c.oid
       FROM pg_class c
       JOIN pg_namespace n ON n.oid = c.relnamespace
-      WHERE n.nspname = ${qLiteral(schema)}
-        AND c.relname = ${qLiteral(tableName)}
+      WHERE n.nspname = ${pgLiteral(schema)}
+        AND c.relname = ${pgLiteral(tableName)}
         AND c.relkind IN ('r', 'p');
     `
   );
@@ -1060,7 +1130,7 @@ export async function buildPostgresTableStructure(args: {
   const oid = Number(cellToString(oidRes.rows?.[0]?.[0], true));
   if (!Number.isFinite(oid) || oid <= 0) return empty;
 
-  const colsRes = await runSqlQuery(
+  const colsRes = await backupQuery(
     connectionId,
     `
       SELECT
@@ -1087,9 +1157,9 @@ export async function buildPostgresTableStructure(args: {
    * it would restart the numbering and collide with restored keys.
    */
   const readOwnedSequence = async (col: string) => {
-    const sequenceFor = `pg_get_serial_sequence(${qLiteral(tableIdent)}, ${qLiteral(col)})`;
+    const sequenceFor = `pg_get_serial_sequence(${pgLiteral(tableIdent)}, ${pgLiteral(col)})`;
     try {
-      const optRes = await runSqlQuery(
+      const optRes = await backupQuery(
         connectionId,
         `
           SELECT ${sequenceFor}, s.seqstart::text, s.seqincrement::text,
@@ -1106,7 +1176,7 @@ export async function buildPostgresTableStructure(args: {
         (i) => cellToString(r[i], true) ?? ""
       );
       const type = cellToString(r[7], true) ?? "";
-      const stateRes = await runSqlQuery(
+      const stateRes = await backupQuery(
         connectionId,
         `SELECT last_value::text, is_called FROM ${seq};`
       );
@@ -1190,7 +1260,7 @@ export async function buildPostgresTableStructure(args: {
     `);\n`;
 
   // Sequences used by column defaults (serial/bigserial) must exist before CREATE TABLE.
-  const seqRes = await runSqlQuery(
+  const seqRes = await backupQuery(
     connectionId,
     `
       SELECT
@@ -1206,8 +1276,8 @@ export async function buildPostgresTableStructure(args: {
        AND dep.deptype = 'a'
       JOIN pg_class seq ON seq.oid = dep.objid AND seq.relkind = 'S'
       JOIN pg_namespace seq_ns ON seq_ns.oid = seq.relnamespace
-      WHERE tbl_ns.nspname = ${qLiteral(schema)}
-        AND tbl.relname = ${qLiteral(tableName)}
+      WHERE tbl_ns.nspname = ${pgLiteral(schema)}
+        AND tbl.relname = ${pgLiteral(tableName)}
         AND col.attnum > 0
         AND NOT col.attisdropped
       ORDER BY col.attnum;
@@ -1239,7 +1309,7 @@ export async function buildPostgresTableStructure(args: {
 
   let preDataSql = `${sequenceCreateSql}${createTableSql}${sequenceOwnedBySql}${sequenceOptionsSql}`;
 
-  const constraintsRes = await runSqlQuery(
+  const constraintsRes = await backupQuery(
     connectionId,
     `
       SELECT conname, contype, pg_get_constraintdef(oid, true)
@@ -1273,7 +1343,7 @@ export async function buildPostgresTableStructure(args: {
     else preDataSql += stmt;
   }
 
-  const indexesRes = await runSqlQuery(
+  const indexesRes = await backupQuery(
     connectionId,
     `
       SELECT pg_get_indexdef(i.indexrelid)
@@ -1281,8 +1351,8 @@ export async function buildPostgresTableStructure(args: {
       JOIN pg_class tbl ON tbl.oid = i.indrelid
       JOIN pg_namespace ns ON ns.oid = tbl.relnamespace
       LEFT JOIN pg_constraint con ON con.conindid = i.indexrelid
-      WHERE ns.nspname = ${qLiteral(schema)}
-        AND tbl.relname = ${qLiteral(tableName)}
+      WHERE ns.nspname = ${pgLiteral(schema)}
+        AND tbl.relname = ${pgLiteral(tableName)}
         AND NOT i.indisprimary
         AND con.oid IS NULL;
     `
@@ -1311,7 +1381,7 @@ async function buildMysqlTableStructure(args: {
 }): Promise<string> {
   const { connectionId, schema, tableName } = args;
   const tableIdent = `${qIdent(schema, "mysql")}.${qIdent(tableName, "mysql")}`;
-  const res = await runSqlQuery(
+  const res = await backupQuery(
     connectionId,
     `SHOW CREATE TABLE ${tableIdent};`
   );
@@ -1351,6 +1421,7 @@ export function useDatabaseBackup() {
 
       setDbBackupRunning(true);
 
+      let snapshotSessionId: string | null = null;
       try {
         const meta = await rt.metadata.load({
           metaKey: rt.metaKey,
@@ -1379,6 +1450,19 @@ export function useDatabaseBackup() {
           filters: [{ name: "PoliteDB dump", extensions: ["dumb"] }],
         });
         if (!path) return;
+
+        // PostgreSQL: every query of the backup reads one snapshot, so the
+        // tables, their rows and sequences agree even while others write.
+        if (rt.engine === "postgres") {
+          const session = await sqlSessionBegin(
+            rt.runtimeConnectionId,
+            "snapshot"
+          );
+          snapshotSessionId = session.sessionId;
+          if (session.snapshotId) {
+            backupSnapshots.set(rt.runtimeConnectionId, session.snapshotId);
+          }
+        }
 
         const sqlParts: string[] = [];
         const appendSql = (content: string) => {
@@ -1449,7 +1533,7 @@ export function useDatabaseBackup() {
           let columns = meta.columnsByTable[key] ?? [];
 
           if (!columns.length) {
-            const colRes = await runSqlQuery(
+            const colRes = await backupQuery(
               rt.runtimeConnectionId,
               tableColumnsQuery(table.schema, table.name)
             );
@@ -1537,6 +1621,11 @@ export function useDatabaseBackup() {
           err instanceof Error ? err.message : "Backup database failed.";
         void showMessage(message, { title: "Backup error", kind: "error" });
       } finally {
+        backupSnapshots.delete(rt.runtimeConnectionId);
+        if (snapshotSessionId) {
+          // Read only: nothing to keep.
+          void sqlSessionEnd(snapshotSessionId, false).catch(() => {});
+        }
         setDbBackupRunning(false);
       }
     },
@@ -1584,6 +1673,8 @@ export function useDatabaseBackup() {
       setDbRestoreRunning(true);
 
       let applied = 0;
+      /** The transaction a PostgreSQL run is in, until committed. */
+      let session: string | null = null;
       try {
         const fileBytes = await readFile(path);
         const unpacked = await unpackDumpBytes(fileBytes);
@@ -1612,6 +1703,12 @@ export function useDatabaseBackup() {
           throw new Error("No SQL statements found in selected file.");
         }
 
+        // PostgreSQL restores run in one transaction: all or nothing.
+        const transactional = rt.engine === "postgres";
+        const nonEmpty = transactional
+          ? await pgTablesWithRows(rt.runtimeConnectionId, statements)
+          : [];
+
         const tab = useScreenStore
           .getState()
           .profileTabs.find((item) => item.id === tabId);
@@ -1620,8 +1717,15 @@ export function useDatabaseBackup() {
           .join(" ");
         const fileName = path.split(/[\\/]/).pop() || path;
         const verb = action === "restore" ? "Restore" : "Import";
+        const runs = `This runs ${statements.length} SQL statement${statements.length === 1 ? "" : "s"} on the database.`;
+        const atomicity = transactional
+          ? "They run in one transaction: if one fails or the run is stopped, nothing is changed. Once finished, it cannot be undone."
+          : "They do not run in a transaction and cannot be undone.";
+        const overlay = nonEmpty.length
+          ? `\n\nThese tables already have rows: ${nonEmpty.slice(0, 5).join(", ")}${nonEmpty.length > 5 ? ` and ${nonEmpty.length - 5} more` : ""}. The backup's rows are added to them (a row whose key exists stops the run) and their sequences are set to the backup's. Restore into an empty database for an exact copy.`
+          : "";
         const ok = await confirmDialog(
-          `${verb} "${fileName}"${target ? ` into ${target}` : ""}?\n\nThis runs ${statements.length} SQL statement${statements.length === 1 ? "" : "s"} on the database. They do not run in a transaction and cannot be undone.`,
+          `${verb} "${fileName}"${target ? ` into ${target}` : ""}?\n\n${runs} ${atomicity}${overlay}`,
           {
             title: opts.dialogTitle,
             kind: "warning",
@@ -1640,7 +1744,8 @@ export function useDatabaseBackup() {
             const gate = dumpRunGate(
               tabSafetyModeNow(tabId),
               action,
-              applied > 0
+              // A transactional run is rolled back: nothing stays.
+              applied > 0 && !transactional
             );
             if (gate.kind === "blocked") return gate.message;
             if (gate.kind === "run" || authenticated) return null;
@@ -1649,22 +1754,54 @@ export function useDatabaseBackup() {
               authenticated = true;
             } catch (err) {
               const reason = err instanceof Error ? err.message : String(err);
-              return `Touch ID authentication failed, so ${applied > 0 ? "nothing more" : "nothing"} was run: ${reason}`;
+              return `Touch ID authentication failed, so ${applied > 0 && !transactional ? "nothing more" : "nothing"} was run: ${reason}`;
             }
           }
         };
         const describeApplied = () =>
-          applied === 0
-            ? "Nothing before it had changed the database."
-            : applied === 1
-              ? "The statement before it already ran and stays in the database."
-              : `The ${applied} statements before it already ran and stay in the database.`;
+          transactional
+            ? "Nothing was changed: the run was rolled back."
+            : applied === 0
+              ? "Nothing before it had changed the database."
+              : applied === 1
+                ? "The statement before it already ran and stays in the database."
+                : `The ${applied} statements before it already ran and stay in the database.`;
 
         const refused = await ensureAllowed();
         if (refused) {
           void showMessage(refused, { title: errorTitle, kind: "warning" });
           return;
         }
+
+        // Statements run in the session's transaction, each behind a
+        // savepoint so one that may be skipped (an object that already
+        // exists) is undone alone.
+        if (transactional) {
+          session = (
+            await sqlSessionBegin(rt.runtimeConnectionId, "transaction")
+          ).sessionId;
+        }
+        const execute = async (sql: string) => {
+          if (!session) {
+            await runSqlQuery(rt.runtimeConnectionId!, sql, {
+              timeoutMs: 120_000,
+            });
+            return;
+          }
+          await sqlSessionExecute(session, "SAVEPOINT politedb_restore");
+          await sqlSessionExecute(session, sql);
+          await sqlSessionExecute(
+            session,
+            "RELEASE SAVEPOINT politedb_restore"
+          );
+        };
+        const undoStatement = async () => {
+          if (!session) return;
+          await sqlSessionExecute(
+            session,
+            "ROLLBACK TO SAVEPOINT politedb_restore; RELEASE SAVEPOINT politedb_restore"
+          );
+        };
 
         let skipped = 0;
         let stopped: { message: string; index: number } | null = null;
@@ -1694,9 +1831,7 @@ export function useDatabaseBackup() {
               break;
             }
 
-            await runSqlQuery(rt.runtimeConnectionId, statementSql, {
-              timeoutMs: 120_000,
-            });
+            await execute(statementSql);
             applied++;
           } catch (err) {
             if (
@@ -1705,11 +1840,13 @@ export function useDatabaseBackup() {
             ) {
               // Keep restore progressing even if existing data violates FK
               // or FK already exists with incompatible shape.
+              await undoStatement();
               skipped++;
               continue;
             }
 
             if (isIgnorableRestoreError(statementSql, err)) {
+              await undoStatement();
               skipped++;
               continue;
             }
@@ -1722,8 +1859,13 @@ export function useDatabaseBackup() {
         }
 
         if (stopped) {
+          if (session) {
+            const s = session;
+            session = null;
+            await sqlSessionEnd(s, false);
+          }
           // What already ran is in the database: show it.
-          if (applied > 0) {
+          if (applied > 0 && !transactional) {
             await rt.refreshSchemaAndTables();
             onRefresh?.();
           }
@@ -1732,6 +1874,12 @@ export function useDatabaseBackup() {
             { title: errorTitle, kind: "warning" }
           );
           return;
+        }
+
+        if (session) {
+          const s = session;
+          session = null;
+          await sqlSessionEnd(s, true);
         }
 
         await rt.refreshSchemaAndTables();
@@ -1749,6 +1897,8 @@ export function useDatabaseBackup() {
           err instanceof Error ? err.message : "SQL dump import failed.";
         void showMessage(message, { title: errorTitle, kind: "error" });
       } finally {
+        // Anything not committed is rolled back.
+        if (session) void sqlSessionEnd(session, false).catch(() => {});
         setDbRestoreRunning(false);
       }
     },

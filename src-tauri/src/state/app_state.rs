@@ -68,6 +68,9 @@ pub struct AppState {
     pub connection_profiles: Arc<DashMap<Uuid, crate::ai::agent::consent::ProfileBinding>>,
     /// Serialises read-modify-write of the agent consent file.
     pub ai_consent_lock: Arc<std::sync::Mutex<()>>,
+    /// PostgreSQL sessions held across calls (transactional restore,
+    /// snapshot backup).
+    pub sql_sessions: Arc<crate::engines::postgres::sql_session::SqlSessionRegistry>,
 }
 
 impl AppState {
@@ -97,6 +100,7 @@ impl AppState {
             ai_ollama_probes: Arc::new(crate::ai::ollama::OllamaProbeCache::new(generations)),
             connection_profiles: Arc::new(DashMap::new()),
             ai_consent_lock: Arc::new(std::sync::Mutex::new(())),
+            sql_sessions: Arc::new(Default::default()),
         }
     }
 }
