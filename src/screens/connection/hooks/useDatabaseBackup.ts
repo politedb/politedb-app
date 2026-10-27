@@ -455,20 +455,33 @@ export type PostgresMoneyColumns = {
  * The table's columns holding money: as the column's type (or a domain
  * over it), as the element of its array type, or deeper. Deeper (in a
  * composite, a range, an array of arrays' domains…) throws: that text
- * would restore differently under another currency locale.
+ * would restore differently under another currency locale. So does a type
+ * nested too deep to check.
  */
 export async function postgresMoneyColumns(
   connectionId: string,
   schema: string,
   tableName: string
 ): Promise<PostgresMoneyColumns> {
+  // Multiranges (and pg_range.rngmultitypid) exist from PostgreSQL 14.
+  const versionRes = await runSqlQuery(
+    connectionId,
+    "SELECT current_setting('server_version_num')::int >= 140000;"
+  );
+  const multiranges = cellToBool(versionRes.rows?.[0]?.[0]);
+  const multirangeStep = multiranges
+    ? `
+          UNION ALL
+          SELECT r.rngtypid, 'r' FROM pg_range r WHERE r.rngmultitypid = t.oid`
+    : "";
   // Walks each column's type: domains (no step), arrays ("a"), composite
-  // fields ("c"), ranges and multiranges ("r"), down to money.
+  // fields ("c"), ranges and multiranges ("r"), down to money. A walk cut
+  // at the depth limit is reported ("!"): unchecked is not money-free.
   const res = await runSqlQuery(
     connectionId,
     `
-      WITH RECURSIVE walk(attname, oid, steps) AS (
-        SELECT a.attname, a.atttypid, ''::text
+      WITH RECURSIVE walk(attname, oid, steps, hops) AS (
+        SELECT a.attname, a.atttypid, ''::text, 0
         FROM pg_attribute a
         JOIN pg_class c ON c.oid = a.attrelid
         JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -477,7 +490,7 @@ export async function postgresMoneyColumns(
           AND a.attnum > 0
           AND NOT a.attisdropped
         UNION
-        SELECT w.attname, nxt.oid, w.steps || nxt.step
+        SELECT w.attname, nxt.oid, w.steps || nxt.step, w.hops + 1
         FROM walk w
         JOIN pg_type t ON t.oid = w.oid
         CROSS JOIN LATERAL (
@@ -490,13 +503,13 @@ export async function postgresMoneyColumns(
           WHERE t.typtype = 'c' AND f.attrelid = t.typrelid
             AND f.attnum > 0 AND NOT f.attisdropped
           UNION ALL
-          SELECT r.rngsubtype, 'r' FROM pg_range r WHERE r.rngtypid = t.oid
-          UNION ALL
-          SELECT r.rngtypid, 'r' FROM pg_range r WHERE r.rngmultitypid = t.oid
+          SELECT r.rngsubtype, 'r' FROM pg_range r WHERE r.rngtypid = t.oid${multirangeStep}
         ) nxt(oid, step)
-        WHERE length(w.steps) < 16
+        WHERE w.hops < 32
       )
-      SELECT attname, steps FROM walk WHERE oid = 'money'::regtype;
+      SELECT attname, CASE WHEN oid = 'money'::regtype THEN steps ELSE '!' END
+      FROM walk
+      WHERE oid = 'money'::regtype OR hops >= 32;
     `
   );
   const scalar = new Set<string>();
@@ -507,13 +520,42 @@ export async function postgresMoneyColumns(
     if (!name) continue;
     if (steps === "") scalar.add(name);
     else if (steps === "a") array.add(name);
-    else {
+    else if (steps === "!") {
+      throw new Error(
+        `The column "${name}" of ${schema}.${tableName} has a type nested too deeply to check for money, so nothing was backed up. Back it up with pg_dump.`
+      );
+    } else {
       throw new Error(
         `The column "${name}" of ${schema}.${tableName} holds money inside another type. Money text depends on the server's currency locale and might restore as another amount, so nothing was backed up. Change the column to numeric, or back it up with pg_dump.`
       );
     }
   }
   return { scalar, array };
+}
+
+/** Decimal places of money on this server (its lc_monetary). */
+async function postgresMoneyScale(connectionId: string): Promise<number> {
+  const res = await runSqlQuery(
+    connectionId,
+    "SELECT scale('0'::money::numeric);"
+  );
+  const scale = Number(cellToString(res.rows?.[0]?.[0], true));
+  return Number.isInteger(scale) && scale >= 0 ? scale : 2;
+}
+
+/**
+ * A restore statement that stops before a table's money rows when the
+ * target's currency locale keeps fewer decimal places than the backed-up
+ * amounts have: converting them to money there would round them.
+ */
+export function postgresMoneyScaleGuard(scale: number): string {
+  return (
+    "DO $politedb$ BEGIN\n" +
+    `  IF scale('0'::money::numeric) < ${scale} THEN\n` +
+    `    RAISE EXCEPTION 'This backup holds money amounts with ${scale} decimal places, but money on this server has %. Restore into a database whose lc_monetary keeps ${scale}.', scale('0'::money::numeric);\n` +
+    "  END IF;\n" +
+    "END $politedb$;\n"
+  );
 }
 
 async function exportTableToSqlParts(args: {
@@ -533,6 +575,9 @@ async function exportTableToSqlParts(args: {
   const query = money
     ? postgresBackupRowsQuery(schema, tableName, columns, money)
     : tableExportQuery(schema, tableName, columns, undefined, "AND", engine);
+  if (money && (money.scalar.size > 0 || money.array.size > 0)) {
+    append(postgresMoneyScaleGuard(await postgresMoneyScale(connectionId)));
+  }
   const opId = await startSqlQueryStream(connectionId, query, {
     batchSize: 250,
     maxRows: 10_000_000,

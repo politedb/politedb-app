@@ -14,6 +14,7 @@ import {
   dumpCommentName,
   postgresBackupRowsQuery,
   postgresMoneyColumns,
+  postgresMoneyScaleGuard,
 } from "./useDatabaseBackup";
 import { formatSqlInsertChunk } from "./sqlInsertLiteral";
 import { splitSqlStatements } from "src/components/editor/splitSqlStatements";
@@ -380,6 +381,11 @@ describe("postgresBackupRowsQuery", () => {
   });
 
   it("stops at money inside another type, and reads where money is", async () => {
+    const lastSql = () =>
+      m.runSqlQuery.mock.calls[m.runSqlQuery.mock.calls.length - 1]![1];
+    const version = (v14: boolean) =>
+      m.runSqlQuery.mockResolvedValueOnce({ rows: [[{ t: "Bool", v: v14 }]] });
+    version(true);
     m.runSqlQuery.mockResolvedValueOnce({
       rows: [
         [
@@ -396,6 +402,15 @@ describe("postgresBackupRowsQuery", () => {
       scalar: new Set(["m"]),
       array: new Set(["ms"]),
     });
+    expect(lastSql()).toContain("rngmultitypid");
+
+    // PostgreSQL 13 has no multiranges: the walk must not name them.
+    version(false);
+    m.runSqlQuery.mockResolvedValueOnce({ rows: [] });
+    await postgresMoneyColumns("c1", "s", "t");
+    expect(lastSql()).not.toContain("rngmultitypid");
+
+    version(true);
     m.runSqlQuery.mockResolvedValueOnce({
       rows: [
         [
@@ -407,6 +422,31 @@ describe("postgresBackupRowsQuery", () => {
     await expect(postgresMoneyColumns("c1", "s", "t")).rejects.toThrow(
       /"addr" .* holds money inside another type/
     );
+
+    // A walk cut at the depth limit is not taken as money-free.
+    version(true);
+    m.runSqlQuery.mockResolvedValueOnce({
+      rows: [
+        [
+          { t: "Str", v: "deep" },
+          { t: "Str", v: "!" },
+        ],
+      ],
+    });
+    await expect(postgresMoneyColumns("c1", "s", "t")).rejects.toThrow(
+      /"deep" .* nested too deeply/
+    );
+  });
+
+  it("guards money rows against a target keeping fewer decimal places", () => {
+    const guard = postgresMoneyScaleGuard(2);
+    expect(guard).toContain("IF scale('0'::money::numeric) < 2 THEN");
+    // One statement for the restore splitter.
+    expect(
+      splitSqlStatements(`${guard}INSERT INTO t VALUES (1);`, {
+        dialect: "postgres",
+      })
+    ).toHaveLength(2);
   });
 
   it("writes the text values as literals the column types", () => {
