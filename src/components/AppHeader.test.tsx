@@ -4,6 +4,7 @@ import { AppHeader } from "./AppHeader";
 import { useScreenStore } from "src/stores/screen";
 import { useProfileStore } from "src/stores/profile";
 import { usePinnedConnectionsStore } from "src/stores/pinnedConnections";
+import { useConnectionStore } from "src/stores/connection";
 
 vi.mock("src/stores/persistentStore", () => ({
   usePersistentStore: { getState: () => ({ scheduleSave: () => {} }) },
@@ -27,6 +28,7 @@ beforeEach(() => {
   closeTab.mockClear();
   useProfileStore.setState({ profiles: [] });
   usePinnedConnectionsStore.setState({ pinnedIds: [] });
+  useConnectionStore.setState({ dataPatchMap: {}, newTableData: {} } as never);
   HTMLElement.prototype.scrollIntoView = scrollIntoView;
   useScreenStore.setState({
     profileTabs: [
@@ -154,5 +156,47 @@ describe("AppHeader connection tabs", () => {
     render(<AppHeader />);
     fireEvent.click(screen.getByRole("button", { name: "Open a connection" }));
     expect(useScreenStore.getState().activeProfileScreen).toBe("main");
+  });
+
+  it("marks a guarded connection with its safety mode color", () => {
+    useScreenStore.setState({
+      profileTabs: [
+        { ...tab("tab-1", "prod"), querySafetyMode: "production" },
+        { ...tab("tab-2", "locked"), isLocked: true },
+        tab("tab-3", "plain"),
+      ],
+    });
+    const { container } = render(<AppHeader />);
+    const stripes = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-safety-mode]")
+    );
+    expect(stripes.map((el) => el.dataset.safetyMode)).toEqual([
+      "production",
+      "lock",
+    ]);
+    expect(stripes[0]!.className).toContain("bg-amber-500");
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs[0]!.getAttribute("title")).toContain("Production mode");
+    expect(tabs[0]!.textContent).toContain("Production mode");
+    expect(tabs[2]!.getAttribute("title")).not.toContain("mode");
+  });
+
+  it("shows a dot on a tab with unsaved row changes", () => {
+    const { container } = render(<AppHeader />);
+    expect(container.querySelector("[data-unsaved-dot]")).toBeNull();
+    act(() =>
+      useConnectionStore.setState({
+        dataPatchMap: {
+          "tab-2": {
+            w1: { patches: { update: { data: { "0": { name: "x" } } } } },
+          },
+        },
+      } as never)
+    );
+    const dots = container.querySelectorAll("[data-unsaved-dot]");
+    expect(dots).toHaveLength(1);
+    const second = screen.getAllByRole("tab")[1]!;
+    expect(second.contains(dots[0]!)).toBe(true);
+    expect(second.getAttribute("title")).toContain("Unsaved changes");
   });
 });

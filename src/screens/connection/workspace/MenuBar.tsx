@@ -1,4 +1,8 @@
 import {
+  OPEN_SAFETY_MODE_PICKER_EVENT,
+  QUERY_SAFETY_MODES,
+} from "src/lib/queries/querySafetyModes";
+import {
   useCallback,
   useEffect,
   useMemo,
@@ -399,6 +403,16 @@ export function MenuBar({
     if (connectionBlocked) setSafeModeOpen(false);
   }, [connectionBlocked]);
 
+  // The status bar's mode badge opens this picker.
+  useEffect(() => {
+    const open = () => {
+      if (!connectionBlocked) setSafeModeOpen(true);
+    };
+    window.addEventListener(OPEN_SAFETY_MODE_PICKER_EVENT, open);
+    return () =>
+      window.removeEventListener(OPEN_SAFETY_MODE_PICKER_EVENT, open);
+  }, [connectionBlocked]);
+
   const tags = useMemo(() => {
     const raw = (profile?.input?.tags ?? []).map(String);
     return classifyTags(raw);
@@ -451,40 +465,6 @@ export function MenuBar({
 
     return [pretty, version].filter(Boolean).join(" ");
   }, [connectionInfo]);
-
-  const queryModes = [
-    {
-      label: "Default mode",
-      description: "Warn before sending queries",
-      value: "default",
-      color: "gray",
-    },
-    {
-      label: "Lock mode",
-      description: "Block all editing queries",
-      value: "lock",
-      color: "red",
-    },
-    {
-      label: "Safe mode",
-      description: "Require Touch ID before sending queries",
-      value: "safe",
-      color: "green",
-    },
-    {
-      label: "Production mode",
-      description: "Touch ID for reads, block writes",
-      value: "production",
-      color: "amber",
-    },
-  ];
-
-  const queryModeDotClass: Record<string, string> = {
-    gray: "bg-gray-500",
-    red: "bg-red-500",
-    green: "bg-green-500",
-    amber: "bg-amber-500",
-  };
 
   const onOpenDatabase = useCallback(
     async (nextDb: string) => {
@@ -561,7 +541,7 @@ export function MenuBar({
 
               {safeModeOpen ? (
                 <div class="absolute top-8 -left-1 z-40 w-md rounded-lg border border-neutral-200 bg-white p-1 shadow-lg">
-                  {queryModes.map((mode) => (
+                  {QUERY_SAFETY_MODES.map((mode) => (
                     <button
                       type="button"
                       class={cn(
@@ -569,15 +549,10 @@ export function MenuBar({
                         "px-2 py-1.5 text-left hover:bg-neutral-100",
                         querySafetyMode === mode.value && "bg-neutral-100"
                       )}
-                      onClick={() =>
-                        void setQuerySafetyMode(mode.value as QuerySafetyMode)
-                      }
+                      onClick={() => void setQuerySafetyMode(mode.value)}
                     >
                       <div
-                        class={cn(
-                          "size-1 rounded-full p-1",
-                          queryModeDotClass[mode.color] ?? "bg-gray-500"
-                        )}
+                        class={cn("size-1 rounded-full p-1", mode.dotClass)}
                       />
                       <div class="flex items-center gap-2 text-sm">
                         <span class="font-semibold text-neutral-800">

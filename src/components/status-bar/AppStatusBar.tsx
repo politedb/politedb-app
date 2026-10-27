@@ -4,7 +4,15 @@ import { normalizeQuerySafetyMode } from "src/lib/queries/querySafety";
 import { useAppUpdater } from "src/hooks/useAppUpdater";
 import { useScreenStore } from "src/stores/screen";
 import { cn } from "src/utils/cn";
-import { buildAppStatusBarModel, type AppStatusBarDot } from "./statusBarModel";
+import {
+  querySafetyModeInfo,
+  requestOpenSafetyModePicker,
+} from "src/lib/queries/querySafetyModes";
+import {
+  buildAppStatusBarModel,
+  querySafetyStatusLabel,
+  type AppStatusBarDot,
+} from "./statusBarModel";
 
 const DOT_CLASS: Record<AppStatusBarDot, string> = {
   connected: "bg-emerald-500",
@@ -30,7 +38,10 @@ function StatusSegments({ items }: { items: string[] }) {
 export function AppStatusBar() {
   const activeProfileScreen = useScreenStore((s) => s.activeProfileScreen);
   const profileTabs = useScreenStore((s) => s.profileTabs);
-  const { appVersion } = useAppUpdater();
+  const setActiveProfileScreen = useScreenStore(
+    (s) => s.setActiveProfileScreen
+  );
+  const { appVersion, updateAvailable, updateVersion } = useAppUpdater();
   const [telemetryConsent, setTelemetryConsent] = useState(getTelemetryConsent);
 
   useEffect(() => {
@@ -50,6 +61,7 @@ export function AppStatusBar() {
 
   const model = buildAppStatusBarModel({
     isConnectionTab: !!activeTab,
+    label: activeTab?.label,
     engine: activeTab?.engine,
     connected: !!activeTab?.runtimeConnectionId,
     querySafetyMode: normalizeQuerySafetyMode(
@@ -76,9 +88,45 @@ export function AppStatusBar() {
         <div class="flex min-w-0 items-center gap-2">
           <StatusSegments items={model.left} />
         </div>
+        {model.mode ? (
+          <button
+            type="button"
+            class={cn(
+              "flex h-5 shrink-0 items-center gap-1.5 rounded-full border px-2",
+              "text-[11px] leading-none font-medium transition-colors",
+              "hover:brightness-95 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none",
+              querySafetyModeInfo(model.mode).badgeClass
+            )}
+            title="Change the query safety mode"
+            aria-label={`${querySafetyStatusLabel(model.mode)}. Change`}
+            onClick={(e) => {
+              e.stopPropagation();
+              requestOpenSafetyModePicker();
+            }}
+          >
+            <span
+              aria-hidden="true"
+              class={cn(
+                "size-1.5 rounded-full",
+                querySafetyModeInfo(model.mode).dotClass
+              )}
+            />
+            {querySafetyModeInfo(model.mode).shortLabel}
+          </button>
+        ) : null}
       </div>
 
       <div class="flex min-w-0 shrink-0 items-center gap-2">
+        {updateAvailable && updateVersion ? (
+          <button
+            type="button"
+            class="shrink-0 rounded px-1 font-medium text-blue-700 hover:underline focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none dark:text-blue-300"
+            title="Install it from the Databases screen"
+            onClick={() => setActiveProfileScreen("main")}
+          >
+            Update available: v{updateVersion}
+          </button>
+        ) : null}
         <StatusSegments items={model.right} />
       </div>
     </footer>

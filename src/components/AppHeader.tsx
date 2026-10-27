@@ -26,6 +26,11 @@ import { useProfileStore } from "src/stores/profile";
 import { usePinnedConnectionsStore } from "src/stores/pinnedConnections";
 import { connectionTabShortcutHint } from "src/lib/tabs/connectionTabShortcuts";
 import { openProfileTab } from "src/lib/tabs/openProfileTab";
+import { normalizeQuerySafetyMode } from "src/lib/queries/querySafety";
+import { querySafetyModeInfo } from "src/lib/queries/querySafetyModes";
+import { connectionTabHasChanges } from "src/screens/connection/lib/tabDirty";
+import { useConnectionStore } from "src/stores/connection";
+import { useObjectDraftStore } from "src/stores/objectDrafts";
 
 /** Saved connections listed in the new-tab menu; the rest are on Databases. */
 const NEW_TAB_MENU_LIMIT = 10;
@@ -75,6 +80,10 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
     }
   }, []);
 
+  // Re-render when the unsaved-work markers can change.
+  useConnectionStore((s) => s.dataPatchMap);
+  useConnectionStore((s) => s.newTableData);
+  useObjectDraftStore((s) => s.drafts);
   const profiles = useProfileStore((s) => s.profiles);
   const pinnedIds = usePinnedConnectionsStore((s) => s.pinnedIds);
   const isMac = useMemo(() => isMacPlatform(), []);
@@ -375,6 +384,12 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
                   profileTabs.length,
                   isMac
                 );
+                const mode = normalizeQuerySafetyMode(
+                  tab.querySafetyMode ?? (tab.isLocked ? "lock" : "default")
+                );
+                const modeInfo =
+                  mode === "default" ? null : querySafetyModeInfo(mode);
+                const unsaved = connectionTabHasChanges(tab.id);
                 // The strip's single tab stop: the active tab, else the first.
                 const isTabStop =
                   isActive ||
@@ -387,7 +402,13 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
                     role="tab"
                     aria-selected={isActive}
                     tabIndex={isTabStop ? 0 : -1}
-                    title={[tab.label, normalizeEngineName(tab.engine), hint]
+                    title={[
+                      tab.label,
+                      normalizeEngineName(tab.engine),
+                      modeInfo?.label,
+                      unsaved ? "Unsaved changes" : null,
+                      hint,
+                    ]
                       .filter(Boolean)
                       .join(" · ")}
                     onClick={(e) => {
@@ -417,7 +438,7 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
                     }}
                     data-tauri-drag-region="false"
                     class={cn(
-                      "group w-48 shadow-sm",
+                      "group relative w-48 shadow-sm",
                       "flex items-center justify-between gap-2",
                       "rounded-md border px-2 py-1 transition-all",
                       "outline-none focus-visible:ring-2 focus-visible:ring-blue-500",
@@ -426,6 +447,16 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
                         : "border-transparent bg-white text-slate-600 hover:bg-slate-50"
                     )}
                   >
+                    {modeInfo ? (
+                      <span
+                        aria-hidden="true"
+                        data-safety-mode={mode}
+                        class={cn(
+                          "absolute inset-y-1 left-0 w-0.75 rounded-full",
+                          modeInfo.dotClass
+                        )}
+                      />
+                    ) : null}
                     <div class="flex min-w-0 items-center gap-2">
                       <span class="flex size-5 items-center justify-center text-slate-600">
                         <DbIcon engine={tab.engine} px={16} />
@@ -434,6 +465,12 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
                       <span class="truncate text-sm font-medium">
                         {tab.label}
                       </span>
+                      {modeInfo ? (
+                        <span class="sr-only">{modeInfo.label}</span>
+                      ) : null}
+                      {unsaved ? (
+                        <span class="sr-only">Unsaved changes</span>
+                      ) : null}
                     </div>
 
                     <Button
@@ -448,12 +485,30 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
                         handleTabClose(tab.id);
                       }}
                       class={cn(
-                        "rounded-full border-none p-0 text-slate-400 transition hover:bg-transparent hover:text-slate-700",
+                        "relative rounded-full border-none p-0 text-slate-400 transition hover:bg-transparent hover:text-slate-700",
                         !isActive &&
+                          !unsaved &&
                           "opacity-60 group-hover:opacity-100 hover:bg-transparent"
                       )}
                     >
-                      <XIcon className="size-3.5" />
+                      {/* Unsaved: the dot sits where × is; hovering or
+                          focusing the tab shows × in its place. */}
+                      {unsaved ? (
+                        <span
+                          aria-hidden="true"
+                          data-unsaved-dot
+                          class="absolute inset-0 flex items-center justify-center group-hover:opacity-0 group-focus-visible:opacity-0"
+                        >
+                          <span class="size-2 rounded-full bg-slate-400 dark:bg-slate-300" />
+                        </span>
+                      ) : null}
+                      <XIcon
+                        className={cn(
+                          "size-3.5",
+                          unsaved &&
+                            "opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
+                        )}
+                      />
                     </Button>
                   </div>
                 );
