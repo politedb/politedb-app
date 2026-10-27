@@ -24,6 +24,7 @@ import {
   switchToProfileTab,
 } from "src/lib/tabs/openProfileTab";
 import { useConnectionLogStore } from "src/stores/connectionLog";
+import { groupFilterShowing } from "./showConnection";
 import { normalizeGroupIds } from "src/stores/connectionGroups";
 import { useLicenseStore } from "src/stores/license";
 
@@ -530,8 +531,16 @@ export function MainScreen() {
                 knownProfileIds={knownProfileIds}
                 onOpenConnection={openProfileInTab}
                 onShowConnection={(profileId) => {
-                  // Show it even if the Connections search would hide it.
+                  // Show it even if the Connections search or the group
+                  // filter would hide it.
                   setSearchQueryFor("connections", "");
+                  setSelectedGroupId(
+                    groupFilterShowing(
+                      profileId,
+                      selectedGroupId,
+                      groupIdsByProfile
+                    )
+                  );
                   setActiveNav("connections");
                   selectProfile(profileId);
                 }}
