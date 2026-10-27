@@ -138,3 +138,12 @@ describe("KeychainSection unused keys", () => {
     await act(async () => del.resolve());
   });
 });
+
+describe("KeychainSection storage note", () => {
+  it("says where keys are stored once for the page, not per group", async () => {
+    renderSection();
+    // Two groups: a used database key and an unused one.
+    await screen.findByText("Unused (1)");
+    expect(screen.getAllByText(/^Stored securely in /)).toHaveLength(1);
+  });
+});

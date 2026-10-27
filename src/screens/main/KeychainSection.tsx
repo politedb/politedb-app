@@ -48,30 +48,36 @@ function getErrorMessage(err: unknown): string {
   return "Unknown error";
 }
 
+/** Where the OS keeps secrets: the macOS Keychain, Windows Credential Manager… */
+function systemKeychainName(): string {
+  const platform =
+    typeof navigator === "undefined" ? "" : navigator.platform.toLowerCase();
+  if (platform.includes("mac")) return "the macOS Keychain";
+  if (platform.includes("win")) return "Windows Credential Manager";
+  return "the system keychain";
+}
+
 function EmptyState(props: { hasSearch: boolean }) {
   const { hasSearch } = props;
 
   return (
     <div>
-      <div class="mb-3 flex items-center justify-between gap-8">
+      <div class="mb-3 flex items-center">
         <h3 class="flex items-center gap-2 text-sm font-semibold tracking-wide text-slate-800">
           <KeyIcon className="size-4 text-slate-500" />
           Credentials (0)
         </h3>
-
-        <div class="flex items-center gap-1">
-          <LockIcon className="size-4 text-green-600" />
-          <span class="text-sm font-medium text-slate-500">
-            Stored securely in macOS keychain
-          </span>
-        </div>
       </div>
 
       <div class="rounded-2xl border border-slate-200 bg-white p-10 text-center shadow-sm">
         <div class="text-sm font-semibold text-slate-900">
           {hasSearch ? "No matching keys" : "No keys yet"}
         </div>
-        <div class="mt-1 text-sm text-slate-500">Try a different keyword.</div>
+        <div class="mt-1 text-sm text-slate-500">
+          {hasSearch
+            ? "Try a different keyword."
+            : "Keys saved by connections and AI providers appear here."}
+        </div>
       </div>
     </div>
   );
@@ -439,6 +445,12 @@ export function KeychainSection(props: {
           </div>
         ) : null}
 
+        {/* Said once for the whole page rather than on every group. */}
+        <p class="mb-4 flex items-center gap-1.5 text-sm font-medium text-slate-500">
+          <LockIcon className="size-4 text-green-600" aria-hidden="true" />
+          Stored securely in {systemKeychainName()}
+        </p>
+
         {filteredKeys.length === 0 && (
           <EmptyState hasSearch={!!searchQuery.trim()} />
         )}
@@ -450,22 +462,23 @@ export function KeychainSection(props: {
               <section key={group.id} aria-label={group.label}>
                 <div class="mb-3 flex items-center justify-between gap-4">
                   <div class="flex flex-1 items-center justify-between gap-8">
-                    <h2
-                      class={cn(
-                        "flex items-center gap-2 text-sm font-semibold tracking-wide",
-                        isUnused
-                          ? "text-amber-700 dark:text-amber-300"
-                          : "text-slate-800"
-                      )}
-                    >
-                      <KeyIcon className="size-4 text-slate-500" />
-                      {group.label} ({group.keys.length})
-                    </h2>
-                    <div class="flex items-center gap-1">
-                      <LockIcon className="size-4 text-green-600" />
-                      <span class="text-sm font-medium text-slate-500">
-                        Stored securely in macOS keychain
-                      </span>
+                    <div class="space-y-1">
+                      <h2
+                        class={cn(
+                          "flex items-center gap-2 text-sm font-semibold tracking-wide",
+                          isUnused
+                            ? "text-amber-700 dark:text-amber-300"
+                            : "text-slate-800"
+                        )}
+                      >
+                        <KeyIcon className="size-4 text-slate-500" />
+                        {group.label} ({group.keys.length})
+                      </h2>
+                      {isUnused ? (
+                        <p class="text-xs text-slate-500">
+                          No connection or AI provider uses these keys any more.
+                        </p>
+                      ) : null}
                     </div>
                   </div>
 
@@ -481,11 +494,7 @@ export function KeychainSection(props: {
                     </Button>
                   ) : null}
                 </div>
-                {isUnused ? (
-                  <p class="mb-2 text-xs text-slate-500">
-                    No connection or AI provider uses these keys any more.
-                  </p>
-                ) : null}
+
                 <div
                   class={
                     viewMode === "grid"
