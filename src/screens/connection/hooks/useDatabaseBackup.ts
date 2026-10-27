@@ -426,12 +426,53 @@ type PgTypeRow = {
   labels: string;
   /** Domains: COLLATE clause target when it differs from the base's. */
   collation: string;
+  /** A collation outside pg_catalog: its catalog row as JSON, to recreate. */
+  collationDef: string;
+  collationSchema: string;
+  collationName: string;
   /** Set when an extension owns the type. */
   extension: string;
   extensionSchema: string;
-  /** Domains: sequences their default uses. */
+  /** Domains: sequences their default uses, as JSON [{schema, name}]. */
   sequences: string;
 };
+
+/** CREATE COLLATION for a collation's catalog row (any PostgreSQL 13+). */
+function createCollationSql(
+  schema: string,
+  name: string,
+  defJson: string
+): string {
+  let def: Record<string, unknown>;
+  try {
+    def = JSON.parse(defJson) as Record<string, unknown>;
+  } catch {
+    return "";
+  }
+  const text = (key: string) =>
+    typeof def[key] === "string" && def[key] ? (def[key] as string) : "";
+  const options: string[] = [];
+  if (def.collprovider === "i") {
+    // The ICU locale moved: collcollate (≤14), colliculocale (15–16),
+    // colllocale (17+).
+    const locale =
+      text("colllocale") || text("colliculocale") || text("collcollate");
+    options.push("provider = icu", `locale = ${qLiteral(locale)}`);
+    if (text("collicurules")) {
+      options.push(`rules = ${qLiteral(text("collicurules"))}`);
+    }
+  } else {
+    options.push(
+      "provider = libc",
+      `lc_collate = ${qLiteral(text("collcollate"))}`,
+      `lc_ctype = ${qLiteral(text("collctype"))}`
+    );
+  }
+  if (def.collisdeterministic === false) options.push("deterministic = false");
+  return ensureSqlEndsWithSemicolon(
+    `CREATE COLLATION IF NOT EXISTS ${qIdent(schema, "postgres")}.${qIdent(name, "postgres")} (${options.join(", ")})`
+  );
+}
 
 /**
  * What the backed-up tables need before they can be created: their schemas
@@ -498,10 +539,16 @@ export async function buildPostgresTypesSql(args: {
       CASE WHEN t.typtype = 'd' AND t.typcollation <> 0
           AND t.typcollation IS DISTINCT FROM bt.typcollation
         THEN quote_ident(cn.nspname) || '.' || quote_ident(co.collname) END,
+      CASE WHEN t.typtype = 'd' AND t.typcollation <> 0
+          AND t.typcollation IS DISTINCT FROM bt.typcollation
+          AND cn.nspname <> 'pg_catalog'
+        THEN to_jsonb(co)::text END,
+      cn.nspname,
+      co.collname,
       x.extname,
       xn.nspname,
-      (SELECT string_agg(
-          quote_ident(sn.nspname) || '.' || quote_ident(sq.relname), ',')
+      (SELECT json_agg(json_build_object(
+          'schema', sn.nspname, 'name', sq.relname))::text
         FROM pg_depend d
         JOIN pg_class sq ON sq.oid = d.refobjid AND sq.relkind = 'S'
         JOIN pg_namespace sn ON sn.oid = sq.relnamespace
@@ -537,9 +584,12 @@ export async function buildPostgresTypesSql(args: {
     checks: cellToString(r?.[8], true) ?? "",
     labels: cellToString(r?.[9], true) ?? "",
     collation: cellToString(r?.[10], true) ?? "",
-    extension: cellToString(r?.[11], true) ?? "",
-    extensionSchema: cellToString(r?.[12], true) ?? "",
-    sequences: cellToString(r?.[13], true) ?? "",
+    collationDef: cellToString(r?.[11], true) ?? "",
+    collationSchema: cellToString(r?.[12], true) ?? "",
+    collationName: cellToString(r?.[13], true) ?? "",
+    extension: cellToString(r?.[14], true) ?? "",
+    extensionSchema: cellToString(r?.[15], true) ?? "",
+    sequences: cellToString(r?.[16], true) ?? "",
   }));
 
   const schemas = new Set(
@@ -584,12 +634,37 @@ export async function buildPostgresTypesSql(args: {
   };
   for (const row of domains) place(row, new Set());
 
-  const sequences = new Set<string>();
+  const sequences = new Map<string, string>();
+  const collations = new Map<string, string>();
   let domainsSql = "";
   for (const row of ordered) {
     addSchema(row.schema);
-    for (const seq of row.sequences.split(",").filter(Boolean)) {
-      sequences.add(seq);
+    let deps: Array<{ schema?: string; name?: string }> = [];
+    try {
+      deps = row.sequences ? JSON.parse(row.sequences) : [];
+    } catch {
+      deps = [];
+    }
+    for (const dep of deps) {
+      if (!dep.schema || !dep.name) continue;
+      addSchema(dep.schema);
+      sequences.set(
+        ident(dep.schema, dep.name),
+        ensureSqlEndsWithSemicolon(
+          `CREATE SEQUENCE IF NOT EXISTS ${ident(dep.schema, dep.name)}`
+        )
+      );
+    }
+    if (row.collationDef && row.collationSchema && row.collationName) {
+      addSchema(row.collationSchema);
+      collations.set(
+        ident(row.collationSchema, row.collationName),
+        createCollationSql(
+          row.collationSchema,
+          row.collationName,
+          row.collationDef
+        )
+      );
     }
     domainsSql += ensureSqlEndsWithSemicolon(
       `CREATE DOMAIN ${ident(row.schema, row.name)} AS ${row.baseSql}` +
@@ -617,15 +692,19 @@ export async function buildPostgresTypesSql(args: {
       )
     )
     .join("");
-  // Already quoted by the catalog query; owned by their tables later.
+  // Sequences are owned by their tables later.
+  const byName = ([a]: [string, string], [b]: [string, string]) =>
+    a.localeCompare(b);
   const sequencesSql = [...sequences]
-    .sort()
-    .map((seq) =>
-      ensureSqlEndsWithSemicolon(`CREATE SEQUENCE IF NOT EXISTS ${seq}`)
-    )
+    .sort(byName)
+    .map(([, sql]) => sql)
+    .join("");
+  const collationsSql = [...collations]
+    .sort(byName)
+    .map(([, sql]) => sql)
     .join("");
 
-  return `${schemasSql}${extensionsSql}${sequencesSql}${enumsSql}${domainsSql}`;
+  return `${schemasSql}${extensionsSql}${collationsSql}${sequencesSql}${enumsSql}${domainsSql}`;
 }
 
 async function buildPostgresTableStructure(args: {

@@ -24,6 +24,9 @@ function row(p: {
   checks?: string;
   labels?: string;
   collation?: string;
+  collationDef?: string;
+  collationSchema?: string;
+  collationName?: string;
   extension?: string;
   extensionSchema?: string;
   sequences?: string;
@@ -40,6 +43,9 @@ function row(p: {
     p.checks ?? null,
     p.labels ?? null,
     p.collation ?? null,
+    p.collationDef ?? null,
+    p.collationSchema ?? null,
+    p.collationName ?? null,
     p.extension ?? null,
     p.extensionSchema ?? null,
     p.sequences ?? null,
@@ -131,13 +137,82 @@ describe("buildPostgresTypesSql", () => {
         kind: "d",
         baseSql: "integer",
         defaultExpr: "nextval('users_id_seq'::regclass)",
-        sequences: '"public"."users_id_seq"',
+        sequences: JSON.stringify([{ schema: "public", name: "users_id_seq" }]),
       }),
     ]);
     expect(sql).toBe(
       [
         'CREATE SEQUENCE IF NOT EXISTS "public"."users_id_seq";',
         `CREATE DOMAIN "public"."ticket" AS integer DEFAULT nextval('users_id_seq'::regclass);`,
+        "",
+      ].join("\n")
+    );
+  });
+
+  it("creates a sequence's own schema, and keeps commas in its name", async () => {
+    const sql = await build([
+      row({
+        oid: "11",
+        name: "ticket",
+        kind: "d",
+        baseSql: "integer",
+        defaultExpr: "nextval('archive.\"ids,old\"'::regclass)",
+        sequences: JSON.stringify([{ schema: "archive", name: "ids,old" }]),
+      }),
+    ]);
+    expect(sql).toBe(
+      [
+        'CREATE SCHEMA IF NOT EXISTS "archive";',
+        'CREATE SEQUENCE IF NOT EXISTS "archive"."ids,old";',
+        `CREATE DOMAIN "public"."ticket" AS integer DEFAULT nextval('archive."ids,old"'::regclass);`,
+        "",
+      ].join("\n")
+    );
+  });
+
+  it.each([
+    [
+      "an ICU collation (PostgreSQL 17)",
+      {
+        collprovider: "i",
+        colllocale: "und-u-ks-level2",
+        collisdeterministic: false,
+      },
+      `(provider = icu, locale = 'und-u-ks-level2', deterministic = false)`,
+    ],
+    [
+      "an ICU collation (PostgreSQL 15–16)",
+      { collprovider: "i", colliculocale: "de-DE", collisdeterministic: true },
+      `(provider = icu, locale = 'de-DE')`,
+    ],
+    [
+      "a libc collation",
+      {
+        collprovider: "c",
+        collcollate: "C",
+        collctype: "C",
+        collisdeterministic: true,
+      },
+      `(provider = libc, lc_collate = 'C', lc_ctype = 'C')`,
+    ],
+  ])("recreates %s a domain uses", async (_c, def, options) => {
+    const sql = await build([
+      row({
+        oid: "12",
+        name: "code",
+        kind: "d",
+        baseSql: "text",
+        collation: '"custom"."ordering"',
+        collationDef: JSON.stringify(def),
+        collationSchema: "custom",
+        collationName: "ordering",
+      }),
+    ]);
+    expect(sql).toBe(
+      [
+        'CREATE SCHEMA IF NOT EXISTS "custom";',
+        `CREATE COLLATION IF NOT EXISTS "custom"."ordering" ${options};`,
+        'CREATE DOMAIN "public"."code" AS text COLLATE "custom"."ordering";',
         "",
       ].join("\n")
     );
