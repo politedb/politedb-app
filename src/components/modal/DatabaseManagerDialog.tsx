@@ -158,6 +158,7 @@ export function DatabaseManagerDialog({
     { type: "sep" },
     {
       type: "item",
+      color: "red",
       label: "Drop...",
       onClick: () => {
         if (!menuState) return;
