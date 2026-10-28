@@ -267,9 +267,11 @@ function pgLeadingWords(sql: string, count: number): string[] {
           i++;
         }
       }
-    } else if (/[A-Za-z_]/.test(c)) {
+    } else if (/[A-Za-z_\u0080-\uffff]/.test(c)) {
+      // A whole identifier: PostgreSQL counts every non-ASCII character
+      // as part of one, so "transactioné" is not TRANSACTION.
       const start = i;
-      while (i < n && /[A-Za-z0-9_$]/.test(sql[i]!)) i++;
+      while (i < n && /[A-Za-z0-9_$\u0080-\uffff]/.test(sql[i]!)) i++;
       words.push(sql.slice(start, i).toUpperCase());
     } else {
       break;
@@ -398,7 +400,8 @@ async function pgTablesWithRows(
 
 /**
  * The tables to back up, as the backup's snapshot has them: every table in
- * the schemas the workspace shows (all but pg_* and information_schema),
+ * the schemas the workspace shows (all but those starting "pg_" and
+ * information_schema),
  * so a table or schema created since the workspace's lists loaded is
  * included and a dropped one is not.
  */
@@ -412,8 +415,9 @@ async function postgresSnapshotTables(
       FROM pg_class c
       JOIN pg_namespace n ON n.oid = c.relnamespace
       WHERE c.relkind IN ('r', 'p')
-        AND n.nspname NOT LIKE 'pg_%'
+        -- The workspace's own schema rule (queries/metadata.ts).
         AND n.nspname <> 'information_schema'
+        AND n.nspname !~ '^pg_'
       ORDER BY n.nspname, c.relname;
     `
   );

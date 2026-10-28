@@ -563,6 +563,9 @@ describe("isTransactionControl", () => {
     "CREATE TABLE endings (x int)",
     "SELECT 'COMMIT'",
     "PREPARE q AS SELECT 1",
+    // A prepared statement named with non-ASCII letters.
+    "PREPARE transactioné AS SELECT 1",
+    "PREPARE transaction中文 AS SELECT 1",
   ])("is false for %s", (sql) => {
     expect(isTransactionControl(sql)).toBe(false);
   });

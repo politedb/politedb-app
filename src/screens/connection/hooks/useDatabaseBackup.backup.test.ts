@@ -219,4 +219,16 @@ describe("database backup file", () => {
     await act(() => result.current.onBackupDatabase("db"));
     expect(m.sessionBegin).toHaveBeenCalledTimes(2);
   });
+
+  it("lists tables with the workspace's schema rule", async () => {
+    streamDelivers((h) => h.onDone());
+    const { result } = renderHook(() => useDatabaseBackup());
+    await act(() => result.current.onBackupDatabase("db"));
+    const list = m.runSqlQuery.mock.calls
+      .map((call) => call[1] as string)
+      .find((sql) => sql.includes("SELECT n.nspname, c.relname"))!;
+    // "pg_" is literal: a schema named pgapp is listed.
+    expect(list).toContain("n.nspname !~ '^pg_'");
+    expect(list).not.toContain("LIKE");
+  });
 });

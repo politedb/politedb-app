@@ -521,6 +521,13 @@ async fn run(ctx: OperationCtx, config: Config, statement: String) {
 /// the server then ends the session and rolls back anything still open.
 pub(super) struct SessionTask(JoinHandle<()>);
 
+impl SessionTask {
+    /// Stops the driver task (closing the socket) without owning the task.
+    pub(super) fn abort_handle(&self) -> tokio::task::AbortHandle {
+        self.0.abort_handle()
+    }
+}
+
 impl Drop for SessionTask {
     fn drop(&mut self) {
         self.0.abort();
