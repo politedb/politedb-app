@@ -566,6 +566,9 @@ describe("isTransactionControl", () => {
     // A prepared statement named with non-ASCII letters.
     "PREPARE transactioné AS SELECT 1",
     "PREPARE transaction中文 AS SELECT 1",
+    // Unicode case mappings are not keyword case folding.
+    "PREPARE transactıon AS SELECT 1",
+    "PREPARE tranſaction AS SELECT 1",
   ])("is false for %s", (sql) => {
     expect(isTransactionControl(sql)).toBe(false);
   });

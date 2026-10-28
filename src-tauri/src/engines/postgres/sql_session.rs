@@ -44,6 +44,12 @@ impl SqlSessionMode {
     }
 }
 
+use std::sync::atomic::Ordering::SeqCst;
+
+const OPEN: u8 = 0;
+const ENDING: u8 = 1;
+const CLOSED: u8 = 2;
+
 /// One statement's limit, as the per-statement runs had.
 const STATEMENT_LIMIT: Duration = Duration::from_secs(120);
 const CONNECT_LIMIT: Duration = Duration::from_secs(30);
@@ -63,8 +69,10 @@ struct PgSqlSession {
     /// lock (a statement may hold it): the socket closes, the statement
     /// fails, and the server rolls back.
     abort: tokio::task::AbortHandle,
-    /// Set once the session is closing: no further statement runs.
-    ended: std::sync::atomic::AtomicBool,
+    /// OPEN, ENDING (commit or rollback asked) or CLOSED (forced). Past
+    /// OPEN no statement starts; a forced close wins over an ending, which
+    /// then sends no COMMIT.
+    state: std::sync::atomic::AtomicU8,
     /// None once ended. Dropping it closes the connection; the server then
     /// rolls back anything still open.
     client: Mutex<Option<(Client, SessionTask)>>,
@@ -161,7 +169,7 @@ impl SqlSessionRegistry {
                 mode,
                 cancel: client.cancel_token(),
                 abort: task.abort_handle(),
-                ended: std::sync::atomic::AtomicBool::new(false),
+                state: std::sync::atomic::AtomicU8::new(OPEN),
                 client: Mutex::new(Some((client, task))),
                 last_used: std::sync::Mutex::new(Instant::now()),
             }),
@@ -183,7 +191,7 @@ impl SqlSessionRegistry {
         let result = {
             let guard = session.client.lock().await;
             // Closed while this call waited for the lock.
-            if session.ended.load(std::sync::atomic::Ordering::SeqCst) {
+            if session.state.load(SeqCst) != OPEN {
                 return Err("SQL_SESSION_ENDED".into());
             }
             let (client, _) = guard.as_ref().ok_or("SQL_SESSION_ENDED")?;
@@ -205,47 +213,74 @@ impl SqlSessionRegistry {
     }
 
     /// Ends a session: commits or rolls back, then closes its connection.
+    /// The session stays listed until then, so a forced close (the
+    /// connection going away, a timeout) can still find and stop it; if
+    /// one does, nothing is committed.
     pub async fn end(&self, session_id: Uuid, commit: bool) -> Result<(), String> {
-        let Some((_, session)) = self.sessions.remove(&session_id) else {
-            return Err("SQL_SESSION_NOT_FOUND".into());
-        };
-        let mut guard = session.client.lock().await;
-        session
-            .ended
-            .store(true, std::sync::atomic::Ordering::SeqCst);
-        let Some((client, _task)) = guard.take() else {
-            return Ok(());
-        };
-        let end = if commit { "COMMIT" } else { "ROLLBACK" };
-        match tokio::time::timeout(END_LIMIT, client.batch_execute(end)).await {
-            Ok(Ok(())) => Ok(()),
-            Ok(Err(e)) => Err(format_pg_error(&e, end)),
-            // Closing the connection (on drop) rolls it back.
-            Err(_) => Err(if commit {
-                "SQL_SESSION_COMMIT_TIMEOUT".into()
-            } else {
-                "SQL_SESSION_ROLLBACK_TIMEOUT".into()
-            }),
+        let session = self
+            .sessions
+            .get(&session_id)
+            .map(|s| Arc::clone(&s))
+            .ok_or("SQL_SESSION_NOT_FOUND")?;
+        // From here no statement starts, queued ones included.
+        if session
+            .state
+            .compare_exchange(OPEN, ENDING, SeqCst, SeqCst)
+            .is_err()
+        {
+            return Err("SQL_SESSION_ENDED".into());
         }
+        let result = match tokio::time::timeout(END_LIMIT, session.client.lock()).await {
+            // A statement still running past the limit: close instead.
+            Err(_) => Err("SQL_SESSION_END_TIMEOUT".to_string()),
+            Ok(mut guard) => {
+                // A forced close may have won meanwhile: commit nothing.
+                if session.state.load(SeqCst) != ENDING {
+                    Err("SQL_SESSION_ENDED".to_string())
+                } else if let Some((client, _task)) = guard.take() {
+                    let end = if commit { "COMMIT" } else { "ROLLBACK" };
+                    match tokio::time::timeout(END_LIMIT, client.batch_execute(end)).await {
+                        Ok(Ok(())) => Ok(()),
+                        Ok(Err(e)) => Err(format_pg_error(&e, end)),
+                        // Closing the connection (on drop) rolls it back.
+                        Err(_) => Err(if commit {
+                            "SQL_SESSION_COMMIT_TIMEOUT".into()
+                        } else {
+                            "SQL_SESSION_ROLLBACK_TIMEOUT".into()
+                        }),
+                    }
+                } else {
+                    Ok(())
+                }
+            }
+        };
+        if result.is_err() {
+            self.close(session_id).await;
+        } else {
+            self.sessions.remove(&session_id);
+        }
+        result
     }
 
     /// Ends a session without waiting on a statement still running: it is
-    /// cancelled first, and the connection closes (rolling back).
+    /// cancelled, the connection closes (rolling back), and an ending in
+    /// progress commits nothing.
     async fn close(&self, session_id: Uuid) {
-        if let Some((_, session)) = self.sessions.remove(&session_id) {
-            // No statement starts from here on, queued ones included.
-            session
-                .ended
-                .store(true, std::sync::atomic::Ordering::SeqCst);
-            // Best effort, bounded: the connection closes below either way.
-            let _ = tokio::time::timeout(CANCEL_LIMIT, session.cancel.cancel_query(NoTls)).await;
-            // Close the connection now, without waiting for the lock a
-            // running statement may hold: that statement then fails.
-            session.abort.abort();
-            if let Ok(mut guard) = tokio::time::timeout(END_LIMIT, session.client.lock()).await {
-                drop(guard.take());
-            }
-        }
+        let Some(session) = self.sessions.get(&session_id).map(|s| Arc::clone(&s)) else {
+            return;
+        };
+        session.state.store(CLOSED, SeqCst);
+        // Best effort, bounded: the connection closes below either way.
+        let _ = tokio::time::timeout(CANCEL_LIMIT, session.cancel.cancel_query(NoTls)).await;
+        // Close the connection now, without waiting for the lock a running
+        // statement or an ending may hold: that work then fails.
+        session.abort.abort();
+        self.sessions.remove(&session_id);
+        let taken = match tokio::time::timeout(END_LIMIT, session.client.lock()).await {
+            Ok(mut guard) => guard.take(),
+            Err(_) => None,
+        };
+        drop(taken);
     }
 
     /// Rolls back every session of a connection that is going away.
@@ -488,6 +523,50 @@ mod tests {
             .unwrap()
             .get(0);
         assert_eq!(queued_ran, 0, "the queued statement never ran");
+
+        // A commit asked while a statement runs, then the connection going
+        // away: the forced close wins, nothing more runs, nothing commits.
+        let (id, _) = reg
+            .begin(conn, &cfg, SqlSessionMode::Transaction)
+            .await
+            .unwrap();
+        reg.execute(id, "INSERT INTO zz_session_t VALUES (97)")
+            .await
+            .unwrap();
+        let running = {
+            let reg = Arc::clone(&reg);
+            tokio::spawn(async move { reg.execute(id, "SELECT pg_sleep(60)").await })
+        };
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let queued = {
+            let reg = Arc::clone(&reg);
+            tokio::spawn(async move {
+                reg.execute(id, "INSERT INTO zz_session_t VALUES (98)")
+                    .await
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let ending = {
+            let reg = Arc::clone(&reg);
+            tokio::spawn(async move { reg.end(id, true).await })
+        };
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let started = Instant::now();
+        reg.end_for_connection(conn).await;
+        let (running, queued, ending) = tokio::join!(running, queued, ending);
+        assert!(running.unwrap().is_err());
+        assert!(queued.unwrap().is_err());
+        assert!(ending.unwrap().is_err(), "the commit lost to the close");
+        assert!(
+            started.elapsed() < Duration::from_secs(15),
+            "closed promptly"
+        );
+        let kept: i64 = other
+            .query_one("SELECT count(*) FROM zz_session_t WHERE v IN (97, 98)", &[])
+            .await
+            .unwrap()
+            .get(0);
+        assert_eq!(kept, 0, "nothing committed, the queued INSERT never ran");
 
         // An abandoned session is closed by the registry's own watch, even
         // after imported SQL turned the server-side idle timeout off.

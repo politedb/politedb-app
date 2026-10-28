@@ -272,7 +272,11 @@ function pgLeadingWords(sql: string, count: number): string[] {
       // as part of one, so "transactioné" is not TRANSACTION.
       const start = i;
       while (i < n && /[A-Za-z0-9_$\u0080-\uffff]/.test(sql[i]!)) i++;
-      words.push(sql.slice(start, i).toUpperCase());
+      // ASCII case folding only, as for keywords: a Unicode mapping turns
+      // "transactıon" (dotless i) into TRANSACTION.
+      words.push(
+        sql.slice(start, i).replace(/[a-z]/g, (ch) => ch.toUpperCase())
+      );
     } else {
       break;
     }
