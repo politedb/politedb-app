@@ -46,9 +46,16 @@ impl SqlSessionMode {
 
 use std::sync::atomic::Ordering::SeqCst;
 
+/// A COMMIT got no answer: it may or may not have been applied.
+pub const COMMIT_OUTCOME_UNKNOWN: &str = "The connection closed while committing, so whether the changes were applied is unknown. Check the database before running this again.";
+
 const OPEN: u8 = 0;
+/// end() was asked: no statement starts.
 const ENDING: u8 = 1;
-const CLOSED: u8 = 2;
+/// end() owns the connection and sends COMMIT/ROLLBACK.
+const COMMITTING: u8 = 2;
+/// A forced close owns it: nothing more is sent.
+const CLOSED: u8 = 3;
 
 /// One statement's limit, as the per-statement runs had.
 const STATEMENT_LIMIT: Duration = Duration::from_secs(120);
@@ -69,9 +76,11 @@ struct PgSqlSession {
     /// lock (a statement may hold it): the socket closes, the statement
     /// fails, and the server rolls back.
     abort: tokio::task::AbortHandle,
-    /// OPEN, ENDING (commit or rollback asked) or CLOSED (forced). Past
-    /// OPEN no statement starts; a forced close wins over an ending, which
-    /// then sends no COMMIT.
+    /// OPEN → ENDING → COMMITTING, or → CLOSED (forced). Past OPEN no
+    /// statement starts. ENDING → COMMITTING and → CLOSED are taken by
+    /// compare-exchange, so exactly one of end() and a forced close owns
+    /// the outcome: a close that wins sends nothing; one that comes after
+    /// COMMIT was sent leaves its outcome unknown, and says so.
     state: std::sync::atomic::AtomicU8,
     /// None once ended. Dropping it closes the connection; the server then
     /// rolls back anything still open.
@@ -234,20 +243,25 @@ impl SqlSessionRegistry {
             // A statement still running past the limit: close instead.
             Err(_) => Err("SQL_SESSION_END_TIMEOUT".to_string()),
             Ok(mut guard) => {
-                // A forced close may have won meanwhile: commit nothing.
-                if session.state.load(SeqCst) != ENDING {
+                // Take ownership of the outcome; a forced close that got
+                // there first means nothing is sent.
+                if session
+                    .state
+                    .compare_exchange(ENDING, COMMITTING, SeqCst, SeqCst)
+                    .is_err()
+                {
                     Err("SQL_SESSION_ENDED".to_string())
                 } else if let Some((client, _task)) = guard.take() {
                     let end = if commit { "COMMIT" } else { "ROLLBACK" };
                     match tokio::time::timeout(END_LIMIT, client.batch_execute(end)).await {
                         Ok(Ok(())) => Ok(()),
-                        Ok(Err(e)) => Err(format_pg_error(&e, end)),
-                        // Closing the connection (on drop) rolls it back.
-                        Err(_) => Err(if commit {
-                            "SQL_SESSION_COMMIT_TIMEOUT".into()
-                        } else {
-                            "SQL_SESSION_ROLLBACK_TIMEOUT".into()
-                        }),
+                        // The server answered: the transaction is over,
+                        // not committed.
+                        Ok(Err(e)) if e.as_db_error().is_some() => Err(format_pg_error(&e, end)),
+                        // No answer (the connection closed, or no reply in
+                        // time): a COMMIT may or may not have been applied.
+                        _ if commit => Err(COMMIT_OUTCOME_UNKNOWN.into()),
+                        _ => Err("SQL_SESSION_ROLLBACK_FAILED".into()),
                     }
                 } else {
                     Ok(())
@@ -269,13 +283,21 @@ impl SqlSessionRegistry {
         let Some(session) = self.sessions.get(&session_id).map(|s| Arc::clone(&s)) else {
             return;
         };
-        session.state.store(CLOSED, SeqCst);
-        // Best effort, bounded: the connection closes below either way.
-        let _ = tokio::time::timeout(CANCEL_LIMIT, session.cancel.cancel_query(NoTls)).await;
+        // Own the session unless end() already owns the outcome (its
+        // COMMIT is in flight): the connection still closes below.
+        let _ = session.state.fetch_update(SeqCst, SeqCst, |state| {
+            (state != COMMITTING).then_some(CLOSED)
+        });
         // Close the connection now, without waiting for the lock a running
         // statement or an ending may hold: that work then fails.
         session.abort.abort();
         self.sessions.remove(&session_id);
+        // The server may not notice the closed socket while a statement
+        // runs: ask it to cancel too, without waiting on that.
+        let cancel = session.cancel.clone();
+        tokio::spawn(async move {
+            let _ = tokio::time::timeout(CANCEL_LIMIT, cancel.cancel_query(NoTls)).await;
+        });
         let taken = match tokio::time::timeout(END_LIMIT, session.client.lock()).await {
             Ok(mut guard) => guard.take(),
             Err(_) => None,

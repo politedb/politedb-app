@@ -285,6 +285,19 @@ INSERT INTO "public"."t" ("a","b") VALUES ('x', 'y');`,
     expect(m.showToast).not.toHaveBeenCalled();
   });
 
+  it("says when a commit's outcome is unknown, and shows the database", async () => {
+    m.sessionEnd.mockImplementation(async (_s: string, commit: boolean) => {
+      if (commit)
+        throw "The connection closed while committing, so whether the changes were applied is unknown.";
+    });
+    await restore();
+    expect(m.showMessage.mock.calls[0]![0]).toContain(
+      "The restore could not be committed: The connection closed while committing"
+    );
+    expect(m.refresh).toHaveBeenCalled();
+    expect(m.showToast).not.toHaveBeenCalled();
+  });
+
   it("rolls a PostgreSQL run back when it stops partway", async () => {
     m.runSqlQuery
       .mockResolvedValueOnce({})

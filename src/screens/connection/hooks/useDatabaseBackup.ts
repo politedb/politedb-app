@@ -2058,7 +2058,17 @@ export function useDatabaseBackup() {
             );
             return;
           }
-          await sqlSessionEnd(s, true);
+          try {
+            await sqlSessionEnd(s, true);
+          } catch (err) {
+            // A COMMIT with no answer may have been applied: show what
+            // the database now holds.
+            await rt.refreshSchemaAndTables();
+            onRefresh?.();
+            throw new Error(
+              `The ${action} could not be committed: ${err instanceof Error ? err.message : String(err)}`
+            );
+          }
         }
 
         await rt.refreshSchemaAndTables();
