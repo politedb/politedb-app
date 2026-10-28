@@ -550,6 +550,10 @@ describe("isTransactionControl", () => {
     "RELEASE SAVEPOINT s",
     "ABORT",
     "PREPARE TRANSACTION 'x'",
+    // Comments nest, and may sit between the words.
+    "/* outer /* inner */ outer */ COMMIT",
+    "PREPARE/**/TRANSACTION 'x'",
+    "START /* a */ -- b\n TRANSACTION",
   ])("is true for %s", (sql) => {
     expect(isTransactionControl(sql)).toBe(true);
   });

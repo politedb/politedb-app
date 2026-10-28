@@ -48,6 +48,12 @@ impl SqlSessionMode {
 const STATEMENT_LIMIT: Duration = Duration::from_secs(120);
 const CONNECT_LIMIT: Duration = Duration::from_secs(30);
 const END_LIMIT: Duration = Duration::from_secs(30);
+/// Setting a session up (its settings, BEGIN, the snapshot export).
+const SETUP_LIMIT: Duration = Duration::from_secs(30);
+/// Asking the server to cancel a statement (it opens its own connection).
+const CANCEL_LIMIT: Duration = Duration::from_secs(10);
+/// How often a session's idle time is checked.
+const WATCH_INTERVAL: Duration = Duration::from_secs(60);
 
 struct PgSqlSession {
     connection_id: Uuid,
@@ -74,16 +80,35 @@ impl PgSqlSession {
     }
 }
 
-#[derive(Default)]
 pub struct SqlSessionRegistry {
     sessions: DashMap<Uuid, Arc<PgSqlSession>>,
+    /// Scales the idle limits and the watch interval (tests shorten them).
+    timing: Timing,
+}
+
+#[derive(Clone, Copy)]
+struct Timing {
+    watch_interval: Duration,
+    idle_scale: f64,
+}
+
+impl Default for SqlSessionRegistry {
+    fn default() -> Self {
+        Self {
+            sessions: DashMap::new(),
+            timing: Timing {
+                watch_interval: WATCH_INTERVAL,
+                idle_scale: 1.0,
+            },
+        }
+    }
 }
 
 impl SqlSessionRegistry {
     /// Opens a session on its own connection: its transaction, and for a
     /// snapshot session the exported snapshot id.
     pub async fn begin(
-        &self,
+        self: &Arc<Self>,
         connection_id: Uuid,
         config: &Config,
         mode: SqlSessionMode,
@@ -94,7 +119,7 @@ impl SqlSessionRegistry {
             .await
             .map_err(|_| "SQL_SESSION_CONNECT_TIMEOUT".to_string())?
             .map_err(|e| format!("SQL_SESSION_CONNECT_FAILED: {e}"))?;
-        let idle_ms = mode.idle_limit().as_millis();
+        let idle_ms = self.idle_limit(mode).as_millis();
         let setup = match mode {
             SqlSessionMode::Transaction => format!(
                 "SET statement_timeout = {}; \
@@ -106,18 +131,21 @@ impl SqlSessionRegistry {
                  BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY"
             ),
         };
-        if let Err(e) = client.batch_execute(&setup).await {
-            return Err(format_pg_error(&e, &setup));
+        match tokio::time::timeout(SETUP_LIMIT, client.batch_execute(&setup)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return Err(format_pg_error(&e, &setup)),
+            Err(_) => return Err("SQL_SESSION_SETUP_TIMEOUT".into()),
         }
         let snapshot = match mode {
             SqlSessionMode::Transaction => None,
-            SqlSessionMode::Snapshot => Some(
-                client
-                    .query_one("SELECT pg_export_snapshot()", &[])
-                    .await
-                    .map_err(|e| format_pg_error(&e, "SELECT pg_export_snapshot()"))?
-                    .get::<usize, String>(0),
-            ),
+            SqlSessionMode::Snapshot => {
+                let export = "SELECT pg_export_snapshot()";
+                match tokio::time::timeout(SETUP_LIMIT, client.query_one(export, &[])).await {
+                    Ok(Ok(row)) => Some(row.get::<usize, String>(0)),
+                    Ok(Err(e)) => return Err(format_pg_error(&e, export)),
+                    Err(_) => return Err("SQL_SESSION_SETUP_TIMEOUT".into()),
+                }
+            }
         };
         let id = Uuid::new_v4();
         self.sessions.insert(
@@ -130,6 +158,7 @@ impl SqlSessionRegistry {
                 last_used: std::sync::Mutex::new(Instant::now()),
             }),
         );
+        self.watch(id, mode);
         Ok((id, snapshot))
     }
 
@@ -157,7 +186,6 @@ impl SqlSessionRegistry {
             Ok(Ok(_)) => Ok(()),
             Ok(Err(e)) => Err(format_pg_error(&e, sql)),
             Err(_) => {
-                let _ = session.cancel.cancel_query(NoTls).await;
                 self.close(session_id).await;
                 Err("SQL_SESSION_TIMEOUT".into())
             }
@@ -189,10 +217,14 @@ impl SqlSessionRegistry {
     /// cancelled first, and the connection closes (rolling back).
     async fn close(&self, session_id: Uuid) {
         if let Some((_, session)) = self.sessions.remove(&session_id) {
-            let _ = session.cancel.cancel_query(NoTls).await;
-            let _ = tokio::time::timeout(END_LIMIT, session.client.lock())
-                .await
-                .map(|mut guard| guard.take());
+            // Best effort, bounded: the connection closes below either way.
+            let _ = tokio::time::timeout(CANCEL_LIMIT, session.cancel.cancel_query(NoTls)).await;
+            // A statement still holding the lock past the limit ends with the
+            // session's last reference (the execute in flight); the server
+            // has been asked to cancel it.
+            if let Ok(mut guard) = tokio::time::timeout(END_LIMIT, session.client.lock()).await {
+                drop(guard.take());
+            }
         }
     }
 
@@ -209,13 +241,47 @@ impl SqlSessionRegistry {
         }
     }
 
+    fn idle_limit(&self, mode: SqlSessionMode) -> Duration {
+        mode.idle_limit().mul_f64(self.timing.idle_scale)
+    }
+
+    /// Watches a session's idle time and closes it once past its limit,
+    /// whatever the session's own settings (imported SQL may change or
+    /// reset idle_in_transaction_session_timeout).
+    fn watch(self: &Arc<Self>, session_id: Uuid, mode: SqlSessionMode) {
+        let registry = Arc::downgrade(self);
+        tokio::spawn(async move {
+            loop {
+                let interval = match registry.upgrade() {
+                    Some(r) => r.timing.watch_interval,
+                    None => return,
+                };
+                tokio::time::sleep(interval).await;
+                let Some(registry) = registry.upgrade() else {
+                    return;
+                };
+                let Some(idle) = registry
+                    .sessions
+                    .get(&session_id)
+                    .map(|s| s.value().idle_for())
+                else {
+                    return;
+                };
+                if idle > registry.idle_limit(mode) {
+                    registry.close(session_id).await;
+                    return;
+                }
+            }
+        });
+    }
+
     /// Closes sessions left unused past their limit (a frontend that never
     /// ended them: a reload, a lost reply).
     async fn reclaim_idle(&self) {
         let stale: Vec<Uuid> = self
             .sessions
             .iter()
-            .filter(|s| s.value().idle_for() > s.value().mode.idle_limit())
+            .filter(|s| s.value().idle_for() > self.idle_limit(s.value().mode))
             .map(|s| *s.key())
             .collect();
         for id in stale {
@@ -277,7 +343,7 @@ mod tests {
             .await
             .unwrap();
         let conn = Uuid::new_v4();
-        let reg = SqlSessionRegistry::default();
+        let reg = Arc::new(SqlSessionRegistry::default());
 
         // A transaction rolled back leaves nothing; savepoints undo alone.
         let (id, snap) = reg
@@ -365,6 +431,41 @@ mod tests {
         assert!(free, "the advisory lock ended with the session");
         other
             .batch_execute("SELECT pg_advisory_unlock(424242)")
+            .await
+            .unwrap();
+
+        // An abandoned session is closed by the registry's own watch, even
+        // after imported SQL turned the server-side idle timeout off.
+        let quick = Arc::new(SqlSessionRegistry {
+            sessions: DashMap::new(),
+            timing: Timing {
+                watch_interval: Duration::from_millis(100),
+                // 15 min → 0.9 s
+                idle_scale: 0.001,
+            },
+        });
+        let (id, _) = quick
+            .begin(conn, &cfg, SqlSessionMode::Transaction)
+            .await
+            .unwrap();
+        quick
+            .execute(id, "SET idle_in_transaction_session_timeout = 0")
+            .await
+            .unwrap();
+        quick
+            .execute(id, "SELECT pg_advisory_lock(424243)")
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        assert!(quick.execute(id, "SELECT 1").await.is_err(), "reclaimed");
+        let free: bool = other
+            .query_one("SELECT pg_try_advisory_lock(424243)", &[])
+            .await
+            .unwrap()
+            .get(0);
+        assert!(free, "its lock ended with it");
+        other
+            .batch_execute("SELECT pg_advisory_unlock(424243)")
             .await
             .unwrap();
 

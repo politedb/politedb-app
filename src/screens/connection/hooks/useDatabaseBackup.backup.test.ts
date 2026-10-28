@@ -199,4 +199,24 @@ describe("database backup file", () => {
     });
     expect(m.writeFile).toHaveBeenCalledTimes(1);
   });
+
+  it("reserves a connection's backup before anything is awaited", async () => {
+    streamDelivers((h) => h.onDone());
+    const { result } = renderHook(() => useDatabaseBackup());
+    await act(async () => {
+      // Started together: the second finds the first's reservation.
+      await Promise.all([
+        result.current.onBackupDatabase("db"),
+        result.current.onBackupDatabase("db"),
+      ]);
+    });
+    expect(m.sessionBegin).toHaveBeenCalledTimes(1);
+    expect(m.showMessage).toHaveBeenCalledWith(
+      "A backup of this connection is already running.",
+      expect.anything()
+    );
+    // Released afterwards: another backup can run.
+    await act(() => result.current.onBackupDatabase("db"));
+    expect(m.sessionBegin).toHaveBeenCalledTimes(2);
+  });
 });

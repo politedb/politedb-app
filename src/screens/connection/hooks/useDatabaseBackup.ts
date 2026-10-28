@@ -239,18 +239,66 @@ function pgLiteral(value: string): string {
 }
 
 /**
+ * The first words of a statement, uppercased, read the PostgreSQL way:
+ * whitespace and comments (line comments, and block comments, which nest)
+ * before and between them are skipped.
+ */
+function pgLeadingWords(sql: string, count: number): string[] {
+  const words: string[] = [];
+  let i = 0;
+  const n = sql.length;
+  while (i < n && words.length < count) {
+    const c = sql[i]!;
+    if (/\s/.test(c)) {
+      i++;
+    } else if (sql.startsWith("--", i)) {
+      while (i < n && sql[i] !== "\n" && sql[i] !== "\r") i++;
+    } else if (sql.startsWith("/*", i)) {
+      let depth = 0;
+      while (i < n) {
+        if (sql.startsWith("/*", i)) {
+          depth++;
+          i += 2;
+        } else if (sql.startsWith("*/", i)) {
+          depth--;
+          i += 2;
+          if (depth === 0) break;
+        } else {
+          i++;
+        }
+      }
+    } else if (/[A-Za-z_]/.test(c)) {
+      const start = i;
+      while (i < n && /[A-Za-z0-9_$]/.test(sql[i]!)) i++;
+      words.push(sql.slice(start, i).toUpperCase());
+    } else {
+      break;
+    }
+  }
+  return words;
+}
+
+/**
  * A statement that controls transactions (BEGIN, COMMIT, END, ROLLBACK,
- * SAVEPOINT, PREPARE TRANSACTION…), after any leading comments. Inside a
- * run that owns its transaction it would end it partway.
+ * SAVEPOINT, PREPARE TRANSACTION…). Inside a run that owns its
+ * transaction it would end it partway.
  */
 export function isTransactionControl(sql: string): boolean {
-  const head = sql
-    .replace(/^(?:\s*(?:--[^\n\r]*(?:\r\n?|\n|$)|\/\*[\s\S]*?\*\/))+/, "")
-    .trimStart()
-    .toUpperCase();
-  return /^(?:BEGIN|START\s+TRANSACTION|COMMIT|END|ROLLBACK|ABORT|SAVEPOINT|RELEASE|PREPARE\s+TRANSACTION)\b/.test(
-    head
-  );
+  const [first = "", second = ""] = pgLeadingWords(sql, 2);
+  if (
+    [
+      "BEGIN",
+      "COMMIT",
+      "END",
+      "ROLLBACK",
+      "ABORT",
+      "SAVEPOINT",
+      "RELEASE",
+    ].includes(first)
+  ) {
+    return true;
+  }
+  return (first === "START" || first === "PREPARE") && second === "TRANSACTION";
 }
 
 function isPgAddForeignKeyStatement(sql: string): boolean {
@@ -298,7 +346,7 @@ type BackupTable = {
  * its catalog queries and row streams all see one database state, even
  * while others write. Set for the duration of a backup only.
  */
-const backupSnapshots = new Map<string, string>();
+const backupSnapshots = new Map<string, { snapshotId: string | null }>();
 
 /** A query of a backup, reading its snapshot when it has one. */
 function backupQuery(
@@ -306,7 +354,7 @@ function backupQuery(
   sql: string,
   opts?: Parameters<typeof runSqlQuery>[2]
 ) {
-  const snapshotId = backupSnapshots.get(connectionId);
+  const snapshotId = backupSnapshots.get(connectionId)?.snapshotId;
   const withSnapshot = snapshotId ? { ...opts, snapshotId } : opts;
   return withSnapshot
     ? runSqlQuery(connectionId, sql, withSnapshot)
@@ -349,15 +397,14 @@ async function pgTablesWithRows(
 }
 
 /**
- * The tables to back up as the backup's snapshot has them, in the schemas
- * the workspace lists (a table created since its lists was loaded is
- * included, a dropped one is not).
+ * The tables to back up, as the backup's snapshot has them: every table in
+ * the schemas the workspace shows (all but pg_* and information_schema),
+ * so a table or schema created since the workspace's lists loaded is
+ * included and a dropped one is not.
  */
 async function postgresSnapshotTables(
-  connectionId: string,
-  schemas: ReadonlySet<string>
+  connectionId: string
 ): Promise<BackupTable[]> {
-  if (!schemas.size) return [];
   const res = await backupQuery(
     connectionId,
     `
@@ -365,7 +412,8 @@ async function postgresSnapshotTables(
       FROM pg_class c
       JOIN pg_namespace n ON n.oid = c.relnamespace
       WHERE c.relkind IN ('r', 'p')
-        AND n.nspname IN (${[...schemas].map(pgLiteral).join(", ")})
+        AND n.nspname NOT LIKE 'pg_%'
+        AND n.nspname <> 'information_schema'
       ORDER BY n.nspname, c.relname;
     `
   );
@@ -700,7 +748,7 @@ export async function exportTableToSqlParts(args: {
     batchSize: 250,
     maxRows: 10_000_000,
     canonicalTextOutput: engine === "postgres",
-    snapshotId: backupSnapshots.get(connectionId),
+    snapshotId: backupSnapshots.get(connectionId)?.snapshotId ?? undefined,
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -1487,31 +1535,34 @@ export function useDatabaseBackup() {
         return;
       }
 
-      // One PostgreSQL backup per connection at a time: each reads its own
-      // snapshot (backupSnapshots).
-      if (backupSnapshots.has(rt.runtimeConnectionId)) {
+      // One backup per connection at a time, reserved before anything is
+      // awaited; each reads its own snapshot (backupSnapshots).
+      const connectionId = rt.runtimeConnectionId;
+      if (backupSnapshots.has(connectionId)) {
         void showMessage("A backup of this connection is already running.", {
           title: "Backup database",
           kind: "info",
         });
         return;
       }
+      const run: { snapshotId: string | null } = { snapshotId: null };
+      backupSnapshots.set(connectionId, run);
 
       setDbBackupRunning(true);
 
       let snapshotSessionId: string | null = null;
-      let snapshotId: string | null = null;
       try {
         const meta = await rt.metadata.load({
           metaKey: rt.metaKey,
           engine: rt.engine,
-          connectionId: rt.runtimeConnectionId,
+          connectionId,
         });
 
         let tables: BackupTable[] = (meta.tables ?? []).filter(
           (t) => t.kind !== "view"
         );
-        if (!tables.length) {
+        // PostgreSQL reads its tables through the snapshot below.
+        if (!tables.length && rt.engine !== "postgres") {
           throw new Error("No tables found to backup.");
         }
 
@@ -1529,21 +1580,16 @@ export function useDatabaseBackup() {
 
         // PostgreSQL: every query of the backup reads one snapshot, so the
         // tables, their rows and sequences agree even while others write.
-        // The tables and their columns are read again through it: the
-        // workspace's lists may predate it (a table or column added since).
+        // The tables and their columns are read through it too: the
+        // workspace's lists may predate it.
         if (rt.engine === "postgres") {
-          const session = await sqlSessionBegin(
-            rt.runtimeConnectionId,
-            "snapshot"
-          );
+          const session = await sqlSessionBegin(connectionId, "snapshot");
           snapshotSessionId = session.sessionId;
-          snapshotId = session.snapshotId;
-          if (!snapshotId) throw new Error("No snapshot to back up from.");
-          backupSnapshots.set(rt.runtimeConnectionId, snapshotId);
-          tables = await postgresSnapshotTables(
-            rt.runtimeConnectionId,
-            new Set(tables.map((t) => t.schema))
-          );
+          if (!session.snapshotId) {
+            throw new Error("No snapshot to back up from.");
+          }
+          run.snapshotId = session.snapshotId;
+          tables = await postgresSnapshotTables(connectionId);
           if (!tables.length) {
             throw new Error("No tables found to backup.");
           }
@@ -1718,12 +1764,9 @@ export function useDatabaseBackup() {
           err instanceof Error ? err.message : "Backup database failed.";
         void showMessage(message, { title: "Backup error", kind: "error" });
       } finally {
-        // Only this run's own snapshot.
-        if (
-          snapshotId &&
-          backupSnapshots.get(rt.runtimeConnectionId) === snapshotId
-        ) {
-          backupSnapshots.delete(rt.runtimeConnectionId);
+        // Only this run's own reservation.
+        if (backupSnapshots.get(connectionId) === run) {
+          backupSnapshots.delete(connectionId);
         }
         if (snapshotSessionId) {
           // Read only: nothing to keep.
