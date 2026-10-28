@@ -223,8 +223,10 @@ impl SqlSessionRegistry {
 
     /// Ends a session: commits or rolls back, then closes its connection.
     /// The session stays listed until then, so a forced close (the
-    /// connection going away, a timeout) can still find and stop it; if
-    /// one does, nothing is committed.
+    /// connection going away, a timeout) can still find and stop it. A
+    /// close that gets there before COMMITTING means nothing is sent; once
+    /// COMMIT is sent, a close cannot undo it, and a COMMIT left without an
+    /// answer is reported as of unknown outcome.
     pub async fn end(&self, session_id: Uuid, commit: bool) -> Result<(), String> {
         let session = self
             .sessions
@@ -276,9 +278,10 @@ impl SqlSessionRegistry {
         result
     }
 
-    /// Ends a session without waiting on a statement still running: it is
-    /// cancelled, the connection closes (rolling back), and an ending in
-    /// progress commits nothing.
+    /// Ends a session without waiting on a statement still running: the
+    /// connection closes at once and the statement is cancelled. Unless
+    /// end() already sent COMMIT (COMMITTING), the server rolls back what
+    /// the session held and an ending in progress sends nothing.
     async fn close(&self, session_id: Uuid) {
         let Some(session) = self.sessions.get(&session_id).map(|s| Arc::clone(&s)) else {
             return;
@@ -305,7 +308,8 @@ impl SqlSessionRegistry {
         drop(taken);
     }
 
-    /// Rolls back every session of a connection that is going away.
+    /// Closes every session of a connection that is going away (rolled
+    /// back, unless a COMMIT was already sent).
     pub async fn end_for_connection(&self, connection_id: Uuid) {
         let ids: Vec<Uuid> = self
             .sessions
