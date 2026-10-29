@@ -1,6 +1,7 @@
 import {
   finishDumpJob,
   registerDumpJob,
+  scopeCovers,
   updateDumpJob,
   useDumpJobStore,
   type DumpCounts,
@@ -156,11 +157,17 @@ function flushProgress(c: Control) {
 function mustRead(kind: DumpJobKind, outcome: DumpOutcome): boolean {
   switch (outcome.kind) {
     case "succeeded":
+      return !!outcome.warning;
     case "abandoned":
       return false;
     case "cancelled":
-      // A cancelled backup closes quietly with a toast (D12).
-      return kind !== "backup";
+      // A cancelled backup closes quietly with a toast (D12), unless
+      // something about it must be read.
+      return (
+        kind !== "backup" ||
+        !!outcome.failure ||
+        outcome.rollback === "cleanup-unconfirmed"
+      );
     default:
       return true;
   }
@@ -188,14 +195,17 @@ export function startDumpJob(
     cleanup,
     isCurrent() {
       if (finished || !current(jobId)) return false;
+      // The origin tab, on the very runtime connection it had…
       const tab = useScreenStore
         .getState()
         .profileTabs.find((t) => t.id === origin.tabId);
-      return (
-        !!tab &&
-        (!tab.runtimeConnectionId ||
-          tab.runtimeConnectionId === origin.runtimeConnectionId)
-      );
+      if (!tab || tab.runtimeConnectionId !== origin.runtimeConnectionId) {
+        return false;
+      }
+      // …and no close of it admitted meanwhile.
+      return !useDumpJobStore
+        .getState()
+        .closing.some((lease) => scopeCovers(lease.scope, origin));
     },
     stopRequested() {
       const job = useDumpJobStore.getState().active;
@@ -284,9 +294,10 @@ export function cancelDumpJob(jobId: string): void {
   const c = current(jobId);
   const job = useDumpJobStore.getState().active;
   if (!c || !job || job.jobId !== jobId || !job.cancellable) return;
-  if (c.handle.cleanup.busy) return;
 
   if (job.cancel.kind === "failed") {
+    // A retry waits until every earlier attempt settled (never overlap).
+    if (c.handle.cleanup.busy) return;
     const retry = c.retryDecision;
     c.retryDecision = null;
     updateDumpJob(jobId, () => ({ cancel: { kind: "requested" } }));

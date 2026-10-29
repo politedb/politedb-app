@@ -34,7 +34,7 @@ function present(
   outcome: DumpOutcome,
   successToast: string
 ) {
-  if (outcome.kind === "succeeded") {
+  if (outcome.kind === "succeeded" && !outcome.warning) {
     if (outcome.skipped > 0) {
       showToast(
         `${successToast} ${outcome.skipped} statement${outcome.skipped === 1 ? " was" : "s were"} skipped: objects that already existed or foreign keys the data did not allow.`,
@@ -45,11 +45,16 @@ function present(
     }
     return;
   }
-  if (outcome.kind === "cancelled" && job.kind === "backup") {
+  if (
+    outcome.kind === "cancelled" &&
+    job.kind === "backup" &&
+    !outcome.failure &&
+    outcome.rollback !== "cleanup-unconfirmed"
+  ) {
     showToast(BACKUP_CANCELLED_MESSAGE, { tone: "info" });
     return;
   }
-  const text = describeDumpOutcome(job.kind, outcome);
+  const text = describeDumpOutcome(outcome);
   if (text) {
     void showMessage(text.message, {
       title: dumpJobTitle(job.kind, true),

@@ -55,19 +55,36 @@ describe("operationBus.invalidate", () => {
     operationBus.invalidate("op-a");
     emit("op:chunk_table", chunk("op-a", 2));
     emit("op:chunk_table", chunk("op-a", 3));
-    emit("op:done", { op_id: "op-a", row_count: 3 });
     await flush();
-    expect(seen).toEqual([1]);
-    expect(done).not.toHaveBeenCalled();
-    // Every chunk was ACKed: the backend is never left waiting.
-    expect(acked("op-a")).toBe(3);
     // Nothing cached for a late subscriber either.
     expect(operationBus.hasPendingChunks("op-a")).toBe(false);
     const late = vi.fn();
     await operationBus.subscribe("op-a", { onChunk: late, onDone: late });
     emit("op:chunk_table", chunk("op-a", 4));
+    emit("op:done", { op_id: "op-a", row_count: 4 });
     await flush();
+    expect(seen).toEqual([1]);
+    expect(done).not.toHaveBeenCalled();
     expect(late).not.toHaveBeenCalled();
+    // Every chunk was ACKed: the backend is never left waiting.
+    expect(acked("op-a")).toBe(4);
+  });
+
+  it("keeps dropping a given-up op's chunks long after the cache TTL", async () => {
+    // Fake the cleanup timer and clock only (ACKs flush on the frame).
+    vi.useFakeTimers({ toFake: ["setInterval", "setTimeout", "Date"] });
+    try {
+      operationBus.invalidate("op-slow");
+      // Far past the orphan-cache TTL and its cleanup runs.
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      emit("op:chunk_table", chunk("op-slow", 1));
+      emit("op:error", { op_id: "op-slow", error: "late" });
+      await flush();
+      expect(operationBus.hasPendingChunks("op-slow")).toBe(false);
+      expect(acked("op-slow")).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("drops chunks queued behind a running handler when invalidated meanwhile", async () => {

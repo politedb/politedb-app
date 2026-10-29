@@ -15,6 +15,7 @@ import { packSqlToDumb } from "src/lib/dump/politedbDumbFormat";
 import type { DumpOutcome } from "src/stores/dumpJob";
 import type { useConnectionRuntimeCtx } from "../../workspace/ConnectionRuntimeContext";
 import { backupStepsTotal } from "../dumpProgress";
+import { holdJobQueries } from "./jobQueries";
 import type { DumpJobHandle } from "./dumpJobController";
 import {
   backupQuery,
@@ -23,6 +24,7 @@ import {
   buildPostgresTableStructure,
   buildPostgresTypesSql,
   dumpCommentName,
+  DumpStopped,
   exportTableToSqlParts,
   postgresGeneratedOnlyRowsSql,
   postgresSnapshotColumns,
@@ -39,6 +41,19 @@ export const BACKUP_CANCELLED_MESSAGE =
 /** Stops the run where it stands (a cancel asked meanwhile). */
 class Cancelled extends Error {}
 
+/** An error the run's own cancel causes (not a failure to report). */
+function isOwnStop(err: unknown): boolean {
+  return (
+    err instanceof Cancelled ||
+    err instanceof DumpStopped ||
+    (err instanceof Error &&
+      (err.name === "AbortError" || err.message === "AbortError"))
+  );
+}
+
+const SESSION_NOTE =
+  "Its read session could not be confirmed closed: close the connection to end it.";
+
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
@@ -53,32 +68,58 @@ export async function runDatabaseBackup(
   let snapshotSessionId: string | null = null;
   let stream: DumpOperation<unknown> | null = null;
   let fileSession: string | null = null;
+  /** A stream, query or snapshot whose release could not be confirmed. */
+  let cleanupUnconfirmed = false;
+  const queries = holdJobQueries(job);
 
   /** Throws Cancelled when a cancel was asked: start no new work. */
   const checkpoint = () => {
     if (job.stopRequested()) throw new Cancelled();
   };
 
-  // Cancel stops the running row stream; the run stops at its next step.
+  // Cancel stops the running row stream and catalog queries; the run
+  // stops at its next step. A backend cancel that failed is no evidence.
   job.setCancelAction(async () => {
     const running = stream;
+    let rejected = false;
     if (running) {
-      await running.cancel();
+      rejected = (await running.cancel()).kind === "rejected";
       await running.settled;
     }
-    return { kind: "accepted", evidence: null };
+    if (!(await queries.stopAll())) rejected = true;
+    return rejected
+      ? { kind: "failed", error: "The backup's query could not be cancelled." }
+      : { kind: "accepted", evidence: null };
   });
 
   // The snapshot session (read only, nothing to keep) and the backup's
-  // snapshot lookup end with the run, after any stream has settled.
+  // snapshot lookup end with the run, after any stream has settled. The
+  // session is kept until it is confirmed ended (one retry).
   const endSnapshot = async () => {
     backupSnapshots.delete(connectionId);
-    if (!snapshotSessionId) return;
     const id = snapshotSessionId;
+    if (!id) return;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        await job.cleanup.run(() => sqlSessionEnd(id, false));
+        snapshotSessionId = null;
+        return;
+      } catch (err) {
+        // Already closed (the connection went away): nothing is held.
+        if (/SQL_SESSION_(NOT_FOUND|ENDED)/.test(errorMessage(err))) {
+          snapshotSessionId = null;
+          return;
+        }
+      }
+    }
     snapshotSessionId = null;
-    await job.cleanup.run(() => sqlSessionEnd(id, false).catch(() => {}));
+    cleanupUnconfirmed = true;
   };
 
+  let result:
+    | { kind: "published" }
+    | { kind: "cancelled"; failure?: string }
+    | { kind: "failed"; error: unknown };
   try {
     job.setPhase("preparing", true);
     const meta = await rt.metadata.load({
@@ -286,8 +327,9 @@ export async function runDatabaseBackup(
           job.progress({ rows: rowsBefore + rows, detail: label });
         },
       }).catch((err) => {
-        if (job.stopRequested()) throw new Cancelled();
-        throw err;
+        // The stream's own cancellation is the cancel; anything else is
+        // a failure, reported (with the cancel, if one was asked).
+        throw isOwnStop(err) ? new Cancelled() : err;
       });
       stream = null;
       rowsBefore += tableRows;
@@ -304,6 +346,7 @@ export async function runDatabaseBackup(
       appendSql("\nSET FOREIGN_KEY_CHECKS = 1;\n");
     }
     await endSnapshot();
+    checkpoint();
 
     // Compression is not interrupted (D9): a cancel asked meanwhile takes
     // effect once it is done, and nothing is written.
@@ -330,27 +373,47 @@ export async function runDatabaseBackup(
       if (errorMessage(err).includes(BACKUP_FILE_ALREADY_PUBLISHED)) {
         fileSession = null;
       } else {
-        return await failed(err);
+        throw err;
       }
     }
     step();
-    return { kind: "succeeded", skipped: 0 };
+    result = { kind: "published" };
   } catch (err) {
-    if (err instanceof Cancelled || job.stopRequested()) {
-      return await cancelled();
-    }
-    return await failed(err);
-  } finally {
-    // A stream still running (a failure elsewhere) is stopped first.
-    const running = stream as DumpOperation<unknown> | null;
-    if (running) {
-      await job.cleanup.run(async () => {
-        await running.cancel();
-        await running.settled;
-      });
-    }
-    await endSnapshot();
+    // A failure that came after the cancel is said too, not hidden.
+    result = isOwnStop(err)
+      ? { kind: "cancelled" }
+      : job.stopRequested()
+        ? { kind: "cancelled", failure: errorMessage(err) }
+        : { kind: "failed", error: err };
   }
+
+  // A stream or query still running (a failure elsewhere) is stopped and
+  // joined first, then the snapshot ends.
+  const running = stream as DumpOperation<unknown> | null;
+  if (running) {
+    await job.cleanup.run(async () => {
+      if ((await running.cancel()).kind === "rejected") {
+        cleanupUnconfirmed = true;
+      }
+      await running.settled;
+    });
+  }
+  if (!(await queries.stopAll())) cleanupUnconfirmed = true;
+  queries.release();
+  await endSnapshot();
+
+  const written = (): DumpOutcome =>
+    cleanupUnconfirmed
+      ? {
+          kind: "succeeded",
+          skipped: 0,
+          warning: `The backup was written. ${SESSION_NOTE}`,
+        }
+      : { kind: "succeeded", skipped: 0 };
+  if (result.kind === "published") return written();
+  return result.kind === "cancelled"
+    ? cancelled(result.failure)
+    : failed(result.error);
 
   /** Removes the temp of an unpublished backup; what became of the file. */
   async function discardFile(): Promise<
@@ -380,24 +443,26 @@ export async function runDatabaseBackup(
     return "unconfirmed";
   }
 
-  async function cancelled(): Promise<DumpOutcome> {
+  async function cancelled(failure?: string): Promise<DumpOutcome> {
     const file = await discardFile();
-    if (file === "published") return { kind: "succeeded", skipped: 0 };
+    if (file === "published") return written();
     if (file === "not-removed") {
-      return { kind: "temp-not-removed", after: "cancelled" };
+      return { kind: "temp-not-removed", after: "cancelled", message: failure };
     }
     if (file === "unconfirmed") return { kind: "file-unconfirmed" };
+    const also = failure ? ` Also: ${failure}` : "";
     return {
       kind: "cancelled",
-      rollback: "n/a",
-      message: BACKUP_CANCELLED_MESSAGE,
+      rollback: cleanupUnconfirmed ? "cleanup-unconfirmed" : "n/a",
+      failure,
+      message: `${BACKUP_CANCELLED_MESSAGE}${also}${cleanupUnconfirmed ? ` ${SESSION_NOTE}` : ""}`,
     };
   }
 
   async function failed(err: unknown): Promise<DumpOutcome> {
-    const message = errorMessage(err) || "Backup database failed.";
+    const message = `${errorMessage(err) || "Backup database failed."}${cleanupUnconfirmed ? ` ${SESSION_NOTE}` : ""}`;
     const file = await discardFile();
-    if (file === "published") return { kind: "succeeded", skipped: 0 };
+    if (file === "published") return written();
     if (file === "not-removed") {
       return { kind: "temp-not-removed", after: "failed", message };
     }

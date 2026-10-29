@@ -67,14 +67,37 @@ function parseCsv(text: string): (string | null)[][] {
   return rows;
 }
 
-vi.mock("src/lib/tauri/query", () => ({
-  startSqlQueryStream: vi.fn(),
-  runSqlQuery: async (_c: string, sql: string) => ({
+async function liveQuery(_c: string, sql: string) {
+  return {
     rows: parseCsv(psql("politedb_live_src", sql, true)).map((r) =>
       r.map((v) => (v === null ? { t: "Null" } : { t: "Str", v }))
     ),
-  }),
+  };
+}
+vi.mock("src/lib/tauri/query", () => ({
+  startSqlQueryStream: vi.fn(),
+  runSqlQuery: liveQuery,
 }));
+// Catalog queries go through the dump port; here they reach runSqlQuery.
+vi.mock("src/lib/tauri/dumpOperation", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("src/lib/tauri/dumpOperation")>();
+  return {
+    ...actual,
+    dumpQuery: (c: string, sql: string) => {
+      const result = Promise.resolve().then(() => liveQuery(c, sql));
+      return {
+        result,
+        cancel: async () => ({ kind: "requested" }),
+        settled: result.then(
+          () => ({ kind: "server-finished" }),
+          (error: unknown) => ({ kind: "server-finished", error })
+        ),
+      };
+    },
+  };
+});
+
 vi.mock("src/stores/persistentStore", () => ({
   usePersistentStore: { getState: () => ({ scheduleSave: () => {} }) },
 }));

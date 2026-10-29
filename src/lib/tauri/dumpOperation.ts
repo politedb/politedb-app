@@ -65,7 +65,6 @@ function start<T>(
   let resolveSettled!: (value: DumpSettled) => void;
   const settled = new Promise<DumpSettled>((res) => (resolveSettled = res));
 
-  const executeAbort = new AbortController();
   let opId: string | null = null;
   let execute: Promise<string | null> | null = null;
   let unsubscribe: (() => void) | null = null;
@@ -90,7 +89,6 @@ function start<T>(
     if (finished) return Promise.resolve({ kind: "requested" });
     stopping = (async () => {
       clearTimer();
-      executeAbort.abort();
       let ack: DumpCancelAck = { kind: "requested" };
       const cancelId = async (id: string) => {
         operationBus.invalidate(id);
@@ -162,7 +160,10 @@ function start<T>(
           snapshot_id: opts.snapshotId,
         },
       },
-      executeAbort.signal
+      // No abort signal: the helper would give up on the IPC early and
+      // only fire-and-forget the id that comes later. Disposal instead
+      // waits for the real execute, adopts its id, and cancels it.
+      undefined
     ).catch((error) => {
       executeError = error;
       return null;
@@ -229,6 +230,30 @@ function toError(error: unknown): Error {
           ? (error as { error: string }).error
           : "SQL operation failed";
   return new Error(message);
+}
+
+export type DumpQueryResult = {
+  rows: unknown[][];
+  columns: OperationDone["columns"];
+};
+
+/** A query whose rows are needed (catalog reads of a backup or restore). */
+export function dumpQuery(
+  connectionId: string,
+  sql: string,
+  opts: DumpSqlOptions = {}
+): DumpOperation<DumpQueryResult> {
+  const rows: unknown[][] = [];
+  return start(
+    connectionId,
+    sql,
+    "direct",
+    opts,
+    (chunk) => {
+      for (const row of chunk.rows ?? []) rows.push(row as unknown[]);
+    },
+    (done) => ({ rows, columns: done.columns })
+  );
 }
 
 /** One statement whose rows are not needed (a restore statement). */

@@ -30,6 +30,25 @@ vi.mock("src/lib/dump/politedbDumbFormat", () => ({
   packSqlToDumb: m.pack,
   unpackDumpBytes: vi.fn(),
 }));
+// Catalog queries go through the dump port; here they reach runSqlQuery.
+vi.mock("src/lib/tauri/dumpOperation", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("src/lib/tauri/dumpOperation")>();
+  return {
+    ...actual,
+    dumpQuery: (c: string, sql: string, o: unknown) => {
+      const result = Promise.resolve().then(() => m.runSqlQuery(c, sql, o));
+      return {
+        result,
+        cancel: async () => ({ kind: "requested" }),
+        settled: result.then(
+          () => ({ kind: "server-finished" }),
+          (error: unknown) => ({ kind: "server-finished", error })
+        ),
+      };
+    },
+  };
+});
 vi.mock("src/lib/tauri/query", () => ({
   startSqlQueryStream: m.startSqlQueryStream,
   runSqlQuery: m.runSqlQuery,
@@ -139,7 +158,14 @@ beforeEach(() => {
   });
   m.sessionEnd.mockResolvedValue(undefined);
   useScreenStore.setState({
-    profileTabs: [{ id: "t1", profileId: "p1", label: "db" } as never],
+    profileTabs: [
+      {
+        id: "t1",
+        profileId: "p1",
+        label: "db",
+        runtimeConnectionId: "conn_1",
+      } as never,
+    ],
   });
 });
 

@@ -78,7 +78,12 @@ export type RollbackEvidence =
   | "n/a";
 
 export type DumpOutcome =
-  | { kind: "succeeded"; skipped: number }
+  | {
+      kind: "succeeded";
+      skipped: number;
+      /** Done, but a cleanup could not be confirmed (shown, kept). */
+      warning?: string;
+    }
   | {
       kind: "cancelled";
       rollback: RollbackEvidence;

@@ -1,19 +1,23 @@
 import type { DumpJobKind, DumpOutcome } from "src/stores/dumpJob";
-import { BACKUP_CANCELLED_MESSAGE } from "./backupRun";
 
 /** The text of an outcome the user must read, and how it reads. */
 export function describeDumpOutcome(
-  kind: DumpJobKind,
   outcome: DumpOutcome
 ): { message: string; tone: "warning" | "error" | "info" } | null {
   switch (outcome.kind) {
     case "succeeded":
+      return outcome.warning
+        ? { message: outcome.warning, tone: "warning" }
+        : null;
     case "abandoned":
       return null;
     case "cancelled":
       return {
-        message: kind === "backup" ? BACKUP_CANCELLED_MESSAGE : outcome.message,
-        tone: "info",
+        message: outcome.message,
+        tone:
+          outcome.failure || outcome.rollback === "cleanup-unconfirmed"
+            ? "warning"
+            : "info",
       };
     case "stopped":
       return {

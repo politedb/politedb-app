@@ -40,6 +40,18 @@ APPROVED
   - Hook: registers the job before the file dialog (D14), runs the runner, and until Phase 3 presents outcomes as today (toast / `showMessage`), dismissing the retained summary right after.
   - Deviations, recorded: the app has one webview window, so the window close scope is the app scope (`origin` has no `windowId`); `backupSnapshots` stays as the snapshot lookup a backup run sets and clears (no reservation: the job store is the only exclusivity authority).
   - Verification: `npx vitest run` 2430 passed (new: controller/store 17, dump port 8, bus invalidate 3, runner cancel paths 18; existing backup/restore suites updated for the port, D7 wording and the one-job message); `npm run build` ok; PR #88 live fidelity test on `pdb-review-session` passed.
+- **Phase 2 committed `3ec08b8`. Review round 1 (Codex: CHANGES REQUIRED, 3 P1 + 6 P2) fixes, 2026-10-29, not committed:**
+  - P1-1: the dump port calls the busy-retry helper without an abort signal, so disposal waits for the real execute, adopts a late id, invalidates and cancels it before settling; covered over the real helper (`dumpOperation.realRetry.test.ts`).
+  - P1-2: backup cancel reports a rejected stream/query cancel as failed; the snapshot session is kept until its end is confirmed (one retry; already closed counts as ended); unconfirmed release is reported (cancelled with `cleanup-unconfirmed`, or success with a warning, both kept to read).
+  - P1-3: a rejected COMMIT is classified by what it proves (`classifyCommitError`): server error → rolled back; `END_TIMEOUT` → not sent, closed; `ENDED`/`NOT_FOUND` without own cancel → unconfirmed; anything else (lost reply, IPC) → commit outcome unknown.
+  - P2-4: catalog queries go through `dumpQuery` (owned port) via `catalogQuery`; a job-held scope (`holdJobQueries`) refuses new ones once cancelled and stops/joins running ones before the snapshot or file is ended.
+  - P2-5: a failure seen after Cancel is reported (`failure`, "Also: …") unless the cancel itself caused it (PostgreSQL: the cancel closed the session; backup: the stream's own abort).
+  - P2-6: a cancel during the last non-transactional statement asks Stop/Continue with the final counts; the summary counts ran/skipped/unknown.
+  - P2-7: `operationBus` invalidation lasts until the op's own done/error (no TTL).
+  - P2-8: a checkpoint after the snapshot ends, before compression.
+  - P2-9: `isCurrent()` requires the exact runtime and no covering close lease.
+  - Also: the first Cancel is no longer ignored while another cleanup action (snapshot end, file abort) runs; only retries wait for the group.
+  - Verification: `npx vitest run` 2448 passed (new: real-retry port 2, bus TTL 1, COMMIT classes 5, failure after cancel 2, catalog hold 1, late prompt 1, backup cleanup 4, last-statement D10 3, isCurrent 1); `npm run build` ok; PR #88 live fidelity test on `pdb-review-session` passed.
 
 ## Task
 

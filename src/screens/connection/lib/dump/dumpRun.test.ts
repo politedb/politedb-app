@@ -49,6 +49,19 @@ vi.mock("src/lib/tauri/sqlSession", () => ({
   sqlSessionCancel: m.cancelSession,
 }));
 vi.mock("src/lib/tauri/dumpOperation", () => ({
+  dumpQuery: (c: string, sql: string, o: unknown) => {
+    const result = Promise.resolve().then(() =>
+      m.runSqlQuery(c, sql, { viaDumpPort: true, ...(o as object) })
+    );
+    return {
+      result,
+      cancel: async () => ({ kind: "requested" }),
+      settled: result.then(
+        () => ({ kind: "server-finished" }),
+        (error: unknown) => ({ kind: "server-finished", error })
+      ),
+    };
+  },
   dumpStatement: m.statement,
   dumpStream: m.stream,
 }));
@@ -125,7 +138,13 @@ beforeEach(() => {
   useDumpJobStore.setState({ active: null, summary: null, closing: [] });
   useScreenStore.setState({
     profileTabs: [
-      { id: "t1", profileId: "p1", label: "shop", querySafetyMode: "default" },
+      {
+        id: "t1",
+        profileId: "p1",
+        label: "shop",
+        querySafetyMode: "default",
+        runtimeConnectionId: "c1",
+      },
     ] as never,
   });
   setDumpProgressScheduler((f) => f());
@@ -374,25 +393,69 @@ describe("statement-by-statement cancel (MySQL)", () => {
     expect(m.statement).toHaveBeenCalledTimes(3);
   });
 
-  it("a cancel during the last statement ends with everything run", async () => {
-    const last = deferred<{ kind: string }>();
-    m.statement
-      .mockImplementationOnce(() =>
-        statementOp(Promise.resolve({ kind: "server-finished" }))
-      )
-      .mockImplementationOnce(() =>
-        statementOp(Promise.resolve({ kind: "server-finished" }))
-      )
-      .mockImplementationOnce(() => statementOp(last.promise));
-    const j = job("restore", "mysql");
-    const run = restore("mysql", j);
-    await vi.waitFor(() => expect(m.statement).toHaveBeenCalledTimes(3));
-    cancelDumpJob(j.jobId);
-    last.resolve({ kind: "server-finished" });
-    const outcome = await run;
-    expect(outcome).toMatchObject({ kind: "stopped", reason: "user" });
-    expect((outcome as { message: string }).message).toContain("all 3 ran");
-  });
+  it.each([
+    ["stops with final counts", true, "server-finished", false],
+    ["continues to the end", false, "server-finished", false],
+    ["counts a skipped last statement", true, "skipped", true],
+  ])(
+    "asks after the last statement too, then %s",
+    async (_name, stop, lastKind, lastSkipped) => {
+      const last = deferred<{ kind: string; error?: unknown }>();
+      m.statement
+        .mockImplementationOnce(() =>
+          statementOp(Promise.resolve({ kind: "server-finished" }))
+        )
+        .mockImplementationOnce(() =>
+          statementOp(Promise.resolve({ kind: "server-finished" }))
+        )
+        .mockImplementationOnce(() => statementOp(last.promise));
+      if (lastSkipped) {
+        // A last statement that may be skipped (its table exists).
+        m.unpack.mockResolvedValue({
+          sql: "INSERT INTO a VALUES (1);\nINSERT INTO a VALUES (2);\nCREATE TABLE b (id int);",
+          engine: "mysql",
+        });
+      }
+      const j = job("restore", "mysql");
+      const run = restore("mysql", j);
+      await vi.waitFor(() => expect(m.statement).toHaveBeenCalledTimes(3));
+      cancelDumpJob(j.jobId);
+      last.resolve(
+        lastKind === "skipped"
+          ? {
+              kind: "server-finished",
+              error: new Error("Table 'b' already exists"),
+            }
+          : { kind: "server-finished" }
+      );
+      await vi.waitFor(() =>
+        expect(useDumpJobStore.getState().active?.stopDecision).not.toBeNull()
+      );
+      const decision = useDumpJobStore.getState().active!.stopDecision!;
+      expect(decision.counts).toMatchObject({
+        completed: lastSkipped ? 2 : 3,
+        skipped: lastSkipped ? 1 : 0,
+        total: 3,
+      });
+      decideDumpJobStop(j.jobId, decision.decisionId, stop);
+      const outcome = await run;
+      if (!stop) {
+        expect(outcome).toEqual({
+          kind: "succeeded",
+          skipped: lastSkipped ? 1 : 0,
+        });
+        return;
+      }
+      expect(outcome).toMatchObject({ kind: "stopped", reason: "user" });
+      const message = (outcome as { message: string }).message;
+      expect(message).toContain("Stopped after the last statement.");
+      expect(message).toContain(
+        lastSkipped
+          ? "2 of 3 statements ran and stay in the database, 1 skipped."
+          : "3 of 3 statements ran and stay in the database."
+      );
+    }
+  );
 
   it("stops at a timed-out statement, counted as unknown, and refreshes", async () => {
     m.statement.mockImplementationOnce(() =>
@@ -463,9 +526,11 @@ describe("backup cancel and file outcomes", () => {
     expect(m.fileBegin).toHaveBeenCalledWith("/out.dumb");
     expect(m.fileWrite).toHaveBeenCalledWith("f1", new Uint8Array([1, 2, 3]));
     expect(m.filePublish).toHaveBeenCalledWith("f1");
-    // Every catalog query is private (no analytics).
+    // Every catalog query goes through the owned dump port (no analytics,
+    // stopped and joined by the job's cleanup).
+    expect(m.runSqlQuery.mock.calls.length).toBeGreaterThan(0);
     for (const call of m.runSqlQuery.mock.calls) {
-      expect(call[2]).toMatchObject({ internal: true });
+      expect(call[2]).toMatchObject({ viaDumpPort: true });
     }
   });
 
@@ -537,6 +602,238 @@ describe("backup cancel and file outcomes", () => {
     const j = job("backup", "mysql");
     expect(await runDatabaseBackup(rt, "/out.dumb", j)).toEqual({
       kind: "file-unconfirmed",
+    });
+  });
+});
+
+describe("Codex Phase 2 review cases", () => {
+  it.each([
+    ["ERROR: deferred constraint violated", "failed", "rolled-back"],
+    ["SQL_SESSION_END_TIMEOUT", "failed", "not-committed-closed"],
+    ["SQL_SESSION_ENDED", "failed", "cleanup-unconfirmed"],
+    ["SQL_SESSION_NOT_FOUND", "failed", "cleanup-unconfirmed"],
+    ["ipc reply lost", "commit-unknown", undefined],
+  ])(
+    "a COMMIT rejected with %s is reported by what it proves",
+    async (error, kind, rollback) => {
+      m.end.mockImplementation(async (_s: string, commit: boolean) => {
+        if (commit) throw new Error(error);
+      });
+      const j = job("restore", "postgres");
+      const outcome = await restore("postgres", j);
+      expect(outcome.kind).toBe(kind);
+      if (rollback) expect(outcome).toMatchObject({ rollback });
+      const message = (outcome as { message: string }).message;
+      if (kind === "commit-unknown") {
+        expect(message).toContain(
+          "whether its changes were applied is unknown"
+        );
+        expect(message).not.toContain("rolled back");
+      }
+    }
+  );
+
+  it("reports a failure that came after a cancel that did not close the session", async () => {
+    const held = holdStatement("INSERT INTO a VALUES (1)");
+    m.cancelSession.mockRejectedValue(new Error("ipc down"));
+    const j = job("restore", "postgres");
+    const run = restore("postgres", j);
+    await flush();
+    cancelDumpJob(j.jobId);
+    await flush();
+    held.reject(new Error("ERROR: duplicate key value"));
+    const outcome = await run;
+    expect(outcome).toMatchObject({
+      kind: "cancelled",
+      rollback: "rolled-back",
+    });
+    expect((outcome as { failure?: string }).failure).toContain(
+      "duplicate key value"
+    );
+    expect((outcome as { message: string }).message).toContain(
+      "Also: ERROR: duplicate key value"
+    );
+  });
+
+  it("starts no catalog query once cancelled, and joins those running", async () => {
+    // A constraint check per statement: the first is held.
+    m.unpack.mockResolvedValue({
+      sql: 'ALTER TABLE "public"."a" ADD CONSTRAINT "a_pk" PRIMARY KEY (id);\nALTER TABLE "public"."b" ADD CONSTRAINT "b_pk" PRIMARY KEY (id);',
+      engine: null,
+    });
+    const checked = deferred<{ rows: unknown[][] }>();
+    m.runSqlQuery.mockImplementation(async (_c: string, sql: string) =>
+      sql.includes("pg_constraint") ? checked.promise : { rows: [] }
+    );
+    const j = job("restore", "postgres");
+    const run = restore("postgres", j);
+    await vi.waitFor(() =>
+      expect(
+        m.runSqlQuery.mock.calls.filter((c) =>
+          String(c[1]).includes("pg_constraint")
+        )
+      ).toHaveLength(1)
+    );
+    cancelDumpJob(j.jobId);
+    await flush();
+    checked.resolve({ rows: [] });
+    const outcome = await run;
+    expect(outcome.kind).toBe("cancelled");
+    expect(
+      m.runSqlQuery.mock.calls.filter((c) =>
+        String(c[1]).includes("pg_constraint")
+      )
+    ).toHaveLength(1);
+    expect(m.execute).not.toHaveBeenCalledWith(
+      "s1",
+      expect.stringContaining("ADD CONSTRAINT")
+    );
+  });
+
+  it("a late prompt result is dropped once a close of the tab was admitted", async () => {
+    const answer = deferred<boolean>();
+    m.confirm.mockReturnValue(answer.promise);
+    const j = job("restore", "postgres");
+    const run = restore("postgres", j);
+    await vi.waitFor(() => expect(m.confirm).toHaveBeenCalled());
+    const { admitClose } = await import("src/stores/dumpJob");
+    // The job is active: closing its tab is refused…
+    expect(admitClose({ kind: "tab", tabId: "t1" }).ok).toBe(false);
+    // …but its runtime may be replaced meanwhile (reconnect).
+    useScreenStore.setState({
+      profileTabs: [
+        { id: "t1", profileId: "p1", runtimeConnectionId: "c2" },
+      ] as never,
+    });
+    answer.resolve(true);
+    expect(await run).toEqual({ kind: "abandoned" });
+    expect(m.begin).not.toHaveBeenCalled();
+  });
+});
+
+describe("backup cleanup evidence (Codex Phase 2 review)", () => {
+  const rt = {
+    runtimeConnectionId: "c1",
+    engine: "mysql" as never,
+    metaKey: "meta",
+    metadata: {
+      load: async () => ({
+        tables: [{ schema: "shop", name: "t", kind: "table" }],
+        columnsByTable: { "shop.t": ["id"] },
+      }),
+    } as never,
+  };
+  const pgRt = { ...rt, engine: "postgres" as never };
+
+  beforeEach(() => {
+    m.runSqlQuery.mockImplementation(async (_c: string, sql: string) => {
+      if (sql.startsWith("SHOW CREATE TABLE"))
+        return {
+          rows: [
+            [
+              { t: "Str", v: "t" },
+              { t: "Str", v: "CREATE TABLE t (id int)" },
+            ],
+          ],
+        };
+      if (sql.includes("SELECT n.nspname, c.relname"))
+        return {
+          rows: [
+            [
+              { t: "Str", v: "public" },
+              { t: "Str", v: "t" },
+            ],
+          ],
+        };
+      if (sql.includes("SELECT a.attname") && !sql.includes("walk"))
+        return { rows: [[{ t: "Str", v: "id" }]] };
+      return { rows: [] };
+    });
+    m.begin.mockResolvedValue({ sessionId: "snap", snapshotId: "0000-1" });
+    m.pack.mockImplementation(async () => new Uint8Array([1]));
+    m.fileBegin.mockResolvedValue("f1");
+    m.fileWrite.mockResolvedValue(undefined);
+    m.filePublish.mockResolvedValue(undefined);
+    m.fileAbort.mockResolvedValue(undefined);
+    m.stream.mockImplementation(() => {
+      const settled = Promise.resolve({ kind: "server-finished" });
+      return { result: settled, cancel: vi.fn(), settled };
+    });
+  });
+
+  it("a stream whose backend cancel is rejected is not a confirmed cancel", async () => {
+    const settled = deferred<{ kind: string; error?: unknown }>();
+    m.stream.mockImplementation(() => ({
+      result: settled.promise,
+      cancel: async () => {
+        settled.resolve({
+          kind: "client-disposed",
+          error: new Error("AbortError"),
+        });
+        return { kind: "rejected", error: new Error("ipc down") };
+      },
+      settled: settled.promise,
+    }));
+    const j = job("backup", "mysql");
+    const run = runDatabaseBackup(rt, "/out.dumb", j);
+    await vi.waitFor(() => expect(m.stream).toHaveBeenCalled());
+    cancelDumpJob(j.jobId);
+    const outcome = await run;
+    expect(outcome).toMatchObject({
+      kind: "cancelled",
+      rollback: "cleanup-unconfirmed",
+    });
+    expect((outcome as { message: string }).message).toContain(
+      "could not be confirmed closed"
+    );
+    expect(m.fileBegin).not.toHaveBeenCalled();
+  });
+
+  it("keeps the snapshot session until it is confirmed ended, and says so if never", async () => {
+    m.end.mockRejectedValue(new Error("ipc down"));
+    const j = job("backup", "postgres");
+    const outcome = await runDatabaseBackup(pgRt, "/out.dumb", j);
+    expect(m.end).toHaveBeenCalledTimes(2);
+    expect(outcome).toMatchObject({ kind: "succeeded" });
+    expect((outcome as { warning?: string }).warning).toContain(
+      "could not be confirmed closed"
+    );
+  });
+
+  it("starts no compression after a cancel asked while the snapshot ends", async () => {
+    const ending = deferred<void>();
+    m.end.mockReturnValue(ending.promise);
+    const j = job("backup", "postgres");
+    const run = runDatabaseBackup(pgRt, "/out.dumb", j);
+    await vi.waitFor(() => expect(m.end).toHaveBeenCalled());
+    cancelDumpJob(j.jobId);
+    ending.resolve();
+    expect(await run).toMatchObject({ kind: "cancelled" });
+    expect(m.pack).not.toHaveBeenCalled();
+    expect(m.fileBegin).not.toHaveBeenCalled();
+  });
+
+  it("reports a row failure that came after the cancel", async () => {
+    const settled = deferred<{ kind: string; error?: unknown }>();
+    m.stream.mockImplementation(() => ({
+      result: settled.promise,
+      cancel: async () => {
+        settled.resolve({
+          kind: "client-disposed",
+          error: new Error("permission denied for table t"),
+        });
+        return { kind: "requested" };
+      },
+      settled: settled.promise,
+    }));
+    const j = job("backup", "mysql");
+    const run = runDatabaseBackup(rt, "/out.dumb", j);
+    await vi.waitFor(() => expect(m.stream).toHaveBeenCalled());
+    cancelDumpJob(j.jobId);
+    const outcome = await run;
+    expect(outcome).toMatchObject({
+      kind: "cancelled",
+      failure: "permission denied for table t",
     });
   });
 });

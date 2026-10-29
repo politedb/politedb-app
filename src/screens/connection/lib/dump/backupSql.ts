@@ -1,5 +1,9 @@
-import { runSqlQuery } from "src/lib/tauri/query";
-import { dumpStream, type DumpOperation } from "src/lib/tauri/dumpOperation";
+import {
+  dumpQuery,
+  dumpStream,
+  type DumpOperation,
+  type DumpQueryResult,
+} from "src/lib/tauri/dumpOperation";
 import { tableExportQuery, qIdent, qLiteral } from "src/lib/queries/sql";
 import { cellToString } from "src/utils/convert";
 import type { ConnectionCreateInput } from "src/lib/tauri";
@@ -296,7 +300,7 @@ export async function pgConstraintExists(args: {
   constraint: string;
 }): Promise<boolean> {
   const { connectionId, schema, table, constraint } = args;
-  const res = await runSqlQuery(
+  const res = await catalogQuery(
     connectionId,
     `
       SELECT 1
@@ -308,7 +312,7 @@ export async function pgConstraintExists(args: {
         AND c.conname = ${pgLiteral(constraint)}
       LIMIT 1;
     `,
-    { timeoutMs: 30_000, internal: true }
+    { timeoutMs: 30_000, snapshot: false }
   );
 
   return Boolean(res.rows?.length);
@@ -327,19 +331,60 @@ export type BackupTable = {
  */
 export const backupSnapshots = new Map<string, { snapshotId: string | null }>();
 
+/**
+ * The running job's hold on its catalog queries: none starts once a
+ * cancel was asked, and each is tracked so the job's cleanup can stop it
+ * and wait for it before ending its snapshot or file.
+ */
+export type DumpQueryScope = {
+  stopRequested(): boolean;
+  track(op: DumpOperation<unknown>): void;
+};
+
+let queryScope: DumpQueryScope | null = null;
+
+/** Set by a running backup or restore (one at a time), cleared after. */
+export function setDumpQueryScope(scope: DumpQueryScope | null): void {
+  queryScope = scope;
+}
+
+/** A catalog query refused because the job was cancelled. */
+export class DumpStopped extends Error {
+  constructor() {
+    super("Cancelled.");
+    this.name = "DumpStopped";
+  }
+}
+
+/**
+ * A catalog query of a backup or restore, through the owned dump port (no
+ * analytics, D13), reading the backup's snapshot when it has one.
+ */
+export function catalogQuery(
+  connectionId: string,
+  sql: string,
+  opts?: { timeoutMs?: number; snapshot?: boolean }
+): Promise<DumpQueryResult> {
+  if (queryScope?.stopRequested()) return Promise.reject(new DumpStopped());
+  const snapshotId =
+    opts?.snapshot === false
+      ? undefined
+      : (backupSnapshots.get(connectionId)?.snapshotId ?? undefined);
+  const op = dumpQuery(connectionId, sql, {
+    timeoutMs: opts?.timeoutMs ?? 60_000,
+    ...(snapshotId ? { snapshotId } : {}),
+  });
+  queryScope?.track(op);
+  return op.result;
+}
+
 /** A query of a backup, reading its snapshot when it has one. */
 export function backupQuery(
   connectionId: string,
   sql: string,
-  opts?: Parameters<typeof runSqlQuery>[2]
-) {
-  // Dump queries never report to analytics (D13).
-  const snapshotId = backupSnapshots.get(connectionId)?.snapshotId;
-  return runSqlQuery(connectionId, sql, {
-    ...opts,
-    internal: true,
-    ...(snapshotId ? { snapshotId } : {}),
-  });
+  opts?: { timeoutMs?: number }
+): Promise<DumpQueryResult> {
+  return catalogQuery(connectionId, sql, opts);
 }
 
 /**
@@ -360,16 +405,16 @@ export async function pgTablesWithRows(
   const found: string[] = [];
   for (const table of targets) {
     try {
-      const res = await runSqlQuery(
+      const res = await catalogQuery(
         connectionId,
         `SELECT to_regclass(${pgLiteral(table)}) IS NOT NULL;`,
-        { internal: true }
+        { snapshot: false }
       );
       if (!cellToBool(res.rows?.[0]?.[0])) continue;
-      const rows = await runSqlQuery(
+      const rows = await catalogQuery(
         connectionId,
         `SELECT EXISTS (SELECT 1 FROM ${table});`,
-        { internal: true }
+        { snapshot: false }
       );
       if (cellToBool(rows.rows?.[0]?.[0])) found.push(table);
     } catch {

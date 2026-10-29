@@ -104,6 +104,26 @@ describe("one dump job in the app", () => {
     expect(job.isCurrent()).toBe(false);
   });
 
+  it("is no longer current once its tab lost its runtime or a close of it was admitted", () => {
+    const job = start();
+    useScreenStore.setState({
+      profileTabs: [{ id: "t1", profileId: "p1" }] as never,
+    });
+    expect(job.isCurrent()).toBe(false);
+    useScreenStore.setState({
+      profileTabs: [
+        { id: "t1", profileId: "p1", runtimeConnectionId: "c1" },
+      ] as never,
+    });
+    expect(job.isCurrent()).toBe(true);
+    // A close covering it (admitted before the job registered its hold,
+    // or by another path) makes a late prompt result stale.
+    useDumpJobStore.setState({
+      closing: [{ leaseId: 99, scope: { kind: "app" } }],
+    });
+    expect(job.isCurrent()).toBe(false);
+  });
+
   it("releases the job only after its cleanup settled", async () => {
     const job = start();
     let release!: () => void;

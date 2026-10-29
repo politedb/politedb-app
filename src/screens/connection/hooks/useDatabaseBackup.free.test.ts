@@ -51,7 +51,14 @@ beforeEach(() => {
   mocks.metadataLoad.mockRejectedValue(new Error("stop"));
   useProUpgradeStore.setState({ feature: null });
   useScreenStore.setState({
-    profileTabs: [{ id: "t1", profileId: "p1", label: "db" } as never],
+    profileTabs: [
+      {
+        id: "t1",
+        profileId: "p1",
+        label: "db",
+        runtimeConnectionId: "conn_1",
+      } as never,
+    ],
   });
 });
 

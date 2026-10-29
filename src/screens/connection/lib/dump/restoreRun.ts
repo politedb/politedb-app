@@ -22,6 +22,7 @@ import type {
 } from "src/stores/dumpJob";
 import type { useConnectionRuntimeCtx } from "../../workspace/ConnectionRuntimeContext";
 import type { CancelActionResult, DumpJobHandle } from "./dumpJobController";
+import { holdJobQueries } from "./jobQueries";
 import {
   isIgnorableRestoreError,
   isPgAddForeignKeyStatement,
@@ -76,9 +77,23 @@ export function rollbackText(
     : base;
 }
 
-/** The COMMIT got no answer (sql_session.rs COMMIT_OUTCOME_UNKNOWN). */
-function isCommitUnknown(message: string): boolean {
-  return message.startsWith("The connection closed while committing");
+/**
+ * What a rejected COMMIT (sqlSessionEnd(id, true)) establishes. Only a
+ * server answer (a PostgreSQL error, "ERROR: …") ends the transaction
+ * uncommitted; an end that timed out waiting for a statement never sent
+ * COMMIT and its session was closed. Everything else (no answer, a lost
+ * IPC reply, an unknown or already-ended session) leaves the COMMIT's
+ * outcome unknown or unconfirmed.
+ */
+export function classifyCommitError(
+  message: string
+): "unknown" | "server-refused" | "not-sent-closed" | "not-sent-unconfirmed" {
+  if (/^(ERROR|FATAL|PANIC):/.test(message)) return "server-refused";
+  if (message.includes("SQL_SESSION_END_TIMEOUT")) return "not-sent-closed";
+  if (/SQL_SESSION_(ENDED|NOT_FOUND)/.test(message)) {
+    return "not-sent-unconfirmed";
+  }
+  return "unknown";
 }
 
 function errorMessage(err: unknown): string {
@@ -178,6 +193,23 @@ async function prepare(
  * statement: a cancel stops at the next statement boundary, after asking.
  */
 export async function runDumpImport(
+  rt: RunRuntime,
+  path: string,
+  opts: DumpImportOptions & { tabId: string },
+  job: DumpJobHandle,
+  onRefresh: (() => void) | undefined
+): Promise<DumpOutcome> {
+  const queries = holdJobQueries(job);
+  try {
+    return await runHeld(rt, path, opts, job, onRefresh);
+  } finally {
+    // Catalog queries still running are stopped and joined.
+    await queries.stopAll();
+    queries.release();
+  }
+}
+
+async function runHeld(
   rt: RunRuntime,
   path: string,
   opts: DumpImportOptions & { tabId: string },
@@ -330,7 +362,8 @@ async function runInTransaction(a: RunArgs): Promise<DumpOutcome> {
   } catch (err) {
     await job.cleanup.settled();
     if (job.stopRequested()) {
-      return cancelledOutcome(a, "nothing-run", false);
+      // Cancel cannot make begin fail: its error is reported too.
+      return cancelledOutcome(a, "nothing-run", false, errorMessage(err));
     }
     return {
       kind: "failed",
@@ -374,11 +407,25 @@ async function runInTransaction(a: RunArgs): Promise<DumpOutcome> {
     return job.cleanup.evidence ?? "cleanup-unconfirmed";
   };
 
+  /**
+   * The cancelled outcome. An error seen meanwhile is the cancel's own
+   * doing only when the cancel closed the session; otherwise it is an
+   * independent failure, reported with it.
+   */
+  const cancelledBy = async (err?: unknown): Promise<DumpOutcome> => {
+    await job.cleanup.settled();
+    const closedByCancel = job.cleanup.evidence !== null;
+    const evidence = await abandon();
+    const failure =
+      err !== undefined && !closedByCancel
+        ? restoreErrorSummary(err)
+        : undefined;
+    return cancelledOutcome(a, evidence, sent, failure);
+  };
+
   for (let i = 0; i < total; i++) {
     const statementSql = statements[i]!;
-    if (job.stopRequested()) {
-      return cancelledOutcome(a, await abandon(), sent);
-    }
+    if (job.stopRequested()) return cancelledBy();
     try {
       const parsed = parsePgAlterAddConstraint(statementSql);
       if (parsed) {
@@ -396,9 +443,7 @@ async function runInTransaction(a: RunArgs): Promise<DumpOutcome> {
       }
       const blocked = await a.ensureAllowed();
       job.setPhase("running", true);
-      if (job.stopRequested()) {
-        return cancelledOutcome(a, await abandon(), sent);
-      }
+      if (job.stopRequested()) return cancelledBy();
       if (blocked) {
         const evidence = await abandon();
         return {
@@ -417,10 +462,9 @@ async function runInTransaction(a: RunArgs): Promise<DumpOutcome> {
       counts.completed++;
       report(job, counts, statementSql);
     } catch (err) {
-      // A cancel closed the session: that is the outcome, not this error.
-      if (job.stopRequested()) {
-        return cancelledOutcome(a, await abandon(), sent);
-      }
+      // Cancelled: the outcome says so (and this error, unless the
+      // cancel caused it by closing the session).
+      if (job.stopRequested()) return cancelledBy(err);
       if (
         isPgAddForeignKeyStatement(statementSql) ||
         isIgnorableRestoreError(statementSql, err)
@@ -437,9 +481,7 @@ async function runInTransaction(a: RunArgs): Promise<DumpOutcome> {
             "RELEASE SAVEPOINT politedb_restore"
           );
         } catch (undoErr) {
-          if (job.stopRequested()) {
-            return cancelledOutcome(a, await abandon(), sent);
-          }
+          if (job.stopRequested()) return cancelledBy(undoErr);
           const evidence = await abandon();
           return {
             kind: "failed",
@@ -465,9 +507,7 @@ async function runInTransaction(a: RunArgs): Promise<DumpOutcome> {
   // The last statement may have run while the tab was locked, switched
   // to Production or closed: nothing is kept then.
   const refusedAtEnd = await a.ensureAllowed();
-  if (job.stopRequested()) {
-    return cancelledOutcome(a, await abandon(), sent);
-  }
+  if (job.stopRequested()) return cancelledBy();
   if (refusedAtEnd) {
     const evidence = await abandon();
     return {
@@ -493,17 +533,23 @@ async function runInTransaction(a: RunArgs): Promise<DumpOutcome> {
     }
     job.setPhase("refreshing", false);
     await a.refresh().catch(() => {});
-    if (isCommitUnknown(message)) {
+    const kind = classifyCommitError(message);
+    if (kind === "unknown") {
       return {
         kind: "commit-unknown",
-        message: `The ${a.action} could not be committed: ${message}`,
+        message: `The ${a.action} could not be committed, and whether its changes were applied is unknown: ${message}. Check the database before running it again.`,
       };
     }
-    // The server answered: the transaction is over, not committed.
+    const evidence: RollbackEvidence =
+      kind === "server-refused"
+        ? "rolled-back"
+        : kind === "not-sent-closed"
+          ? "not-committed-closed"
+          : "cleanup-unconfirmed";
     return {
       kind: "failed",
-      message: `The ${a.action} could not be committed: ${message}`,
-      rollback: "rolled-back",
+      message: `The ${a.action} could not be committed: ${message}\n\n${rollbackText(evidence, sent)}`,
+      rollback: evidence,
       counts: a.snapshot(),
     };
   }
@@ -527,14 +573,28 @@ async function committed(a: RunArgs): Promise<DumpOutcome> {
 function cancelledOutcome(
   a: RunArgs,
   evidence: RollbackEvidence,
-  sent: boolean
+  sent: boolean,
+  failure?: string
 ): DumpOutcome {
   return {
     kind: "cancelled",
     rollback: evidence,
     counts: a.snapshot(),
-    message: `Cancelled. ${rollbackText(evidence, sent)}`,
+    failure,
+    message: `Cancelled. ${rollbackText(evidence, sent)}${failure ? `\n\nAlso: ${failure}` : ""}`,
   };
+}
+
+/** Where a run outside a transaction ended up, after its last statement. */
+function describeFinished(counts: DumpCounts): string {
+  const parts = [
+    `${counts.completed} of ${counts.total} statement${counts.total === 1 ? "" : "s"} ran and stay in the database`,
+  ];
+  if (counts.skipped > 0) parts.push(`${counts.skipped} skipped`);
+  if (counts.unknown > 0) {
+    parts.push(`${counts.unknown} may be partly applied`);
+  }
+  return `${parts.join(", ")}.`;
 }
 
 /** What already ran, outside a transaction. */
@@ -582,7 +642,7 @@ async function runStatementByStatement(a: RunArgs): Promise<DumpOutcome> {
       reason: "user",
       message:
         beforeIndex >= total
-          ? `Stopped after the last statement: all ${total} ran.`
+          ? `Stopped after the last statement. ${describeFinished(counts)}`
           : `Stopped before statement ${beforeIndex + 1} of ${total}. ${describeApplied(counts)}`,
       counts: a.snapshot(),
     });
@@ -633,7 +693,8 @@ async function runStatementByStatement(a: RunArgs): Promise<DumpOutcome> {
     report(job, counts, statementSql);
   }
 
-  // A cancel asked during the last statement: it all ran.
-  if (job.stopRequested()) return stoppedByUser(total);
+  // A cancel asked during the last statement: asked like any other, with
+  // the final counts.
+  if (await userStops()) return stoppedByUser(total);
   return committed(a);
 }

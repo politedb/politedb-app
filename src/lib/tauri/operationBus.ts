@@ -34,6 +34,8 @@ type BusState = {
   /**
    * Ops whose owner stopped listening for good (invalidate), with when:
    * later events for them are ACKed and dropped, never cached or delivered.
+   * Kept until the op's own done/error arrives (nothing follows it), not
+   * on a timer: a cancelled op may still send rows much later.
    */
   invalidated: Map<OpId, number>;
 };
@@ -140,9 +142,6 @@ function runCleanup() {
     if (!hasSubscriber && (isTerminal || isExpired)) {
       state.cacheByOp.delete(opId);
     }
-  }
-  for (const [opId, at] of state.invalidated) {
-    if (now - at > CACHE_TTL_MS) state.invalidated.delete(opId);
   }
 }
 
@@ -308,7 +307,10 @@ async function setupListeners(): Promise<UnlistenFn[]> {
     const opId = getOpId(payload);
     if (!opId) return;
 
-    if (state.invalidated.has(opId)) return;
+    if (state.invalidated.has(opId)) {
+      state.invalidated.delete(opId);
+      return;
+    }
 
     const done = payload as OperationDone;
     const cache = getOrCreateCache(opId);
@@ -341,7 +343,10 @@ async function setupListeners(): Promise<UnlistenFn[]> {
     const opId = getOpId(payload);
     if (!opId) return;
 
-    if (state.invalidated.has(opId)) return;
+    if (state.invalidated.has(opId)) {
+      state.invalidated.delete(opId);
+      return;
+    }
 
     const error = payload as any;
     const cache = getOrCreateCache(opId);
