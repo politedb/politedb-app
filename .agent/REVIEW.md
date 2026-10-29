@@ -846,3 +846,49 @@ Reviewed by Codex, 2026-10-29. Scope: `e214f18..3ec08b8` (HEAD), including extra
 - No database or container touched. No live SQL, Rust test, native desktop/UI run, or real filesystem publication attempted. Implementer's recorded live fidelity run is handoff evidence, not reviewer-run verification. Green mock suites do not discharge the missing race/evidence cases above.
 
 Only `.agent/REVIEW.md` edited. Pre-existing untracked `.claude/launch.json` preserved. No application/test edits, commit, push or merge.
+
+## backup-restore-progress — Phase 2 review round 2
+
+Status: **CHANGES REQUIRED**
+
+Reviewed by Codex, 2026-10-29. Read `AGENTS.md`, `.agent/WORKFLOW.md` and referenced RTK instructions first. Reviewed `git show 59a58d2` and the whole Phase 2 range `e214f18..59a58d2` (HEAD), against the APPROVED plan. No P0/P1 found in this round; three P2 contract defects remain. Phase 3 modal/close wiring remains outside this phase's implementation scope.
+
+### Round 1 disposition
+
+| # | Disposition | Evidence / remaining issue |
+| --- | --- | --- |
+| 1 — late operation IDs | Original race resolved; retry regression below | Disposal now waits for execute, adopts/invalidate its late ID, and awaits cancellation. Real-helper tests cover deferred execute and rejected cancel. Removing the signal also permits fresh busy retries after stop (R2-1). |
+| 2 — backup cleanup evidence | Partially resolved | Stream cancel ACK is inspected; snapshot handle survives two end attempts; unconfirmed snapshot close produces retained cancellation/warning. Catalog cancel evidence can still disappear (R2-2). |
+| 3 — rejected COMMIT | Resolved | `classifyCommitError` separates acknowledged server refusal, end-lock timeout, unowned ENDED/NOT_FOUND and unknown transport outcomes. Checked against backend `SqlSessionRegistry::end` error paths; generic lost reply no longer claims rollback. |
+| 4 — owned catalog operations | Dispatch/ownership fixed; evidence incomplete | `catalogQuery` uses `dumpQuery`, preserving snapshot options; `holdJobQueries` blocks dispatch after stop and joins cancellation. Scope-wide rejected-cancel evidence is missing (R2-2). |
+| 5 — failure after Cancel | Partially resolved | Backup preserves non-abort errors; PostgreSQL preserves errors when cancel fails. Successful session cancel still suppresses unrelated errors (R2-3). |
+| 6 — final-statement D10 | Resolved | Final boundary asks Stop/Continue; stopped summary uses completed/skipped/unknown counts. Tests cover final success/skipped statement and Continue. |
+| 7 — bus invalidation lifetime | Resolved | Tombstone survives cache TTL until the operation's own terminal event; fake-clock test advances ten minutes. No additional bus regression established. |
+| 8 — compression after snapshot cleanup | Resolved | Checkpoint immediately after `endSnapshot()` prevents compression/file begin after Cancel during that await; held-end regression test passes. |
+| 9 — origin identity | Resolved | `isCurrent()` requires exact runtime identity and rejects covering close leases; controller and late-prompt tests cover invalidation. |
+
+First Cancel during unrelated cleanup is now admitted; retry remains blocked while cleanup is busy. This fixes the lost first request during snapshot end. It does not address the evidence loss described below.
+
+### P2 findings
+
+1. **Busy retry can dispatch SQL after disposal requested stop.** `src/lib/tauri/dumpOperation.ts:150–166` passes no signal to `operationExecuteWithBusyRetry`; its loop in `src/lib/tauri/query.ts:159–231` therefore has no stop input. Hold the first execute, request Cancel (or let its timeout fire), then reject execute with `ERR_SQL_BUSY`: the helper can cancel the busy holder and dispatch another execute even though the dump already stopped. For a timed-out non-transactional restore, that retry can start a mutating statement after its deadline; cancelling the resulting late ID cannot undo applied effects. **Fix:** independently stop future retry attempts while continuing to await/adopt every already-dispatched raw execute. Do not restore the original early-abort race. Add real-helper tests with held busy rejection/backoff and verify no second execute after cancel/timeout.
+
+2. **Catalog cancellation rejection is lost when its operation settles.** `src/screens/connection/lib/dump/jobQueries.ts:15–17,22–31` deletes each operation on settlement and stores rejected ACKs only in one `stopAll()` local boolean. The backup cancel action (`src/screens/connection/lib/dump/backupRun.ts:80–92`) returns `failed` without retaining that boolean in `cleanupUnconfirmed`. After the cancelled catalog query rejects and leaves the set, final cleanup at `backupRun.ts:401` sees no operation and returns true, allowing an ordinary cancelled backup with no cleanup warning. MySQL/MariaDB have no snapshot session whose closure could independently release that query. Timeout-driven disposal has the same evidence hole: its rejected cancel is absent from `DumpSettled`, and the scope forgets the operation before cleanup inspects it. **Fix:** retain cumulative cancellation/disposal evidence for the scope lifetime and consume it in the final outcome, including internally triggered timeout disposal. Add real-port catalog tests with rejected cancel, both user cancel and timeout, asserting retained warning and no false confirmed-cleanup result.
+
+3. **Successful session cancellation still hides independent failures.** `src/screens/connection/lib/dump/restoreRun.ts:415–422` equates any eventual cleanup evidence with proof that Cancel caused the caught error. For example, Cancel closes the transaction session while `pgConstraintExists` runs through a separate catalog operation; that query independently rejects with a permission error. `cancelledBy` waits for session cancellation, sees evidence, then drops the catalog error and omits `failure` / “Also: …”. An independent statement error arriving while cancel is pending is also dropped if cancel subsequently succeeds. **Fix:** filter only errors identifiable as caused by cancellation; session-close evidence alone cannot establish causality, especially for another operation. Add accepted-cancel plus independent catalog/statement failure tests. Existing new test covers only rejected cancellation.
+
+### Whole-phase checks and limitations
+
+- Reviewed extraction/helper integration, hook entry points, store/controller transitions, restore strategies, backup file publication/discard, progress, catalog scope and bus disposal across the full range. No additional concrete extraction, destination-integrity, analytics or sensitive-logging regression established.
+- Snapshot cleanup retry/warnings, published-file tombstone handling, bounded temp deletion retry and retained warning selection are present. Findings above concern additional operation/evidence paths, not a request to change approved file or rollback policy.
+- Phase 2's temporary `showMessage` presentation and summary dismissal remain recorded scaffolding. Final D15 retention and native modal/close integration still require Phase 3 verification.
+- No database or container touched. No live SQL, Rust tests, native desktop/UI run, or real file publication attempted. Implementer's live-test notes are handoff evidence, not reviewer-run verification. The three findings are static control-flow findings; current tests do not cover those combinations.
+
+### Verification run
+
+- `npx vitest run --exclude '**/.claude/**'`: **280 files passed, 1 skipped; 2,448 tests passed, 1 skipped**.
+- `npx tsc --noEmit -p .`: **passed**.
+- `npm run build`: **passed**; warnings for `node:zlib` browser externalization, ineffective dynamic imports and large chunks remain.
+- `git diff --check e214f18..HEAD`: **passed**.
+
+Only `.agent/REVIEW.md` edited. Pre-existing untracked `.claude/launch.json` preserved. No application/test edits, commit, push or merge.
