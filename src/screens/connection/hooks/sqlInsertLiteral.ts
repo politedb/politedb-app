@@ -59,6 +59,40 @@ function asCellObj(cell: unknown): CellObj | null {
   return null;
 }
 
+/** Column types for money (money[]) read as numeric text by backups. */
+export const POSTGRES_MONEY_AS_NUMERIC = "politedb:money-as-numeric";
+export const POSTGRES_MONEY_ARRAY_AS_NUMERIC =
+  "politedb:money-array-as-numeric";
+
+/**
+ * A backed-up money amount (or money[]) as numeric text, written as a
+ * typed numeric that converts to money as a number in the restoring
+ * session. That conversion rounds to the session's lc_monetary decimal
+ * places, so the same expression first checks them against the amount's
+ * own decimal places and fails instead of rounding. Being one expression,
+ * the check and the conversion run in the same session.
+ */
+export function postgresMoneyValueSql(
+  text: string,
+  type: "numeric" | "numeric[]"
+): string {
+  // The longest run of digits after a decimal point, scanned (a large
+  // array must not become one argument per element).
+  let places = 0;
+  for (let i = text.indexOf("."); i >= 0; i = text.indexOf(".", i + 1)) {
+    let end = i + 1;
+    while (end < text.length && text[end]! >= "0" && text[end]! <= "9") end++;
+    places = Math.max(places, end - i - 1);
+  }
+  const here = "scale('0'::money::numeric)";
+  if (places === 0) return `${sqlQuoteString(text, "postgres")}::${type}`;
+  return (
+    `CASE WHEN ${here} >= ${places} THEN ${sqlQuoteString(text, "postgres")}::${type} ` +
+    // Depends on the session (not folded early); fails with this text.
+    `ELSE ('money here keeps ' || ${here} || ' decimal places, the backup has ${places}: restore with a matching lc_monetary')::${type} END`
+  );
+}
+
 /**
  * Format one cell as an SQL literal for INSERT dumps.
  * Postgres arrays arrive as `{ t: "Json", v: "[...]" }` and must not be
@@ -94,7 +128,14 @@ export function formatSqlInsertValue(
   }
 
   if (obj?.t === "Str") {
-    return sqlQuoteString(String(obj.v ?? ""), engine);
+    const text = String(obj.v ?? "");
+    if (engine === "postgres" && dbType === POSTGRES_MONEY_AS_NUMERIC) {
+      return postgresMoneyValueSql(text, "numeric");
+    }
+    if (engine === "postgres" && dbType === POSTGRES_MONEY_ARRAY_AS_NUMERIC) {
+      return postgresMoneyValueSql(text, "numeric[]");
+    }
+    return sqlQuoteString(text, engine);
   }
 
   if (typeof cell === "boolean") return cell ? "TRUE" : "FALSE";
@@ -112,6 +153,11 @@ export function formatSqlInsertChunk(args: {
   columnTypes?: string[];
   rows: unknown[][];
   qIdent: (name: string, engine?: any) => string;
+  /**
+   * PostgreSQL: the table has a GENERATED ALWAYS identity column, whose
+   * backed-up values are inserted as they were.
+   */
+  overridingSystemValue?: boolean;
 }): string {
   const {
     engine,
@@ -121,6 +167,7 @@ export function formatSqlInsertChunk(args: {
     columnTypes = [],
     rows,
     qIdent,
+    overridingSystemValue,
   } = args;
   if (!rows.length) return "";
 
@@ -138,5 +185,6 @@ export function formatSqlInsertChunk(args: {
     })
     .join(",\n");
 
-  return `INSERT INTO ${tableIdent} (${colList}) VALUES\n${values};\n`;
+  const overriding = overridingSystemValue ? " OVERRIDING SYSTEM VALUE" : "";
+  return `INSERT INTO ${tableIdent} (${colList})${overriding} VALUES\n${values};\n`;
 }

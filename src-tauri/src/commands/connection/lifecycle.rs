@@ -399,7 +399,12 @@ pub async fn connection_remove(
     // sessions and finish cleanup on cancel).
     state.ai_agent_runs.cancel_on_connections(&[connection_id]);
     state.connection_profiles.remove(&connection_id);
-    if let Some((_id, conn)) = state.connections.remove(&connection_id) {
+    // The connection is removed first, then its sessions end (rolled back):
+    // a session begun meanwhile either is ended here or, finding the
+    // connection gone, ends itself (sql_session_begin).
+    let removed = state.connections.remove(&connection_id);
+    state.sql_sessions.end_for_connection(connection_id).await;
+    if let Some((_id, conn)) = removed {
         conn.close().await;
     }
 

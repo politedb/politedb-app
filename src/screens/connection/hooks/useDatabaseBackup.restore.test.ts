@@ -13,6 +13,9 @@ const m = vi.hoisted(() => ({
   showToast: vi.fn(),
   refresh: vi.fn(async () => {}),
   rt: { engine: "postgres" as string },
+  sessionBegin: vi.fn(),
+  sessionEnd: vi.fn(),
+  savepoints: vi.fn(),
 }));
 
 vi.mock("src/lib/system-dialog", () => ({
@@ -32,6 +35,16 @@ vi.mock("src/lib/dump/politedbDumbFormat", () => ({
 vi.mock("src/lib/tauri/query", () => ({
   startSqlQueryStream: vi.fn(),
   runSqlQuery: m.runSqlQuery,
+}));
+// A PostgreSQL restore runs in a session; its statements still reach
+// runSqlQuery here, savepoint bookkeeping goes to its own mock.
+vi.mock("src/lib/tauri/sqlSession", () => ({
+  sqlSessionBegin: m.sessionBegin,
+  sqlSessionEnd: m.sessionEnd,
+  sqlSessionExecute: async (_session: string, sql: string) =>
+    /^(SAVEPOINT|RELEASE|ROLLBACK TO) /.test(sql)
+      ? m.savepoints(sql)
+      : m.runSqlQuery("conn_1", sql),
 }));
 vi.mock("src/lib/tauri/security", () => ({
   securityTouchIdAuthenticate: m.touchId,
@@ -53,6 +66,7 @@ vi.mock("../workspace/ConnectionRuntimeContext", () => ({
 
 import {
   canBackupDatabase,
+  isTransactionControl,
   restoreErrorSummary,
   restoreStatementLabel,
   useDatabaseBackup,
@@ -84,6 +98,9 @@ beforeEach(() => {
   m.confirmDialog.mockResolvedValue(true);
   m.runSqlQuery.mockResolvedValue({});
   m.touchId.mockResolvedValue(true);
+  m.sessionBegin.mockResolvedValue({ sessionId: "s1", snapshotId: null });
+  m.sessionEnd.mockResolvedValue(undefined);
+  m.savepoints.mockResolvedValue(undefined);
 });
 
 describe("restoring a dump", () => {
@@ -201,7 +218,10 @@ INSERT INTO "public"."t" ("a","b") VALUES ('x', 'y');`,
       engine: "postgres",
     });
     await restore();
-    const ran = m.runSqlQuery.mock.calls.map((call) => call[1] as string);
+    const ran = m.runSqlQuery.mock.calls
+      .map((call) => call[1] as string)
+      // The check for tables that already have rows.
+      .filter((sql) => !sql.startsWith("SELECT to_regclass"));
     expect(ran).toHaveLength(2);
     expect(ran.some((sql) => /^\s*DROP TABLE victim/i.test(sql))).toBe(false);
     expect(ran[0]).toContain(";DROP TABLE victim;--')");
@@ -216,11 +236,12 @@ INSERT INTO "public"."t" ("a","b") VALUES ('x', 'y');`,
       sql: `-- Data public.products\n-- Data public.users\nINSERT INTO "public"."users" ("id", "name", "role") VALUES ${rows};`,
       engine: "postgres",
     });
-    m.runSqlQuery.mockRejectedValueOnce(
-      new Error(
+    m.runSqlQuery.mockImplementation(async (_c: string, sql: string) => {
+      if (!sql.includes("INSERT INTO")) return {};
+      throw new Error(
         `null value in column "role" violates not-null constraint\nDETAIL: Failing row contains (${"x, ".repeat(300)}).\nHINT: check\nCONTEXT: more`
-      )
-    );
+      );
+    });
     await restore();
     const [message] = m.showMessage.mock.calls[0]!;
     expect(message).toContain(
@@ -233,7 +254,90 @@ INSERT INTO "public"."t" ("a","b") VALUES ('x', 'y');`,
     expect(message.length).toBeLessThan(1_000);
   });
 
-  it("says what already ran when it stops partway", async () => {
+  it("refuses a dump that controls transactions, running nothing", async () => {
+    m.unpack.mockResolvedValue({
+      sql: "INSERT INTO a VALUES (1);\n-- note\nCOMMIT;\nINSERT INTO a VALUES (2);",
+      engine: "postgres",
+    });
+    await restore();
+    expect(m.sessionBegin).not.toHaveBeenCalled();
+    expect(m.runSqlQuery).not.toHaveBeenCalled();
+    expect(m.showMessage.mock.calls[0]![0]).toMatch(
+      /^Statement 2 of 3 controls transactions .*nothing was run/
+    );
+  });
+
+  it("keeps nothing when the tab is locked during the last statement", async () => {
+    m.unpack.mockResolvedValue({
+      sql: "INSERT INTO a VALUES (1);",
+      engine: "postgres",
+    });
+    m.runSqlQuery.mockImplementationOnce(async () => {
+      setMode("lock");
+      return {};
+    });
+    await restore();
+    expect(m.sessionEnd).toHaveBeenCalledWith("s1", false);
+    expect(m.sessionEnd).not.toHaveBeenCalledWith("s1", true);
+    expect(m.showMessage.mock.calls[0]![0]).toContain(
+      "Stopped before committing."
+    );
+    expect(m.showToast).not.toHaveBeenCalled();
+  });
+
+  it("says when a commit's outcome is unknown, and shows the database", async () => {
+    m.sessionEnd.mockImplementation(async (_s: string, commit: boolean) => {
+      if (commit)
+        throw "The connection closed while committing, so whether the changes were applied is unknown.";
+    });
+    await restore();
+    expect(m.showMessage.mock.calls[0]![0]).toContain(
+      "The restore could not be committed: The connection closed while committing"
+    );
+    expect(m.refresh).toHaveBeenCalled();
+    expect(m.showToast).not.toHaveBeenCalled();
+  });
+
+  it("rolls a PostgreSQL run back when it stops partway", async () => {
+    m.runSqlQuery
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new Error("disk full"));
+    await restore();
+    const [message] = m.showMessage.mock.calls[0]!;
+    expect(message).toContain("Stopped at statement 2 of 3: disk full");
+    expect(message).toContain("Nothing was changed: the run was rolled back.");
+    expect(m.sessionBegin).toHaveBeenCalledWith("conn_1", "transaction");
+    expect(m.sessionEnd).toHaveBeenCalledWith("s1", false);
+    expect(m.sessionEnd).not.toHaveBeenCalledWith("s1", true);
+  });
+
+  it("commits a PostgreSQL run that finishes, each statement behind a savepoint", async () => {
+    await restore();
+    expect(m.sessionEnd).toHaveBeenCalledWith("s1", true);
+    expect(m.savepoints.mock.calls.map((call) => call[0])).toEqual(
+      Array(3)
+        .fill([
+          "SAVEPOINT politedb_restore",
+          "RELEASE SAVEPOINT politedb_restore",
+        ])
+        .flat()
+    );
+  });
+
+  it("undoes a skipped statement alone, at its savepoint", async () => {
+    m.runSqlQuery.mockRejectedValueOnce(
+      new Error('relation "a" already exists')
+    );
+    await restore();
+    expect(m.savepoints).toHaveBeenCalledWith(
+      "ROLLBACK TO SAVEPOINT politedb_restore"
+    );
+    expect(m.sessionEnd).toHaveBeenCalledWith("s1", true);
+  });
+
+  it("says what already ran when a run without a transaction stops partway", async () => {
+    m.rt.engine = "mysql";
+    m.unpack.mockResolvedValue({ sql: DUMP, engine: "mysql" });
     m.runSqlQuery
       .mockResolvedValueOnce({})
       .mockRejectedValueOnce(new Error("disk full"));
@@ -243,6 +347,46 @@ INSERT INTO "public"."t" ("a","b") VALUES ('x', 'y');`,
     expect(message).toContain(
       "The statement before it already ran and stays in the database."
     );
+    expect(m.sessionBegin).not.toHaveBeenCalled();
+  });
+
+  it.each(["mysql", "sqlite"])(
+    "runs a %s restore statement by statement, saying it cannot be undone",
+    async (engine) => {
+      m.rt.engine = engine;
+      m.unpack.mockResolvedValue({ sql: DUMP, engine });
+      await restore();
+      const [body] = m.confirmDialog.mock.calls[0]!;
+      expect(body).toContain(
+        "This runs 3 SQL statements on the database. They do not run in a transaction and cannot be undone."
+      );
+      expect(body).not.toContain("one transaction");
+      expect(m.sessionBegin).not.toHaveBeenCalled();
+      expect(m.savepoints).not.toHaveBeenCalled();
+      expect(m.runSqlQuery.mock.calls.map((call) => call[1])).toEqual(
+        DUMP.split(";\n").map((s) => s.replace(/;$/, ""))
+      );
+      expect(m.showToast).toHaveBeenCalledWith("Database restored.", {
+        tone: "success",
+      });
+    }
+  );
+
+  it("warns before adding rows to tables that already have some", async () => {
+    m.unpack.mockResolvedValue({
+      sql: 'INSERT INTO "public"."t" ("a") VALUES (1);',
+      engine: "postgres",
+    });
+    m.runSqlQuery.mockImplementation(async (_c: string, sql: string) =>
+      sql.startsWith("SELECT to_regclass") || sql.startsWith("SELECT EXISTS")
+        ? { rows: [[{ t: "Bool", v: true }]] }
+        : {}
+    );
+    m.confirmDialog.mockResolvedValue(false);
+    await restore();
+    const [body] = m.confirmDialog.mock.calls[0]!;
+    expect(body).toContain('These tables already have rows: "public"."t".');
+    expect(body).toContain("They run in one transaction");
   });
 });
 
@@ -271,16 +415,32 @@ describe("the safety mode is read again while a dump runs", () => {
     const onRefresh = vi.fn();
     await restore(onRefresh);
     expect(m.runSqlQuery).toHaveBeenCalledTimes(1);
-    // What already ran is shown.
+    // Rolled back: nothing changed, nothing to show.
+    expect(m.sessionEnd).toHaveBeenCalledWith("s1", false);
+    expect(m.refresh).not.toHaveBeenCalled();
+    const [message] = m.showMessage.mock.calls[0]!;
+    expect(message).toContain("so nothing was restored");
+    expect(message).toContain("Stopped before statement 2 of 3.");
+    expect(message).toContain("Nothing was changed: the run was rolled back.");
+    expect(m.showToast).not.toHaveBeenCalled();
+  });
+
+  it("shows what already ran when a run without a transaction is locked mid-run", async () => {
+    m.rt.engine = "mysql";
+    m.unpack.mockResolvedValue({ sql: DUMP, engine: "mysql" });
+    m.runSqlQuery.mockImplementationOnce(async () => {
+      setMode("lock");
+      return {};
+    });
+    const onRefresh = vi.fn();
+    await restore(onRefresh);
     expect(m.refresh).toHaveBeenCalledTimes(1);
     expect(onRefresh).toHaveBeenCalledTimes(1);
     const [message] = m.showMessage.mock.calls[0]!;
     expect(message).toContain("so nothing more was restored");
-    expect(message).toContain("Stopped before statement 2 of 3.");
     expect(message).toContain(
       "The statement before it already ran and stays in the database."
     );
-    expect(m.showToast).not.toHaveBeenCalled();
   });
 
   it("asks for Touch ID when the tab turns Safe mid-run", async () => {
@@ -302,7 +462,7 @@ describe("the safety mode is read again while a dump runs", () => {
     await act(() => result.current.onImportSqlDump(undefined, { tabId: "t1" }));
     expect(m.runSqlQuery).toHaveBeenCalledTimes(1);
     expect(m.showMessage.mock.calls[0]![0]).toContain(
-      "so nothing more was imported"
+      "so nothing was imported"
     );
   });
 });
@@ -411,4 +571,40 @@ describe("stop message parts", () => {
       expect(restoreErrorSummary(error)).toBe("Unknown restore error");
     }
   );
+});
+
+describe("isTransactionControl", () => {
+  it.each([
+    "COMMIT",
+    "commit prepared 'x'",
+    "END",
+    "BEGIN ISOLATION LEVEL SERIALIZABLE",
+    "START TRANSACTION",
+    "-- a\nROLLBACK",
+    "/* x */ SAVEPOINT s",
+    "RELEASE SAVEPOINT s",
+    "ABORT",
+    "PREPARE TRANSACTION 'x'",
+    // Comments nest, and may sit between the words.
+    "/* outer /* inner */ outer */ COMMIT",
+    "PREPARE/**/TRANSACTION 'x'",
+    "START /* a */ -- b\n TRANSACTION",
+  ])("is true for %s", (sql) => {
+    expect(isTransactionControl(sql)).toBe(true);
+  });
+
+  it.each([
+    "INSERT INTO commits VALUES (1)",
+    "CREATE TABLE endings (x int)",
+    "SELECT 'COMMIT'",
+    "PREPARE q AS SELECT 1",
+    // A prepared statement named with non-ASCII letters.
+    "PREPARE transactioné AS SELECT 1",
+    "PREPARE transaction中文 AS SELECT 1",
+    // Unicode case mappings are not keyword case folding.
+    "PREPARE transactıon AS SELECT 1",
+    "PREPARE tranſaction AS SELECT 1",
+  ])("is false for %s", (sql) => {
+    expect(isTransactionControl(sql)).toBe(false);
+  });
 });

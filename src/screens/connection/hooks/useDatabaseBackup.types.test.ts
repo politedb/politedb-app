@@ -9,7 +9,19 @@ vi.mock("src/stores/persistentStore", () => ({
   usePersistentStore: { getState: () => ({ scheduleSave: () => {} }) },
 }));
 
-import { buildPostgresTypesSql, dumpCommentName } from "./useDatabaseBackup";
+import {
+  buildPostgresTableStructure,
+  buildPostgresTypesSql,
+  postgresGeneratedOnlyRowsSql,
+  dumpCommentName,
+  postgresBackupRowsQuery,
+  postgresMoneyColumns,
+} from "./useDatabaseBackup";
+import {
+  formatSqlInsertChunk,
+  POSTGRES_MONEY_ARRAY_AS_NUMERIC,
+  POSTGRES_MONEY_AS_NUMERIC,
+} from "./sqlInsertLiteral";
 import { splitSqlStatements } from "src/components/editor/splitSqlStatements";
 
 /** One catalog row, in the query's column order. */
@@ -328,5 +340,276 @@ describe("dumpCommentName", () => {
     const statements = splitSqlStatements(dump, { dialect: "postgres" });
     expect(statements).toHaveLength(1);
     expect(statements[0]!.text).toContain("CREATE TABLE IF NOT EXISTS");
+  });
+});
+
+describe("postgresBackupRowsQuery", () => {
+  it("reads every column through its output function, names quoted", () => {
+    expect(postgresBackupRowsQuery("App", 'we"ird', ["id", "a = b"])).toBe(
+      'SELECT CASE WHEN num_nulls("id") = 1 THEN NULL ELSE format(\'%s\', "id") END AS "id", ' +
+        'CASE WHEN num_nulls("a = b") = 1 THEN NULL ELSE format(\'%s\', "a = b") END AS "a = b" ' +
+        'FROM "App"."we""ird";'
+    );
+  });
+
+  it("reads money and money[] as numeric", () => {
+    expect(
+      postgresBackupRowsQuery("s", "t", ["m", "ms"], {
+        scalar: new Set(["m"]),
+        array: new Set(["ms"]),
+      })
+    ).toBe(
+      'SELECT CASE WHEN num_nulls("m") = 1 THEN NULL ELSE ("m")::numeric::text END AS "m", ' +
+        'CASE WHEN num_nulls("ms") = 1 THEN NULL ELSE ("ms")::numeric[]::text END AS "ms" FROM "s"."t";'
+    );
+  });
+
+  it("writes money read as numeric as a typed numeric, checking decimal places", () => {
+    const sql = formatSqlInsertChunk({
+      engine: "postgres",
+      schema: "s",
+      tableName: "t",
+      columnNames: ["m", "ms", "z", "x"],
+      columnTypes: [
+        POSTGRES_MONEY_AS_NUMERIC,
+        POSTGRES_MONEY_ARRAY_AS_NUMERIC,
+        POSTGRES_MONEY_AS_NUMERIC,
+        "text",
+      ],
+      rows: [
+        [
+          { t: "Str", v: "-1234.56" },
+          { t: "Str", v: "[0:1]={1.500,NULL}" },
+          { t: "Str", v: "1235" },
+          { t: "Str", v: "1234.56" },
+        ],
+      ],
+      qIdent: (name) => `"${name}"`,
+    });
+    const here = "scale('0'::money::numeric)";
+    expect(sql).toContain(
+      `CASE WHEN ${here} >= 2 THEN '-1234.56'::numeric ELSE ('money here keeps ' || ${here} || ' decimal places, the backup has 2: restore with a matching lc_monetary')::numeric END`
+    );
+    expect(sql).toContain(
+      `CASE WHEN ${here} >= 3 THEN '[0:1]={1.500,NULL}'::numeric[] ELSE`
+    );
+    // No decimal places: nothing to round.
+    expect(sql).toContain(`, '1235'::numeric, '1234.56')`);
+    expect(
+      splitSqlStatements(`${sql}\nSELECT 2;`, { dialect: "postgres" })
+    ).toHaveLength(2);
+  });
+
+  it("stops at money inside another type, and reads where money is", async () => {
+    const lastSql = () =>
+      m.runSqlQuery.mock.calls[m.runSqlQuery.mock.calls.length - 1]![1];
+    const version = (v14: boolean) =>
+      m.runSqlQuery.mockResolvedValueOnce({ rows: [[{ t: "Bool", v: v14 }]] });
+    version(true);
+    m.runSqlQuery.mockResolvedValueOnce({
+      rows: [
+        [
+          { t: "Str", v: "m" },
+          { t: "Str", v: "" },
+        ],
+        [
+          { t: "Str", v: "ms" },
+          { t: "Str", v: "a" },
+        ],
+      ],
+    });
+    expect(await postgresMoneyColumns("c1", "s", "t")).toEqual({
+      scalar: new Set(["m"]),
+      array: new Set(["ms"]),
+    });
+    expect(lastSql()).toContain("rngmultitypid");
+
+    // PostgreSQL 13 has no multiranges: the walk must not name them.
+    version(false);
+    m.runSqlQuery.mockResolvedValueOnce({ rows: [] });
+    await postgresMoneyColumns("c1", "s", "t");
+    expect(lastSql()).not.toContain("rngmultitypid");
+
+    version(true);
+    m.runSqlQuery.mockResolvedValueOnce({
+      rows: [
+        [
+          { t: "Str", v: "addr" },
+          { t: "Str", v: "c" },
+        ],
+      ],
+    });
+    await expect(postgresMoneyColumns("c1", "s", "t")).rejects.toThrow(
+      /"addr" .* holds money inside another type/
+    );
+
+    // A walk cut at the depth limit is not taken as money-free.
+    version(true);
+    m.runSqlQuery.mockResolvedValueOnce({
+      rows: [
+        [
+          { t: "Str", v: "deep" },
+          { t: "Str", v: "!" },
+        ],
+      ],
+    });
+    await expect(postgresMoneyColumns("c1", "s", "t")).rejects.toThrow(
+      /"deep" .* nested too deeply/
+    );
+  });
+
+  it("writes the text values as literals the column types", () => {
+    // Text forms of a composite, a bytea array and hstore, as read.
+    const sql = formatSqlInsertChunk({
+      engine: "postgres",
+      schema: "app",
+      tableName: "t",
+      columnNames: ["c", "bya", "h"],
+      columnTypes: ["text", "text", "text"],
+      rows: [
+        [
+          { t: "Str", v: '("Main ""St"", 1\\2",70000)' },
+          { t: "Str", v: '{"\\x00",NULL}' },
+          { t: "Null" },
+        ],
+      ],
+      qIdent: (name) => `"${name}"`,
+    });
+    expect(sql).toContain(
+      String.raw`VALUES
+  (E'("Main ""St"", 1\\2",70000)', E'{"\\x00",NULL}', NULL);`
+    );
+    expect(
+      splitSqlStatements(`${sql}\nSELECT 2;`, { dialect: "postgres" })
+    ).toHaveLength(2);
+  });
+});
+
+describe("buildPostgresTableStructure: generated and identity columns", () => {
+  const S = (v: string | null) =>
+    v === null ? { t: "Null" } : { t: "Str", v };
+
+  function catalog(opts: { unreadable?: boolean } = {}) {
+    m.runSqlQuery.mockImplementation(async (_c: string, sql = "") => {
+      if (sql.includes("SELECT c.oid")) return { rows: [[S("42")]] };
+      if (sql.includes("format_type(a.atttypid"))
+        return {
+          rows: [
+            [S("id"), S("integer"), S("t"), S(null), S("a"), S("")],
+            [S("bid"), S("bigint"), S("t"), S(null), S("d"), S("")],
+            [S("price"), S("numeric"), S("f"), S(null), S(""), S("")],
+            [S("total"), S("numeric"), S("f"), S("(price * 2)"), S(""), S("s")],
+            [S("half"), S("numeric"), S("f"), S("(price / 2)"), S(""), S("v")],
+          ],
+        };
+      if (sql.includes("FROM pg_sequence s")) {
+        const id = sql.includes("'id'");
+        return {
+          rows: [
+            [
+              S(id ? "app.g_id_seq" : "app.g_bid_seq"),
+              S(id ? "-1" : "1"),
+              S(id ? "-10" : "1"),
+              S(id ? "-1000" : "1"),
+              S(id ? "-1" : "9223372036854775807"),
+              S("1"),
+              S(id ? "t" : "f"),
+              S(id ? "integer" : "bigint"),
+            ],
+          ],
+        };
+      }
+      if (sql.includes("last_value")) {
+        if (opts.unreadable) throw new Error("permission denied");
+        const id = sql.includes("g_id_seq");
+        return { rows: [[S(id ? "-21" : "1"), S(id ? "t" : "f")]] };
+      }
+      return { rows: [] };
+    });
+  }
+
+  it("recreates them with their sequence options, and sets the sequences", async () => {
+    catalog();
+    const s = await buildPostgresTableStructure({
+      connectionId: "c1",
+      schema: "app",
+      tableName: "g",
+    });
+    expect(s.preDataSql).toContain(
+      '"id" integer GENERATED ALWAYS AS IDENTITY (INCREMENT BY -10 MINVALUE -1000 MAXVALUE -1 START WITH -1 CACHE 1 CYCLE) NOT NULL'
+    );
+    expect(s.preDataSql).toContain(
+      '"bid" bigint GENERATED BY DEFAULT AS IDENTITY (INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1 CACHE 1 NO CYCLE) NOT NULL'
+    );
+    expect(s.preDataSql).toContain(
+      '"total" numeric GENERATED ALWAYS AS ((price * 2)) STORED'
+    );
+    expect(s.preDataSql).toContain(
+      '"half" numeric GENERATED ALWAYS AS ((price / 2)) VIRTUAL'
+    );
+    // Set again even when the CREATE is skipped (an existing table or
+    // sequence), before any row.
+    expect(s.preDataSql).toContain(
+      'ALTER TABLE "app"."g" ALTER COLUMN "id" SET INCREMENT BY -10 SET MINVALUE -1000 SET MAXVALUE -1 SET START WITH -1 SET CACHE 1 SET CYCLE RESTART;'
+    );
+    expect(s.preDataSql.indexOf("ALTER TABLE")).toBeGreaterThan(
+      s.preDataSql.indexOf("CREATE TABLE")
+    );
+    expect(s.generatedColumns).toEqual(["total", "half"]);
+    expect(s.identityAlways).toBe(true);
+    expect(s.allGenerated).toBe(false);
+    expect(s.sequenceValuesSql).toBe(
+      `SELECT pg_catalog.setval(pg_get_serial_sequence('"app"."g"', 'id'), -21, true);\n` +
+        `SELECT pg_catalog.setval(pg_get_serial_sequence('"app"."g"', 'bid'), 1, false);\n`
+    );
+  });
+
+  it("stops the backup when a sequence cannot be read", async () => {
+    catalog({ unreadable: true });
+    await expect(
+      buildPostgresTableStructure({
+        connectionId: "c1",
+        schema: "app",
+        tableName: "g",
+      })
+    ).rejects.toThrow(/sequence numbering "id" of app\.g could not be read/);
+  });
+
+  it("restores the rows of a table of generated columns by count", async () => {
+    m.runSqlQuery.mockResolvedValueOnce({ rows: [[S("3")]] });
+    expect(await postgresGeneratedOnlyRowsSql("c1", "app", "g")).toBe(
+      'INSERT INTO "app"."g" SELECT FROM generate_series(1, 3);\n'
+    );
+    m.runSqlQuery.mockResolvedValueOnce({ rows: [[S("0")]] });
+    expect(await postgresGeneratedOnlyRowsSql("c1", "app", "g")).toBe("");
+  });
+
+  it("writes OVERRIDING SYSTEM VALUE for a GENERATED ALWAYS identity", () => {
+    expect(
+      formatSqlInsertChunk({
+        engine: "postgres",
+        schema: "app",
+        tableName: "g",
+        columnNames: ["id"],
+        rows: [[{ t: "Str", v: "1" }]],
+        qIdent: (name) => `"${name}"`,
+        overridingSystemValue: true,
+      })
+    ).toBe(
+      `INSERT INTO "app"."g" ("id") OVERRIDING SYSTEM VALUE VALUES\n  ('1');\n`
+    );
+  });
+});
+
+describe("catalog queries", () => {
+  it("quote a name holding a backslash as an E'' literal", async () => {
+    m.runSqlQuery
+      .mockResolvedValueOnce({ rows: [[{ t: "Bool", v: true }]] })
+      .mockResolvedValueOnce({ rows: [] });
+    await postgresMoneyColumns("c1", "s\\'x", "t");
+    const sql = m.runSqlQuery.mock.calls[1]![1] as string;
+    // With standard_conforming_strings off a plain '…' would end at \'.
+    expect(sql).toContain(String.raw`n.nspname = E's\\''x'`);
+    expect(sql).toContain("c.relname = 't'");
   });
 });

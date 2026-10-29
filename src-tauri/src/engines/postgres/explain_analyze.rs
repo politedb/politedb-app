@@ -519,7 +519,14 @@ async fn run(ctx: OperationCtx, config: Config, statement: String) {
 
 /// Aborts the session's driver task when dropped, which closes the socket;
 /// the server then ends the session and rolls back anything still open.
-struct SessionTask(JoinHandle<()>);
+pub(super) struct SessionTask(JoinHandle<()>);
+
+impl SessionTask {
+    /// Stops the driver task (closing the socket) without owning the task.
+    pub(super) fn abort_handle(&self) -> tokio::task::AbortHandle {
+        self.0.abort_handle()
+    }
+}
 
 impl Drop for SessionTask {
     fn drop(&mut self) {
@@ -532,7 +539,9 @@ impl Drop for SessionTask {
 /// every NOTICE and logs connection errors verbatim), this driver task reads
 /// asynchronous messages and drops them, and ends silently on error. A
 /// statement's functions can put customer data in a NOTICE (plan D6).
-async fn connect_quiet(config: &Config) -> Result<(Client, SessionTask), tokio_postgres::Error> {
+pub(super) async fn connect_quiet(
+    config: &Config,
+) -> Result<(Client, SessionTask), tokio_postgres::Error> {
     let (client, mut connection) = config.connect(NoTls).await?;
     let task = tokio::spawn(async move {
         while let Some(message) = poll_fn(|cx| connection.poll_message(cx)).await {

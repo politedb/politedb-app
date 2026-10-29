@@ -24,6 +24,15 @@ pub struct SqlQueryInput {
     #[serde(default)]
     pub lock_timeout_ms: Option<u64>,
     pub read_only: Option<bool>,
+    /// Write values in fixed text formats regardless of the session's
+    /// settings (PostgreSQL only: ISO dates, ISO 8601 intervals, exact
+    /// floats). Backups read text that must restore anywhere.
+    #[serde(default)]
+    pub canonical_text_output: Option<bool>,
+    /// Read this snapshot (pg_export_snapshot of a snapshot session), so
+    /// separate queries see one database state (PostgreSQL only).
+    #[serde(default)]
+    pub snapshot_id: Option<String>,
     pub validate_only: Option<bool>,
     #[serde(default)]
     pub client_mode: Option<String>, // "direct" | "stream"

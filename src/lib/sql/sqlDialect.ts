@@ -618,6 +618,12 @@ export function sqlQuotedStringLiteral(
   if (isSqlServerEngine(engine)) {
     return `N'${text.replace(/'/g, "''")}'`;
   }
+  // PostgreSQL: a value with a backslash is an E'…' string with the
+  // backslashes doubled, read the same with standard_conforming_strings on
+  // or off (a plain '…' changes with that session setting).
+  if (engine === "postgres" && text.includes("\\")) {
+    return `E'${text.replace(/\\/g, "\\\\").replace(/'/g, "''")}'`;
+  }
   return `'${text.replace(/'/g, "''")}'`;
 }
 

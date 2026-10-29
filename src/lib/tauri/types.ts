@@ -389,6 +389,10 @@ export type SqlQueryPayload = {
   /** PostgreSQL only: fail instead of waiting longer for a lock. */
   lock_timeout_ms?: number | null;
   read_only?: boolean;
+  /** PostgreSQL only: fixed text formats (ISO dates, exact floats). */
+  canonical_text_output?: boolean;
+  /** PostgreSQL only: read this exported snapshot. */
+  snapshot_id?: string;
   client_mode?: "direct" | "stream";
 };
 

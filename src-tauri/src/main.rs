@@ -174,6 +174,9 @@ fn main() {
             // Operations
             commands::operation::operation_execute,
             commands::operation::operation_execute_transaction,
+            commands::sql_session::sql_session_begin,
+            commands::sql_session::sql_session_execute,
+            commands::sql_session::sql_session_end,
             commands::operation::operation_import_csv_transaction,
             commands::operation::operation_cancel,
             commands::operation::operation_chunk_ack,
