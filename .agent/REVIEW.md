@@ -763,3 +763,37 @@ Reviewed by Codex, 2026-10-29. Scope: `git show 5993c3a` and the complete nine-f
 - `rtk proxy git diff --check aaa6337..HEAD -- src-tauri src/lib/tauri`: **passed**. No desktop/webview run or frontend build/tests in this backend-only review. Implementer's successful disposable live runs were read as handoff evidence, not reviewer-run verification.
 
 Only `.agent/REVIEW.md` changed by this review; existing untracked `.claude/launch.json` preserved. No source/test edits, commit, push or merge. Verdict remains CHANGES REQUIRED for the approved deterministic boundary-test requirements above; production fixes are accepted by static review, with live/native limits explicitly retained.
+
+
+## backup-restore-progress — Phase 1 review round 3
+
+Status: **VERIFIED WITH LIMITATIONS**
+
+Reviewed by Codex, 2026-10-29. Read `AGENTS.md` and `.agent/WORKFLOW.md` first. Scope: `git show e5fbe48` and the complete nine-file Phase 1 diff `git diff aaa6337..HEAD -- src-tauri src/lib/tauri`, at HEAD `e5fbe48aa3eab66048dc9997b284092ccebd33c6`, against the APPROVED plan `.agent/plans/backup-restore-progress.md`. The fix commit changes tests/test instrumentation plus plan evidence; changing `wait_torn_down` to an instance method adds no non-test behavior.
+
+### Disposition of round 2 findings
+
+| Round 2 finding | Disposition | Evidence |
+| --- | --- | --- |
+| P2-1: deterministic SQL waiter admission and server-side COMMIT races | Resolved by inspection; live execution blocked locally | `sql_session.rs:481–484` counts waiters after subscribing to the retained watch value. At `:997–1016`, second cancel/end must subscribe before the first cancel is released, then that first cancel must subscribe before teardown is released; the forced-close case similarly waits for late cancel admission at `:1068`. These counters are isolated to this registry/test, so an unscheduled task cannot satisfy admission. At `:854–882`, a separate connection holds advisory lock 777 and the deferred trigger requests its transaction lock. Both COMMIT cases wait for an ungranted server advisory lock (`:1095–1104`, `:1138–1147`) before acting, then explicitly unlock; cancel refusal also verifies COMMIT remains blocked and ultimately commits. This removes the former three-second trigger window and fixed cleanup sleep. |
+| P2-2: responsiveness test must detect blocking the async worker | Resolved; replacement test passed | `commands/backup_file.rs:88–125` uses one runtime worker, waits for blocking-entry acknowledgement, then requires an unrelated spawned async task to finish while file work remains held. It invokes the production `blocking` helper. A plain synchronous helper would occupy the only worker, preventing that spawned task from completing before the five-second timeout; the release guard and ten-second receive bound prevent indefinite retention on failure. Reviewer did not mutate the helper to rerun the implementer's negative control, respecting the review-only file restriction. |
+
+### Whole Phase 1 assessment / new findings
+
+**No remaining P0/P1/P2 findings established in the reviewed diff.**
+
+Rechecked cancellation/forced-close ownership, once-only teardown and completion waiters, ENDING losing to cancel without COMMIT or recursive close, COMMITTING refusal without side effects, and preservation of unknown COMMIT outcome on forced transport closure. Test-only gates/counters remain under `cfg(test)`; the production binary check passes.
+
+Rechecked file state transitions and lock ordering: registry guards are short, per-session locks serialize file work, stale cloned sessions cannot write/publish after abort/forget, failed deletion retains retry ownership, forget is restricted to AbortFailed, and Published retains a path-free tombstone. Publication continues through the existing sync-and-atomic-rename helper without destination deletion fallback. Async command handlers use `block_in_place`; raw-body/header parsing, command registration, frontend argument names and serialized cancel outcomes agree. No new sensitive logging found. Published tombstone retention and unjoined bounded server cancel follow the approved contract.
+
+### Verification run
+
+- `rtk cargo test backup_file` from `src-tauri/`: **10 passed**, 501 filtered out, including new one-worker responsiveness test, parser tests and file races.
+- `rtk cargo test` from `src-tauri/`: **441 passed, 47 failed, 23 ignored**. Failures are in unchanged AI HTTP/prepare/transport/Ollama and license fixtures, with denied local socket operations (`PermissionDenied: Operation not permitted`) and dependent assertions. Same count/classes reported in round 2; no fresh parent-baseline run, so no independent baseline-equivalence claim.
+- `rtk cargo check --bin PoliteDB` from `src-tauri/`: **passed**, including non-test command implementations.
+- Only authorized live invocation: `rtk proxy env HEALTH_PG_URL=postgres://postgres:review@127.0.0.1:55440/postgres cargo test sql_session -- --ignored --test-threads=1`: **0 passed, 2 failed**, at initial connection acquisition (`sql_session.rs:852` and `:598`) with sandbox `PermissionDenied: Operation not permitted`, before SQL setup. No other database/container used; no container command run.
+- `rtk proxy git diff --check aaa6337..HEAD -- src-tauri src/lib/tauri`: **passed**.
+
+Limitations: reviewer could not execute the live SQL race assertions or observe actual native webview/raw IPC responsiveness. Implementer's recorded disposable live successes are handoff evidence, not reviewer-run verification. No frontend build/tests, desktop run or clippy rerun in this test-only re-review. File race tests still sample concurrent scheduling rather than force both acquisition orders; static serialization and sequential state tests support the contract.
+
+Only `.agent/REVIEW.md` changed by this review; pre-existing untracked `.claude/launch.json` preserved. No application/test edits, commit, push or merge.
