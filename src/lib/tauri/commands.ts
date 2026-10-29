@@ -73,6 +73,12 @@ export const CMD = {
   sqlSessionBegin: "sql_session_begin",
   sqlSessionExecute: "sql_session_execute",
   sqlSessionEnd: "sql_session_end",
+  sqlSessionCancel: "sql_session_cancel",
+  backupFileBegin: "backup_file_begin",
+  backupFileWrite: "backup_file_write",
+  backupFilePublish: "backup_file_publish",
+  backupFileAbort: "backup_file_abort",
+  backupFileForget: "backup_file_forget",
 
   // Draft sql management
   draftSqlLoad: "sql_draft_load",

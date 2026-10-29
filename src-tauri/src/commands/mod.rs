@@ -2,6 +2,7 @@ pub mod ai;
 pub mod ai_agent;
 pub mod ai_agent_data;
 pub mod app;
+pub mod backup_file;
 pub mod cassandra;
 pub mod connection;
 pub mod export;

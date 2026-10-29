@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 use uuid::Uuid;
 
-use crate::engines::postgres::sql_session::SqlSessionMode;
+use crate::engines::postgres::sql_session::{CancelOutcome, SqlSessionMode};
 use crate::engines::EngineConnection;
 use crate::state::AppState;
 
@@ -72,4 +72,14 @@ pub async fn sql_session_end(
     commit: bool,
 ) -> Result<(), String> {
     state.sql_sessions.end(session_id, commit).await
+}
+
+/// Cancels a session (see `SqlSessionRegistry::cancel`); refused with
+/// SQL_SESSION_COMMITTING once its COMMIT or ROLLBACK was sent.
+#[tauri::command]
+pub async fn sql_session_cancel(
+    state: State<'_, AppState>,
+    session_id: Uuid,
+) -> Result<CancelOutcome, String> {
+    state.sql_sessions.cancel(session_id).await
 }

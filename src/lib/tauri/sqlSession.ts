@@ -37,3 +37,26 @@ export async function sqlSessionEnd(
 ): Promise<void> {
   await invoke(CMD.sqlSessionEnd, { sessionId, commit });
 }
+
+/**
+ * What a cancel established: this side closed the session's connection
+ * and end() sent no COMMIT ("cancelled", "already_closed_by_cancel"), or
+ * nothing ("already_ended": closed by end or a forced close; "unknown": no
+ * such session). Never a server-confirmed rollback.
+ */
+export type SqlSessionCancelOutcome =
+  | "cancelled"
+  | "already_closed_by_cancel"
+  | "already_ended"
+  | "unknown";
+
+/**
+ * Cancels a session at once (a running statement too), unless its COMMIT
+ * or ROLLBACK was already sent: then it rejects with
+ * SQL_SESSION_COMMITTING and changes nothing.
+ */
+export async function sqlSessionCancel(
+  sessionId: string
+): Promise<SqlSessionCancelOutcome> {
+  return invoke<SqlSessionCancelOutcome>(CMD.sqlSessionCancel, { sessionId });
+}

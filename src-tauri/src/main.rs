@@ -4,6 +4,7 @@
 extern crate objc2;
 
 mod ai;
+mod backup_file;
 mod commands;
 mod data_migration;
 mod distribution;
@@ -177,6 +178,7 @@ fn main() {
             commands::sql_session::sql_session_begin,
             commands::sql_session::sql_session_execute,
             commands::sql_session::sql_session_end,
+            commands::sql_session::sql_session_cancel,
             commands::operation::operation_import_csv_transaction,
             commands::operation::operation_cancel,
             commands::operation::operation_chunk_ack,
@@ -218,6 +220,11 @@ fn main() {
             commands::export::export_session_append,
             commands::export::export_session_publish,
             commands::export::export_session_abort,
+            commands::backup_file::backup_file_begin,
+            commands::backup_file::backup_file_write,
+            commands::backup_file::backup_file_publish,
+            commands::backup_file::backup_file_abort,
+            commands::backup_file::backup_file_forget,
             // cassandra
             commands::cassandra::cassandra_list_keyspaces,
             commands::cassandra::cassandra_list_tables,
