@@ -929,3 +929,39 @@ Reviewed by Codex, 2026-10-29. Read `AGENTS.md`, `.agent/WORKFLOW.md` and refere
 - In-memory actual-runner reproduction above: **confirmed R3-1**; no database, container or real file I/O through application boundaries.
 
 Only `.agent/REVIEW.md` edited. Pre-existing untracked `.claude/launch.json` preserved. No application/test edits, commit, push or merge.
+
+
+## backup-restore-progress — Phase 2 review round 4
+
+Status: **CHANGES REQUIRED**
+
+Reviewed by Codex, 2026-10-29. Read `AGENTS.md`, `.agent/WORKFLOW.md` and referenced RTK instructions first. Reviewed `git show a7c543e` and the whole Phase 2 range `git diff e214f18..HEAD` (HEAD: `a7c543e`). One P2 remains in the fix's error rethrow path; no P0/P1 found.
+
+### R3-1 disposition
+
+**Partially resolved.** `runDumpImport` now consumes cumulative catalog release evidence for every returned restore/import outcome. `withCatalogWarning` preserves success/skipped fields, existing warnings, counts, failure details and commit/rollback evidence. Failed, cancelled, stopped, commit-unknown and committed-refresh-failed outcomes retain their original meaning with the catalog note appended. Its file-only cases are unreachable from the restore strategies. An abandoned preflight/prompt with unconfirmed catalog release becomes a visible cancelled result with `nothing-run`; no transaction has begun at those abandoned return sites. The controller retains that restore/import result and the temporary presenter displays its message. Ordinary abandoned results remain quiet when cleanup is confirmed.
+
+The three added regressions pass (committed restore, returned failure and dismissed prompt). However, thrown errors still discard the same evidence, so R3-1 is not fully closed.
+
+### P2 findings
+
+1. **R4-1 — Error rethrow bypasses the catalog-release warning.** `src/screens/connection/lib/dump/restoreRun.ts:233–234`: after `queries.stopAll()` returns `false`, `if (!run.ok) throw run.error` bypasses `withCatalogWarning`. Concrete path: the overlay preflight query times out with rejected backend cancellation; `pgTablesWithRows` swallows that error; the subsequent `confirmDialog` rejects (its native IPC rejection propagates). `runHeld` throws, cleanup correctly reports unconfirmed release, but the wrapper rethrows only the dialog error. The hook catch (`src/screens/connection/hooks/useDatabaseBackup.ts:212–218`) constructs a plain failed outcome from that error, omitting the still-running catalog query and instruction to close the connection. **Fix:** preserve the original error while adding the catalog-release note on the thrown-error path too, or normalize that path to a failed outcome before applying `withCatalogWarning`. Add a regression with the preflight timeout/rejected cancel followed by a rejected confirmation, asserting both the original error and catalog warning reach the caller/presenter.
+
+   Database-free in-memory reproduction used the actual `restoreRun.ts`, `backupSql.ts` and `jobQueries.ts`, transpiled in memory with mocked operation/session/dialog/filesystem boundaries. A quoted-table INSERT triggers one preflight query; its result rejects with `SQL_QUERY_TIMEOUT` and its settlement has `cancelRejected: true`; confirmation then rejects with `dialog IPC failed`. Observed: `queries: 1`, `scopeConfirmedReleased: false`, `rethrown: "dialog IPC failed"`, `warningIncluded: false`. No source/fixture file written; no database, container or application file I/O performed.
+
+### Whole-phase checks and limitations
+
+- Rechecked helper extraction/re-exports and hook callers, job/store admission and retained outcomes, origin/close identity, cleanup ownership, stop/retry decisions, progress scheduling, both restore strategies, snapshot/stream/file cleanup, publication evidence, catalog scope and bus invalidation across the Phase 2 range. No additional concrete regression established beyond R4-1.
+- Previous retry-stop, late-operation adoption, cumulative cancel rejection, independent-error preservation, final-statement stop decision and backup cleanup fixes remain present. The new warning does not replace transaction evidence or turn commit-unknown into rollback/success.
+- Phase 2's temporary message presentation/summary dismissal remains scaffolding. Actual modal, D15 retention and close/quit integration still require Phase 3 review.
+- No database or container touched. No live SQL, Rust tests, native desktop/UI run or real backup publication attempted. Mocked tests and the reproduction verify frontend control flow, not live server termination or native IPC behavior. Implementer's live-test notes remain handoff evidence, not reviewer-run verification.
+
+### Verification run
+
+- `npx vitest run --exclude '**/.claude/**'`: **281 files passed, 1 skipped; 2,463 tests passed, 1 skipped**.
+- `npx tsc --noEmit -p .`: **passed**.
+- `npm run build`: **passed**; warnings for `node:zlib` browser externalization, ineffective dynamic imports, large chunks and plugin timings.
+- `git diff --check e214f18..HEAD`: **passed**.
+- In-memory actual-runner reproduction above: **confirmed R4-1**.
+
+Only `.agent/REVIEW.md` edited. Pre-existing untracked `.claude/launch.json` preserved. No application/test edits, commit, push or merge.
