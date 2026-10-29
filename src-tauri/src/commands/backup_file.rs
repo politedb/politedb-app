@@ -81,29 +81,46 @@ mod tests {
         );
     }
 
-    /// The file work runs inside block_in_place: the runtime's other tasks
-    /// keep running while a write blocks.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn file_work_does_not_block_other_tasks() {
-        let ticks = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let ticker = {
-            let ticks = std::sync::Arc::clone(&ticks);
-            tokio::spawn(async move {
-                loop {
-                    ticks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-                }
+    /// The file work runs inside block_in_place: with a single runtime
+    /// worker, an unrelated task still runs while that work is held. A
+    /// plain synchronous call there would hold the only worker, and the
+    /// unrelated task would never run.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn file_work_does_not_hold_the_only_worker() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let (entered_tx, entered_rx) = mpsc::channel::<()>();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        // Lets the held work go even if an assertion fails first.
+        struct Release(mpsc::Sender<()>);
+        impl Drop for Release {
+            fn drop(&mut self) {
+                let _ = self.0.send(());
+            }
+        }
+        let release = Release(release_tx);
+
+        let held = tokio::spawn(async move {
+            blocking(move || {
+                entered_tx.send(()).unwrap();
+                let _ = release_rx.recv_timeout(Duration::from_secs(10));
             })
-        };
-        tokio::spawn(async {
-            blocking(|| std::thread::sleep(std::time::Duration::from_millis(300)))
-        })
-        .await
-        .unwrap();
-        ticker.abort();
-        assert!(
-            ticks.load(std::sync::atomic::Ordering::SeqCst) > 10,
-            "other tasks ran meanwhile"
+        });
+        tokio::task::spawn_blocking(move || entered_rx.recv_timeout(Duration::from_secs(5)))
+            .await
+            .unwrap()
+            .expect("the held work started");
+
+        let other = tokio::spawn(async { "ran" });
+        let ran = tokio::time::timeout(Duration::from_secs(5), other).await;
+        assert_eq!(
+            ran.map(|r| r.unwrap()),
+            Ok("ran"),
+            "an unrelated task ran while the file work was held"
         );
+        assert!(!held.is_finished(), "still held");
+        drop(release);
+        held.await.unwrap();
     }
 }

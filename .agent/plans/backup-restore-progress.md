@@ -22,6 +22,11 @@ APPROVED
   - P2: who closed a session is part of the state (`CLOSED_BY_CANCEL` / `CLOSED_FORCED`, one compare-exchange); `closed_by` removed.
   - P2: test hooks (gates held after a cancel takes a session, after end() reaches ENDING, at teardown; counters for statements at the lock / sent, teardowns) order the live races by handshakes, not sleeps. New cases: queued statement never runs; cancel took + forced close + second cancel + end during a held teardown (owner kept, one teardown); end() held in ENDING loses to cancel (no COMMIT, no second close); forced close during COMMIT keeps `COMMIT_OUTCOME_UNKNOWN` and tears down once. File service: publish vs abort and write vs abort races (50 rounds each, one consistent outcome), raw IPC request parsing (missing/invalid header, JSON body), file work not blocking other runtime tasks.
   - Verification: `cargo test` 488 passed; `backup_file` 10 passed (3 runs); live `sql_session` 2 passed (cancel test 3 more runs, stable) on `pdb-review-session`; clippy only pre-existing errors in untouched files.
+- **Phase 1 review round 2 fixes (Codex: CHANGES REQUIRED, 2 P2, tests only), 2026-10-29, not committed:**
+  - Teardown waiters are counted once subscribed (`teardown_waiters` hook); the live test waits for the second cancel, end() and the first cancel to be subscribed before releasing the held teardown, and for the late cancel before releasing the forced close (no `yield_now` guesses).
+  - The deferred trigger takes advisory lock 777, held by a separate test connection: the test checks in `pg_locks` that the COMMIT is waiting on the server, then cancels (refused, COMMIT still held) or force-closes (`COMMIT_OUTCOME_UNKNOWN`, one teardown), then releases the lock. No `pg_sleep` window, no fixed wait before cleanup.
+  - The responsiveness test runs on a one-worker runtime with entry/release handshakes and requires an unrelated task to run while the file work is held; checked to fail (timeout) when `blocking()` is a plain call.
+  - Verification: `cargo test` 488 passed; `backup_file` 10 passed; live `sql_session` 2 passed, 3 runs, on `pdb-review-session`; `cargo check --bin PoliteDB` ok.
 
 ## Task
 

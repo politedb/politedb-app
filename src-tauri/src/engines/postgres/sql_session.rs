@@ -163,6 +163,9 @@ struct TestHooks {
     cancels_took: std::sync::atomic::AtomicUsize,
     /// end() calls past OPEN → ENDING.
     endings: std::sync::atomic::AtomicUsize,
+    /// Callers subscribed to another caller's teardown (counted once
+    /// subscribed, so a completion after that cannot be missed).
+    teardown_waiters: std::sync::atomic::AtomicUsize,
 }
 
 #[cfg(test)]
@@ -349,7 +352,7 @@ impl SqlSessionRegistry {
             // Already ending, or closed: a close is torn down before this
             // answers, so the caller never sees it half done.
             if is_closed(session.state.load(SeqCst)) {
-                Self::wait_torn_down(&session).await;
+                self.wait_torn_down(&session).await;
             }
             return Err("SQL_SESSION_ENDED".into());
         }
@@ -369,7 +372,7 @@ impl SqlSessionRegistry {
                     // A cancel or forced close took it: that caller tears
                     // it down; nothing is sent from here.
                     drop(guard);
-                    Self::wait_torn_down(&session).await;
+                    self.wait_torn_down(&session).await;
                     return Err("SQL_SESSION_ENDED".into());
                 } else if let Some((client, _task)) = guard.take() {
                     let end = if commit { "COMMIT" } else { "ROLLBACK" };
@@ -421,7 +424,7 @@ impl SqlSessionRegistry {
         if state == COMMITTING {
             return Err("SQL_SESSION_COMMITTING".into());
         }
-        Self::wait_torn_down(&session).await;
+        self.wait_torn_down(&session).await;
         Ok(if state == CLOSED_BY_CANCEL {
             CancelOutcome::AlreadyClosedByCancel
         } else {
@@ -450,7 +453,7 @@ impl SqlSessionRegistry {
     /// until it is done.
     async fn teardown(&self, session_id: Uuid, session: &Arc<PgSqlSession>, cancel_server: bool) {
         if session.teardown_started.swap(true, SeqCst) {
-            Self::wait_torn_down(session).await;
+            self.wait_torn_down(session).await;
             return;
         }
         #[cfg(test)]
@@ -475,8 +478,10 @@ impl SqlSessionRegistry {
         session.torn_down.send_replace(true);
     }
 
-    async fn wait_torn_down(session: &PgSqlSession) {
+    async fn wait_torn_down(&self, session: &PgSqlSession) {
         let mut done = session.torn_down.subscribe();
+        #[cfg(test)]
+        self.hooks.teardown_waiters.fetch_add(1, SeqCst);
         let _ = done.wait_for(|done| *done).await;
     }
 
@@ -841,15 +846,33 @@ mod tests {
             NoTls,
             ManagerConfig::default(),
         ))
-        .max_size(2)
+        .max_size(3)
         .build()
         .unwrap();
         let other = pool.get().await.unwrap();
+        // Holds advisory lock 777, which the deferred trigger takes at
+        // COMMIT: a COMMIT then waits until the test lets it go.
+        let holder = pool.get().await.unwrap();
+        let commit_blocked = || {
+            let other = &other;
+            async move {
+                other
+                    .query_one(
+                        "SELECT count(*) FROM pg_locks
+                         WHERE locktype = 'advisory' AND objid = 777 AND NOT granted",
+                        &[],
+                    )
+                    .await
+                    .unwrap()
+                    .get::<_, i64>(0)
+                    > 0
+            }
+        };
         other
             .batch_execute(
                 "DROP TABLE IF EXISTS zz_cancel_t; CREATE TABLE zz_cancel_t (v int);
                  CREATE OR REPLACE FUNCTION zz_cancel_slow() RETURNS trigger
-                   LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_sleep(3); RETURN NULL; END $$;
+                   LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_advisory_xact_lock(777); RETURN NULL; END $$;
                  CREATE CONSTRAINT TRIGGER zz_cancel_slow AFTER INSERT ON zz_cancel_t
                    DEFERRABLE INITIALLY DEFERRED FOR EACH ROW
                    WHEN (NEW.v >= 500) EXECUTE FUNCTION zz_cancel_slow();",
@@ -940,7 +963,11 @@ mod tests {
             .await
             .unwrap();
         let took_gate = h.cancel_took_gate.hold();
-        let (took, teardowns) = (h.cancels_took.load(SeqCst), h.teardowns.load(SeqCst));
+        let (took, teardowns, waiters) = (
+            h.cancels_took.load(SeqCst),
+            h.teardowns.load(SeqCst),
+            h.teardown_waiters.load(SeqCst),
+        );
         let first = {
             let reg = Arc::clone(&reg);
             tokio::spawn(async move { reg.cancel(id).await })
@@ -967,14 +994,23 @@ mod tests {
             let reg = Arc::clone(&reg);
             tokio::spawn(async move { reg.end(id, true).await })
         };
-        // Nobody answers while the teardown is held.
-        tokio::task::yield_now().await;
-        assert!(!second.is_finished() && !ending.is_finished() && !forced.is_finished());
+        // Both wait on the held teardown (subscribed: they cannot miss it).
+        until("the second cancel and end() wait", || {
+            h.teardown_waiters.load(SeqCst) == waiters + 2
+        })
+        .await;
         assert_eq!(state_of(&reg, id), Some(CLOSED_BY_CANCEL), "owner kept");
-        h.teardown_gate.open();
-        teardown_gate.add_permits(1);
+        // The first cancel, let go, finds the teardown taken and waits too.
         h.cancel_took_gate.open();
         took_gate.add_permits(1);
+        until("the first cancel waits", || {
+            h.teardown_waiters.load(SeqCst) == waiters + 3
+        })
+        .await;
+        assert!(!second.is_finished() && !ending.is_finished() && !forced.is_finished());
+        assert!(!first.is_finished());
+        h.teardown_gate.open();
+        teardown_gate.add_permits(1);
         forced.await.unwrap();
         assert_eq!(first.await.unwrap(), Ok(CancelOutcome::Cancelled));
         assert_eq!(
@@ -1015,7 +1051,7 @@ mod tests {
             .await
             .unwrap();
         let teardown_gate = h.teardown_gate.hold();
-        let teardowns = h.teardowns.load(SeqCst);
+        let (teardowns, waiters) = (h.teardowns.load(SeqCst), h.teardown_waiters.load(SeqCst));
         let forced = {
             let reg = Arc::clone(&reg);
             tokio::spawn(async move { reg.end_for_connection(conn).await })
@@ -1029,15 +1065,18 @@ mod tests {
             let reg = Arc::clone(&reg);
             tokio::spawn(async move { reg.cancel(id).await })
         };
-        tokio::task::yield_now().await;
+        until("the late cancel waits", || {
+            h.teardown_waiters.load(SeqCst) == waiters + 1
+        })
+        .await;
         assert!(!late.is_finished());
         h.teardown_gate.open();
         teardown_gate.add_permits(1);
         forced.await.unwrap();
         assert_eq!(late.await.unwrap(), Ok(CancelOutcome::AlreadyEnded));
 
-        // Once COMMIT is sent (slowed by a deferred trigger), a cancel is
-        // refused and changes nothing: the commit completes.
+        // Once COMMIT is sent (held by the deferred trigger on lock 777), a
+        // cancel is refused and changes nothing: the commit completes.
         let (id, _) = reg
             .begin(conn, &cfg, SqlSessionMode::Transaction)
             .await
@@ -1045,15 +1084,33 @@ mod tests {
         reg.execute(id, "INSERT INTO zz_cancel_t VALUES (500)")
             .await
             .unwrap();
+        holder
+            .batch_execute("SELECT pg_advisory_lock(777)")
+            .await
+            .unwrap();
         let committing = {
             let reg = Arc::clone(&reg);
             tokio::spawn(async move { reg.end(id, true).await })
         };
-        until("COMMIT is sent", || state_of(&reg, id) == Some(COMMITTING)).await;
+        let mut blocked = false;
+        for _ in 0..500 {
+            if commit_blocked().await {
+                blocked = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(blocked, "the COMMIT is running on the server, held");
+        assert_eq!(state_of(&reg, id), Some(COMMITTING));
         assert_eq!(
             reg.cancel(id).await,
             Err("SQL_SESSION_COMMITTING".to_string())
         );
+        assert!(commit_blocked().await, "the refused cancel changed nothing");
+        holder
+            .batch_execute("SELECT pg_advisory_unlock(777)")
+            .await
+            .unwrap();
         assert_eq!(committing.await.unwrap(), Ok(()));
         assert_eq!(rows(500).await, 1, "committed");
         // Gone after a completed end: unknown, not a cancel.
@@ -1070,11 +1127,23 @@ mod tests {
             .await
             .unwrap();
         let teardowns = h.teardowns.load(SeqCst);
+        holder
+            .batch_execute("SELECT pg_advisory_lock(777)")
+            .await
+            .unwrap();
         let committing = {
             let reg = Arc::clone(&reg);
             tokio::spawn(async move { reg.end(id, true).await })
         };
-        until("COMMIT is sent", || state_of(&reg, id) == Some(COMMITTING)).await;
+        let mut blocked = false;
+        for _ in 0..500 {
+            if commit_blocked().await {
+                blocked = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(blocked, "the COMMIT is running on the server, held");
         reg.end_for_connection(conn).await;
         assert_eq!(
             committing.await.unwrap(),
@@ -1083,9 +1152,11 @@ mod tests {
         assert_eq!(h.teardowns.load(SeqCst), teardowns + 1, "torn down once");
         assert_eq!(state_of(&reg, id), None);
 
-        // The server may still finish that COMMIT; wait for it before the
-        // cleanup so the drop does not block on its lock.
-        tokio::time::sleep(Duration::from_secs(4)).await;
+        // Let the server finish (or drop) that COMMIT before cleaning up.
+        holder
+            .batch_execute("SELECT pg_advisory_unlock(777)")
+            .await
+            .unwrap();
         other
             .batch_execute("DROP TABLE zz_cancel_t; DROP FUNCTION zz_cancel_slow()")
             .await
