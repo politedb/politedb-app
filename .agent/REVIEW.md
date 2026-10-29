@@ -1103,3 +1103,36 @@ Reviewed by Codex, 2026-10-29. Read `AGENTS.md`, `.agent/WORKFLOW.md` and refere
 - No database or container touched. No Rust tests, native desktop launch, live SQL, native IPC cancellation, real file publication, real browser default-action/layout check or live fidelity tests run. Native and browser behavior described above is explicitly source-derived where not covered by the frontend suite.
 
 Only `.agent/REVIEW.md` edited. Pre-existing untracked `.claude/launch.json` preserved. No application/test edits, commit, push or merge.
+
+
+## backup-restore-progress — Phase 3 review round 4
+
+Status: **VERIFIED WITH LIMITATIONS**
+
+Reviewed by Codex, 2026-10-29. Read `AGENTS.md`, `.agent/WORKFLOW.md` and referenced RTK instructions first. Re-reviewed `git show 7220363` and the whole Phase 3 range `git diff e1f3494..HEAD`; HEAD: `7220363d9ece11738bc4a82cbbfa0a1ebb2de985`.
+
+### Round 3 finding disposition
+
+**R3-1 (P2) resolved.** `src/components/modal/DumpProgressDialog.tsx:313–344`: `stopPropagation()` now precedes the Tab branch, so plain Tab and modifier+Tab cannot reach the background document/window bubble listeners. Focus wrapping and default handling remain in the existing Tab branch. The mounted regression in `DumpProgressDialog.shortcuts.test.tsx` uses the real `useConnectionShortcuts`: Shift+Tab invokes Open SQL without the modal, then cannot invoke it while the modal is open, including the single-button wrap case. `DumpProgressDialog.test.tsx` now includes Tab and Shift+Tab in its no-background-listener assertion. The same capture handler remains installed for retained summaries, with the current summary Escape callback read through its ref.
+
+### New / remaining findings
+
+- **P0: none established.**
+- **P1: none established.**
+- **P2: none established.** No new concrete regression found in the fix or remaining Phase 3 range.
+
+### Whole-phase review and limitations
+
+- Rechecked global running flags and all three hook callers; job registration before prompts; explicit visibility at backup/restore execution boundaries; atomic active-to-summary transition; retained outcome text, Close and stale-ID dismissal; progress/counts; Cancel, refusal, COMMIT/publication, Stop/Continue and retry/Stop trying controls.
+- Rechecked portal placement, root inertness, initial focus and restoration, Tab wrapping, summary Escape and scrollable panel composition. Moving propagation blocking does not add `preventDefault` for Enter/Space, or change the existing Tab focus/default branches. No editable input or target-keydown-dependent widget currently exists in this modal. Synthetic jsdom keydowns do not prove real browser default button activation, multi-button native Tab navigation or scrolling at large text sizes; no browser/native visual verification run in this review.
+- Rechecked window-lifetime quit guard, request/fallback/direct tab-close admission, production bridge intent forwarding, pending discard continuations, scope coverage, borrowed leases and owned release through awaited disconnect/persistence. No additional premature-release path established. Coverage still lacks direct `useConnectionActions.closeTab` duplicate/delayed-disconnect integration, full MainLayout navigation with native close, concurrent actual quit requests, and held initial Touch ID with the real hook and modal. Backup/restore hook outcome suites still use a stand-in summary subscriber. These remain coverage limitations rather than passing integration evidence.
+- Native prompt keyboard handling, Touch ID, native close-listener registration, IPC cancellation, real backup file publication and live SQL fidelity were not exercised. No database or container touched; no Rust tests, native desktop launch or live tests run. This verdict covers reviewed Phase 3 source and frontend checks, with the plan's native/manual verification still outstanding.
+
+### Verification run
+
+- `npx vitest run --exclude '**/.claude/**'`: **284 files passed, 1 skipped; 2,488 tests passed, 1 skipped; exit 0**.
+- `npx tsc --noEmit -p .`: **passed**, exit 0.
+- `npm run build`: **passed**, exit 0; node:zlib browser externalization, ineffective dynamic-import, large-chunk and plugin-timing warnings reported.
+- `git diff --check e1f3494..HEAD`: **passed**, exit 0.
+
+Only `.agent/REVIEW.md` edited. Pre-existing untracked `.claude/launch.json` preserved. No application/test edits, commit, push or merge.
