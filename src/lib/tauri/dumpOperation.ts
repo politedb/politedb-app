@@ -22,6 +22,12 @@ export type DumpSettled = {
   kind: "server-finished" | "client-disposed";
   /** Why it ended when that was not a success. */
   error?: unknown;
+  /**
+   * Disposed, but the backend refused (or never answered) its cancel:
+   * the operation may still run. Also for a disposal the port started
+   * itself (a timeout, a failed handler).
+   */
+  cancelRejected?: boolean;
 };
 
 /** What asking the backend to cancel the operation gave. */
@@ -89,7 +95,7 @@ function start<T>(
     if (finished) return Promise.resolve({ kind: "requested" });
     stopping = (async () => {
       clearTimer();
-      let ack: DumpCancelAck = { kind: "requested" };
+      let ack = { kind: "requested" } as DumpCancelAck;
       const cancelId = async (id: string) => {
         operationBus.invalidate(id);
         try {
@@ -107,7 +113,11 @@ function start<T>(
       unsubscribe = null;
       await drainHandlers();
       rejectResult(cause);
-      resolveSettled({ kind: "client-disposed", error: cause });
+      resolveSettled({
+        kind: "client-disposed",
+        error: cause,
+        ...(ack.kind === "rejected" ? { cancelRejected: true } : {}),
+      });
       return ack;
     })();
     return stopping;
@@ -162,8 +172,11 @@ function start<T>(
       },
       // No abort signal: the helper would give up on the IPC early and
       // only fire-and-forget the id that comes later. Disposal instead
-      // waits for the real execute, adopts its id, and cancels it.
-      undefined
+      // waits for the real execute, adopts its id, and cancels it; once
+      // stopping, no further attempt (busy retry) is sent.
+      undefined,
+      undefined,
+      () => stopping !== null
     ).catch((error) => {
       executeError = error;
       return null;

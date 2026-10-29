@@ -153,11 +153,18 @@ function raceAgainstAbort<T>(
 export async function operationExecuteWithBusyRetry(
   payload: Parameters<typeof operationExecute>[0],
   signal?: AbortSignal,
-  isTimedOut?: () => boolean
+  isTimedOut?: () => boolean,
+  /**
+   * Stops further attempts without racing the one in flight (dump
+   * operations): an execute already sent is still awaited and its id
+   * returned, but none is sent, and no busy holder cancelled, after it.
+   */
+  shouldStop?: () => boolean
 ) {
   let lastErr: unknown;
 
   for (let attempt = 0; attempt <= SQL_BUSY_RETRY_MAX; attempt++) {
+    if (shouldStop?.()) throw createAbortError();
     if (signal?.aborted) {
       if (isTimedOut?.()) throw new Error("SQL_QUERY_TIMEOUT");
       throw createAbortError();
@@ -202,6 +209,7 @@ export async function operationExecuteWithBusyRetry(
       // Backend cancel_operation calls release_op synchronously, so sleeping
       // here only widens the window for a competing stream (sqlLoader retry)
       // to re-acquire and starve re-export until retries exhaust.
+      if (shouldStop?.()) throw createAbortError();
       const busyOpId = parseSqlBusyOpId(err);
       if (busyOpId) {
         try {

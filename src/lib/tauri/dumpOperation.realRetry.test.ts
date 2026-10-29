@@ -89,4 +89,39 @@ describe("dump operations over the real retry helper", () => {
     expect(m.invalidate).toHaveBeenCalledWith("late-op");
     expect(await op.settled).toMatchObject({ kind: "client-disposed" });
   });
+
+  it("send no further attempt once stopped, even when the first was busy", async () => {
+    const first = deferred<string>();
+    m.execute.mockReturnValueOnce(first.promise);
+    m.cancel.mockResolvedValue(undefined);
+    const op = dumpStatement("c1", "DELETE FROM t");
+    await flush();
+    void op.cancel();
+    await flush();
+    // The connection was busy: the helper would cancel the holder and retry.
+    first.reject(
+      new Error("ERR_SQL_BUSY:0b6b2f0e-6a3f-4d0e-9d5e-2f1c9a4b7e10")
+    );
+    expect(await op.settled).toMatchObject({ kind: "client-disposed" });
+    expect(m.execute).toHaveBeenCalledTimes(1);
+    // Nobody else's operation is cancelled on its behalf.
+    expect(m.cancel).not.toHaveBeenCalled();
+  });
+
+  it("send no further attempt after its timeout", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "setInterval", "Date"] });
+    try {
+      const first = deferred<string>();
+      m.execute.mockReturnValueOnce(first.promise);
+      const op = dumpStatement("c1", "DELETE FROM t", { timeoutMs: 50 });
+      await vi.advanceTimersByTimeAsync(100);
+      first.reject(new Error("ERR_SQL_BUSY"));
+      await vi.advanceTimersByTimeAsync(5_000);
+      const settled = await op.settled;
+      expect((settled.error as Error).message).toBe("SQL_QUERY_TIMEOUT");
+      expect(m.execute).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

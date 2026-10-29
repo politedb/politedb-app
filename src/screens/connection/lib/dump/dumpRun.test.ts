@@ -16,6 +16,8 @@ import {
  */
 
 const m = vi.hoisted(() => ({
+  /** Catalog queries settle as if their cancel had been refused. */
+  catalogCancelRejected: false,
   confirm: vi.fn(),
   unpack: vi.fn(),
   pack: vi.fn(),
@@ -57,7 +59,10 @@ vi.mock("src/lib/tauri/dumpOperation", () => ({
       result,
       cancel: async () => ({ kind: "requested" }),
       settled: result.then(
-        () => ({ kind: "server-finished" }),
+        () =>
+          m.catalogCancelRejected
+            ? { kind: "client-disposed", cancelRejected: true }
+            : { kind: "server-finished" },
         (error: unknown) => ({ kind: "server-finished", error })
       ),
     };
@@ -135,6 +140,7 @@ function restore(engine: string, j: DumpJobHandle) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  m.catalogCancelRejected = false;
   useDumpJobStore.setState({ active: null, summary: null, closing: [] });
   useScreenStore.setState({
     profileTabs: [
@@ -835,5 +841,115 @@ describe("backup cleanup evidence (Codex Phase 2 review)", () => {
       kind: "cancelled",
       failure: "permission denied for table t",
     });
+  });
+});
+
+describe("Codex Phase 2 review round 2 cases", () => {
+  it("reports an independent catalog failure even when the cancel closed the session", async () => {
+    m.unpack.mockResolvedValue({
+      sql: 'ALTER TABLE "public"."a" ADD CONSTRAINT "a_pk" PRIMARY KEY (id);',
+      engine: null,
+    });
+    const checked = deferred<{ rows: unknown[][] }>();
+    m.runSqlQuery.mockImplementation(async (_c: string, sql: string) =>
+      sql.includes("pg_constraint") ? checked.promise : { rows: [] }
+    );
+    const j = job("restore", "postgres");
+    const run = restore("postgres", j);
+    await vi.waitFor(() =>
+      expect(
+        m.runSqlQuery.mock.calls.some((c) =>
+          String(c[1]).includes("pg_constraint")
+        )
+      ).toBe(true)
+    );
+    cancelDumpJob(j.jobId);
+    await flush();
+    checked.reject(new Error("permission denied for table pg_constraint"));
+    const outcome = await run;
+    expect(outcome).toMatchObject({
+      kind: "cancelled",
+      rollback: "not-committed-closed",
+    });
+    expect((outcome as { failure?: string }).failure).toContain(
+      "permission denied for table pg_constraint"
+    );
+  });
+
+  it("reports an independent statement error even when the cancel closed the session", async () => {
+    const held = holdStatement("INSERT INTO a VALUES (1)");
+    const j = job("restore", "postgres");
+    const run = restore("postgres", j);
+    await flush();
+    cancelDumpJob(j.jobId);
+    held.reject(new Error("ERROR: division by zero"));
+    const outcome = await run;
+    expect(outcome).toMatchObject({
+      kind: "cancelled",
+      rollback: "not-committed-closed",
+    });
+    expect((outcome as { message: string }).message).toContain(
+      "Also: ERROR: division by zero"
+    );
+  });
+
+  it.each([
+    "SQL_SESSION_ENDED",
+    "ERROR: connection closed",
+    "ERROR: canceling statement due to user request",
+  ])("leaves out %s, which the closing session causes", async (error) => {
+    const held = holdStatement("INSERT INTO a VALUES (1)");
+    const j = job("restore", "postgres");
+    const run = restore("postgres", j);
+    await flush();
+    cancelDumpJob(j.jobId);
+    held.reject(new Error(error));
+    const outcome = await run;
+    expect(outcome).toMatchObject({ kind: "cancelled" });
+    expect((outcome as { failure?: string }).failure).toBeUndefined();
+  });
+
+  it("warns when a backup's catalog query could not be confirmed released", async () => {
+    m.runSqlQuery.mockImplementation(async (_c: string, sql: string) =>
+      sql.startsWith("SHOW CREATE TABLE")
+        ? {
+            rows: [
+              [
+                { t: "Str", v: "t" },
+                { t: "Str", v: "CREATE TABLE t (id int)" },
+              ],
+            ],
+          }
+        : { rows: [] }
+    );
+    m.catalogCancelRejected = true;
+    m.pack.mockImplementation(async () => new Uint8Array([1]));
+    m.fileBegin.mockResolvedValue("f1");
+    m.fileWrite.mockResolvedValue(undefined);
+    m.filePublish.mockResolvedValue(undefined);
+    m.stream.mockImplementation(() => {
+      const settled = Promise.resolve({ kind: "server-finished" });
+      return { result: settled, cancel: vi.fn(), settled };
+    });
+    const j = job("backup", "mysql");
+    const outcome = await runDatabaseBackup(
+      {
+        runtimeConnectionId: "c1",
+        engine: "mysql" as never,
+        metaKey: "meta",
+        metadata: {
+          load: async () => ({
+            tables: [{ schema: "shop", name: "t", kind: "table" }],
+            columnsByTable: { "shop.t": ["id"] },
+          }),
+        } as never,
+      },
+      "/out.dumb",
+      j
+    );
+    expect(outcome).toMatchObject({ kind: "succeeded" });
+    expect((outcome as { warning?: string }).warning).toContain(
+      "could not be confirmed closed"
+    );
   });
 });

@@ -52,6 +52,11 @@ APPROVED
   - P2-9: `isCurrent()` requires the exact runtime and no covering close lease.
   - Also: the first Cancel is no longer ignored while another cleanup action (snapshot end, file abort) runs; only retries wait for the group.
   - Verification: `npx vitest run` 2448 passed (new: real-retry port 2, bus TTL 1, COMMIT classes 5, failure after cancel 2, catalog hold 1, late prompt 1, backup cleanup 4, last-statement D10 3, isCurrent 1); `npm run build` ok; PR #88 live fidelity test on `pdb-review-session` passed.
+- **Phase 2 review round 1 fixes committed `59a58d2`. Review round 2 (Codex: CHANGES REQUIRED, 3 P2) fixes, 2026-10-29, not committed:**
+  - P2-1: `operationExecuteWithBusyRetry` takes a `shouldStop` that ends further attempts (no new execute, no busy holder cancelled) without racing the one in flight; the dump port passes it. Real-helper tests: busy rejection after cancel and after timeout send no second execute (checked to fail without the stop).
+  - P2-2: `DumpSettled.cancelRejected` marks a disposal whose backend cancel was refused (also a port-started timeout); `holdJobQueries` keeps that evidence for the whole run, so a refused catalog cancel still makes the backup's cleanup unconfirmed after the query left. Tests over the real port (user cancel, timeout) and a backup warning test.
+  - P2-3: an error seen after Cancel is left out only when the cancel closed the session **and** the error is one that closing causes (`causedByCancel`: session ended/gone, connection closed, statement cancelled, catalog query refused/aborted); independent catalog or statement errors are reported ("Also: …"). Tests for both and for the three cancel-caused errors.
+  - Verification: `npx vitest run` all passed; `npm run build` ok; PR #88 live fidelity test on `pdb-review-session` passed.
 
 ## Task
 

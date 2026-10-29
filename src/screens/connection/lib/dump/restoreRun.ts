@@ -24,6 +24,7 @@ import type { useConnectionRuntimeCtx } from "../../workspace/ConnectionRuntimeC
 import type { CancelActionResult, DumpJobHandle } from "./dumpJobController";
 import { holdJobQueries } from "./jobQueries";
 import {
+  DumpStopped,
   isIgnorableRestoreError,
   isPgAddForeignKeyStatement,
   isTransactionControl,
@@ -98,6 +99,25 @@ export function classifyCommitError(
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * An error that closing the session, or the job's own stop, produces: the
+ * session already ended or gone, its connection closed under a running
+ * statement, the statement cancelled by the server, a catalog query
+ * refused or aborted. Nothing else counts as caused by a cancel.
+ */
+export function causedByCancel(err: unknown): boolean {
+  if (err instanceof DumpStopped) return true;
+  if (err instanceof Error && err.name === "AbortError") return true;
+  const message = errorMessage(err);
+  return (
+    message === "AbortError" ||
+    /SQL_SESSION_(ENDED|NOT_FOUND)/.test(message) ||
+    /^ERROR: (connection closed|error communicating with the server|canceling statement due to user request)/i.test(
+      message
+    )
+  );
 }
 
 /** A cancel of the session, by what it established (D7 evidence). */
@@ -408,8 +428,10 @@ async function runInTransaction(a: RunArgs): Promise<DumpOutcome> {
   };
 
   /**
-   * The cancelled outcome. An error seen meanwhile is the cancel's own
-   * doing only when the cancel closed the session; otherwise it is an
+   * The cancelled outcome. An error seen meanwhile is left out only when
+   * the cancel closed the session and the error is what that closing
+   * causes (the session ended, the connection closed, the statement
+   * cancelled, a catalog query refused); any other error is an
    * independent failure, reported with it.
    */
   const cancelledBy = async (err?: unknown): Promise<DumpOutcome> => {
@@ -417,7 +439,7 @@ async function runInTransaction(a: RunArgs): Promise<DumpOutcome> {
     const closedByCancel = job.cleanup.evidence !== null;
     const evidence = await abandon();
     const failure =
-      err !== undefined && !closedByCancel
+      err !== undefined && !(closedByCancel && causedByCancel(err))
         ? restoreErrorSummary(err)
         : undefined;
     return cancelledOutcome(a, evidence, sent, failure);
