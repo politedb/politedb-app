@@ -892,3 +892,40 @@ First Cancel during unrelated cleanup is now admitted; retry remains blocked whi
 - `git diff --check e214f18..HEAD`: **passed**.
 
 Only `.agent/REVIEW.md` edited. Pre-existing untracked `.claude/launch.json` preserved. No application/test edits, commit, push or merge.
+
+## backup-restore-progress — Phase 2 review round 3
+
+Status: **CHANGES REQUIRED**
+
+Reviewed by Codex, 2026-10-29. Read `AGENTS.md`, `.agent/WORKFLOW.md` and referenced RTK instructions first. Reviewed `git show cc73633` and the whole Phase 2 range `git diff e214f18..HEAD` (HEAD: `cc73633cb5e0c7e19e64de8c44108f927f2efe9f`). All three reported round 2 cases are resolved; one adjacent P2 evidence-consumption defect remains. No P0/P1 found.
+
+### Round 2 disposition
+
+| # | Disposition | Evidence |
+| --- | --- | --- |
+| 1 — execute retries after stop | Resolved | `shouldStop` is checked before each execute and before cancelling a busy holder. The in-flight execute is still awaited and its late ID adopted/cancelled. Cancel during holder-cancel/backoff reaches the next loop's stop check. Real-helper regressions cover a held busy rejection after explicit cancel and timeout. Other production callers (`runSqlQuery`, `startSqlQueryStream`) omit the new optional fourth argument; their existing signal/deadline behavior is preserved. |
+| 2 — lost catalog cancel rejection | Resolved for the reported backup cases | Disposal exposes `DumpSettled.cancelRejected`, including timeout/handler-triggered disposal. `holdJobQueries` accumulates it before removing the operation and retains it across repeated `stopAll()` calls; backup consumes the final boolean. Real-port tests cover accepted cancel, rejected cancel after removal, and timeout with rejected cancel; runner test checks the backup warning. Restore/import still discards that evidence (R3-1 below). |
+| 3 — independent failure hidden after accepted session cancel | Resolved | `cancelledBy` now requires both session-cancel evidence and `causedByCancel(err)` before suppressing an error. Independent catalog permission and statement division-by-zero failures survive in `failure` / “Also: …”; session-ended, connection-closed and statement-cancelled cases remain filtered. |
+
+### P2 findings
+
+1. **R3-1 — Restore/import discards cumulative catalog cleanup failure.** `src/screens/connection/lib/dump/restoreRun.ts:223–228`: `runDumpImport` returns `runHeld`'s outcome, then awaits `queries.stopAll()` in `finally` without inspecting its boolean. A preflight catalog query in `pgTablesWithRows` can time out, have its backend cancel rejected, and be swallowed by that helper's existing catch (`backupSql.ts:408–422`). The transaction uses its own connection and can subsequently commit successfully. The scope correctly retains `cancelRejected`, but this caller drops it and returns plain `succeeded`, allowing a quiet success and no retained cleanup warning while the separate catalog query may still run. Failure/cancel outcomes likewise omit this additional cleanup uncertainty. **Fix:** collect the runner outcome, inspect final catalog cleanup evidence, and add/retain an explicit catalog-release warning without overwriting the transaction's commit/rollback evidence. Add restore/import regression coverage for a swallowed preflight timeout with rejected cancel and an error/cancel outcome with the same evidence.
+
+   Database-free in-memory reproduction used the actual `restoreRun.ts`, `backupSql.ts` and `jobQueries.ts`, transpiled in memory with mocked port/session/dialog/filesystem boundaries: one quoted-table INSERT, preflight query rejects `SQL_QUERY_TIMEOUT`, its settlement carries `cancelRejected: true`, and transaction IPCs succeed. Observed: `queries: 1`, `scopeConfirmedReleased: false`, outcome `{"kind":"succeeded","skipped":0}`. No source or fixture file written.
+
+### Whole-phase checks and limitations
+
+- Rechecked extraction/re-exports and hook entry points, one-job admission and retained-summary transitions, origin/close identity, controller cleanup and stop decisions, progress coalescing, both restore strategies, backup snapshot/stream/file cleanup, file publication evidence, catalog scope, and bus invalidation. No additional concrete destination-integrity, analytics, sensitive-logging or unrelated-caller regression established.
+- `shouldStop` stops future attempts without restoring the early-abort/late-ID race. Cumulative rejected-cancel evidence is conservative and survives operation removal; the remaining defect is its restore/import consumer, not its storage.
+- Phase 2's temporary message presentation/summary dismissal remains recorded scaffolding. Phase 3 must verify the actual modal, D15 retention and close/quit integration.
+- No database or container touched. No live SQL, Rust tests, native desktop/UI run or real backup publication attempted. Implementer's live-test notes remain handoff evidence, not reviewer-run verification.
+
+### Verification run
+
+- `npx vitest run --exclude '**/.claude/**'`: **281 files passed, 1 skipped; 2,460 tests passed, 1 skipped**.
+- `npx tsc --noEmit -p .`: **passed**.
+- `npm run build`: **passed**; warnings for `node:zlib` browser externalization, ineffective dynamic imports and large chunks remain.
+- `git diff --check e214f18..HEAD`: **passed**.
+- In-memory actual-runner reproduction above: **confirmed R3-1**; no database, container or real file I/O through application boundaries.
+
+Only `.agent/REVIEW.md` edited. Pre-existing untracked `.claude/launch.json` preserved. No application/test edits, commit, push or merge.
