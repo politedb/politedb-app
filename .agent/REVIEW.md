@@ -1069,3 +1069,37 @@ Reviewed by Codex, 2026-10-29. Read `AGENTS.md`, `.agent/WORKFLOW.md` and refere
 - Inline Node/jsdom event-propagation probe reproducing the modal's capture predicate: Shift+S dispatched from a modal button reaches the background window shortcut listener (**1 call**). This verifies the propagation mechanism; it is not a mounted production-hook integration test.
 
 Only `.agent/REVIEW.md` edited. Pre-existing untracked `.claude/launch.json` preserved. No application/test edits, commit, push or merge.
+
+
+## backup-restore-progress — Phase 3 review round 3
+
+Status: **CHANGES REQUIRED**
+
+Reviewed by Codex, 2026-10-29. Read `AGENTS.md`, `.agent/WORKFLOW.md` and referenced RTK instructions first. Reviewed `git show 25c10f5` and the whole Phase 3 range `git diff e1f3494..HEAD`; HEAD: `25c10f524d313032bbfe60c05939199ee50b8aae`. No P0/P1 established.
+
+### Round 2 finding disposition
+
+**R2-1 partially resolved; one remaining P2 below.** Window capture now stops non-Tab keydowns regardless of modifiers. The new regression uses the real `useConnectionShortcuts` with `Shift+R` and confirms no background refresh. Plain keys and Meta/Ctrl/Alt chords likewise cannot reach document or window bubble listeners. Summary Escape is handled directly through the current `onEscapeRef`, so stopping propagation does not strand the retained result: the new test confirms dismissal without notifying the background listener. Active-job Escape remains ignored. Tab is still exempt from propagation blocking, leaving another supported Shift-only chord exposed.
+
+### New / remaining findings
+
+1. **P2 — Tab-based shortcuts still execute behind the blocking modal.** `src/components/modal/DumpProgressDialog.tsx:313–334`: every Tab key takes the early-return branch before `e.stopPropagation()` at line 343, including Shift/Ctrl/Meta/Alt+Tab. Keyboard Settings accepts `Shift+Tab` (`src/components/settings/KeyboardSettings.tsx:54–79`), and `keyboardEventToShortcut` / `matchesShortcut` preserve that binding (`src/stores/keyboardShortcuts.ts:243–285`). Configure Refresh as `Shift+Tab`, focus Cancel in the progress modal, and press Shift+Tab: the trap moves focus and prevents the default, but the real connection shortcut handler still invokes background Refresh because it does not reject `defaultPrevented` events. The same leak applies while a retained summary is open. Stop Tab propagation as well as implementing its focus/default behavior, and add real-hook regression coverage for Tab chords (including a wrap case). The updated modal test explicitly excludes Tab from its background-listener assertion, so the suite misses this remaining part of R2-1.
+
+### Whole-phase checks and adjacent behavior
+
+- Rechecked modal visibility at backup/restore execution boundaries, global running flags, retained-summary transitions and stale-ID dismissal, progress/count rendering, Cancel/refused/COMMIT/publication states, Stop/Continue and cleanup retry controls. Rechecked the body portal, inert root, focus entry/restoration, scrollable panels and current summary Escape callback. No additional concrete P0/P1/P2 established in these paths.
+- The fix calls `stopPropagation`, not `preventDefault`, for non-Escape keys. Native button Enter/Space activation remains a default action; input editing defaults are not inherently cancelled, but target keydown handlers would be suppressed. This modal currently contains buttons and text, no editable input or target keydown-dependent widget. Background inputs inside `#root` are intentionally inert. Do not treat the synthetic Enter keydown assertion as proof of real browser button activation: jsdom does not simulate that default.
+- A simultaneously open unsaved-changes `WarningRefreshDialog` stays under the inert app root. Its Escape listener is on document (`src/components/common/Dialog.tsx:79`), so non-Tab capture isolation prevents a running-modal Escape from closing it, and a summary Escape dismisses only the summary. After progress/summary closes, inertness and the capture listener are removed and the underlying dialog can be used again. This is source/control-flow review, not a mounted dual-dialog browser test.
+- File/confirmation/message dialogs use native Tauri plugin calls (browser fallbacks use alert/confirm), and Touch ID is native. Their OS controls do not live on the webview DOM propagation path; source review gives no basis to claim this capture handler disables their input. Initial prompts precede progress visibility; mid-run native prompts may coexist. Native keyboard/Touch ID operation was not exercised.
+- Rechecked window-lifetime quit guard, request/fallback/direct tab-close paths, production bridge intent forwarding, discard continuations, close scope borrowing and owned-lease release through awaited disconnect/persistence. No new premature-release path established. Existing coverage still lacks direct `useConnectionActions.closeTab` duplicate/delayed-disconnect tests, full layout navigation + native close, concurrent actual quit requests, and held initial Touch ID with real hook/modal integration. Outcome hook suites still substitute a summary subscriber; these limitations remain separate from passing unit evidence.
+
+### Verification run
+
+- `npx vitest run --exclude '**/.claude/**'`: **284 files passed, 1 skipped; 2,488 tests passed, 1 skipped; exit 0**.
+- `npx tsc --noEmit -p .`: **passed**, exit 0.
+- `npm run build`: **passed**, exit 0; node:zlib browser externalization, ineffective dynamic-import and large-chunk warnings remain.
+- `git diff --check e1f3494..HEAD`: **passed**.
+- Inline Node/jsdom reproduction using the source-extracted production modal capture handler, connection shortcut handler and shortcut normalization/matching functions: `Shift+Tab` matches the configured Refresh binding; dispatch from the modal button invokes Refresh **once**, despite `defaultPrevented: true`. This is a source-derived handler probe, not a mounted Preact integration test. An initial probe omitted other shortcut values and errored; rerun with populated fallback bindings produced the stated result.
+- No database or container touched. No Rust tests, native desktop launch, live SQL, native IPC cancellation, real file publication, real browser default-action/layout check or live fidelity tests run. Native and browser behavior described above is explicitly source-derived where not covered by the frontend suite.
+
+Only `.agent/REVIEW.md` edited. Pre-existing untracked `.claude/launch.json` preserved. No application/test edits, commit, push or merge.
