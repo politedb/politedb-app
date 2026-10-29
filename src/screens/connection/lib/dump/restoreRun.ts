@@ -220,18 +220,25 @@ export async function runDumpImport(
   onRefresh: (() => void) | undefined
 ): Promise<DumpOutcome> {
   const queries = holdJobQueries(job);
-  let run: { ok: true; outcome: DumpOutcome } | { ok: false; error: unknown };
+  // A run that throws (a native prompt failing, say) still ends as an
+  // outcome, so the catalog note below can never be lost on that path.
+  let outcome: DumpOutcome;
   try {
-    run = { ok: true, outcome: await runHeld(rt, path, opts, job, onRefresh) };
+    outcome = await runHeld(rt, path, opts, job, onRefresh);
   } catch (error) {
-    run = { ok: false, error };
+    outcome = {
+      kind: "failed",
+      message:
+        error instanceof Error
+          ? error.message
+          : String(error ?? "SQL dump import failed."),
+    };
   }
   // Catalog queries still running are stopped and joined; whether every
   // one of the run was released goes into its outcome.
   const released = await queries.stopAll();
   queries.release();
-  if (!run.ok) throw run.error;
-  return released ? run.outcome : withCatalogWarning(run.outcome);
+  return released ? outcome : withCatalogWarning(outcome);
 }
 
 export const CATALOG_UNCONFIRMED_NOTE =

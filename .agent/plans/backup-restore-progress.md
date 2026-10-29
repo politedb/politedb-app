@@ -60,6 +60,9 @@ APPROVED
 - **Phase 2 review round 2 fixes committed `cc73633`. Review round 3 (Codex: CHANGES REQUIRED, 1 P2) fix, 2026-10-29, not committed:**
   - R3-1: restore/import reads its job's catalog release evidence after the run (`holdJobQueries.stopAll()`), and when a catalog query could not be confirmed stopped adds `CATALOG_UNCONFIRMED_NOTE` (`withCatalogWarning`): a warning on success (kept to read), appended to failure/stop/cancel/commit messages without changing their commit or rollback evidence; a dismissed prompt after such a check becomes a cancelled "Nothing was run." outcome instead of a quiet one. Tests: swallowed preflight timeout with refused cancel then COMMIT, failure with the same evidence, dismissed prompt.
   - Verification: `npx vitest run` 2463 passed; `npm run build` ok.
+- **Phase 2 review round 3 fix committed `a7c543e`. Review round 4 (Codex: CHANGES REQUIRED, 1 P2) fix, 2026-10-29, not committed:**
+  - R4-1: `runDumpImport` turns an error thrown by the run (a native prompt failing, say) into a failed outcome with its message before the catalog note is applied, so the note can no longer be lost on that path. Test: preflight timeout with refused cancel, then a failing confirmation → failed with both the dialog error and the catalog note.
+  - Verification: `npx vitest run` 2464 passed; `npm run build` ok.
 
 ## Task
 

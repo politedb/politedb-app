@@ -1016,3 +1016,27 @@ describe("Codex Phase 2 review round 3 case", () => {
     expect(m.begin).not.toHaveBeenCalled();
   });
 });
+
+describe("Codex Phase 2 review round 4 case", () => {
+  it("keeps the catalog warning when a prompt after such a check fails", async () => {
+    m.unpack.mockResolvedValue({
+      sql: 'INSERT INTO "public"."a" ("id") VALUES (1);',
+      engine: null,
+    });
+    m.runSqlQuery.mockImplementation(async (_c: string, sql: string) => {
+      if (sql.includes("to_regclass")) throw new Error("SQL_QUERY_TIMEOUT");
+      return { rows: [] };
+    });
+    m.catalogCancelRejected = true;
+    m.confirm.mockRejectedValue(new Error("dialog IPC failed"));
+    const j = job("restore", "postgres");
+    const outcome = await restore("postgres", j);
+    expect(outcome.kind).toBe("failed");
+    const message = (outcome as { message: string }).message;
+    expect(message).toContain("dialog IPC failed");
+    expect(message).toContain(
+      "catalog query of this run could not be confirmed stopped"
+    );
+    expect(m.begin).not.toHaveBeenCalled();
+  });
+});
