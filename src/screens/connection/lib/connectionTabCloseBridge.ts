@@ -1,5 +1,10 @@
 export type ConnectionTabCloseBridge = {
-  closeTab: (tabId: string, skipCheck?: boolean) => Promise<void>;
+  /** `intent`: the outer close's admission (see withCloseAdmission). */
+  closeTab: (
+    tabId: string,
+    skipCheck?: boolean,
+    intent?: symbol
+  ) => Promise<void>;
   discardChanges: () => Promise<void>;
   discardAndQuitApp?: () => Promise<void>;
 };

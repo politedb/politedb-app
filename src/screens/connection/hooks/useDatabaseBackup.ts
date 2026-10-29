@@ -1,10 +1,10 @@
-import { useCallback, useState } from "preact/hooks";
+import { useCallback } from "preact/hooks";
 import { openDialog, saveDialog, showMessage } from "src/lib/system-dialog";
 import { showToast } from "src/stores/toast";
 import { useScreenStore } from "src/stores/screen";
 import { dumpRunGate, tabSafetyModeNow } from "src/lib/dump/dumpRestoreSafety";
 import {
-  dismissDumpJobSummary,
+  useDumpJobStore,
   type DumpJobKind,
   type DumpOutcome,
 } from "src/stores/dumpJob";
@@ -15,25 +15,19 @@ import {
   runDatabaseBackup,
 } from "../lib/dump/backupRun";
 import { runDumpImport, type DumpImportOptions } from "../lib/dump/restoreRun";
-import {
-  startDumpJob,
-  type DumpJobHandle,
-} from "../lib/dump/dumpJobController";
-import { describeDumpOutcome, dumpJobTitle } from "../lib/dump/dumpOutcomeText";
+import { startDumpJob } from "../lib/dump/dumpJobController";
+import { dumpJobTitle } from "../lib/dump/dumpOutcomeText";
 
 // The SQL and catalog helpers moved to lib/dump/backupSql.ts; re-exported
 // for existing importers.
 export * from "../lib/dump/backupSql";
 
 /**
- * Shows a finished job's outcome. The job's retained result (D15) is shown
- * here as a message and closed with it, until the progress modal shows it.
+ * Shows a finished job's outcome when nothing needs reading: a toast. An
+ * outcome to read stays as the job's retained result, which the progress
+ * modal shows until Close (D15).
  */
-function present(
-  job: DumpJobHandle,
-  outcome: DumpOutcome,
-  successToast: string
-) {
+function present(outcome: DumpOutcome, successToast: string) {
   if (outcome.kind === "succeeded" && !outcome.warning) {
     if (outcome.skipped > 0) {
       showToast(
@@ -47,21 +41,12 @@ function present(
   }
   if (
     outcome.kind === "cancelled" &&
-    job.kind === "backup" &&
-    !outcome.failure &&
-    outcome.rollback !== "cleanup-unconfirmed"
+    outcome.rollback === "n/a" &&
+    !outcome.failure
   ) {
+    // A cancelled backup closes quietly (D12).
     showToast(BACKUP_CANCELLED_MESSAGE, { tone: "info" });
-    return;
   }
-  const text = describeDumpOutcome(outcome);
-  if (text) {
-    void showMessage(text.message, {
-      title: dumpJobTitle(job.kind, true),
-      kind: text.tone,
-    });
-  }
-  dismissDumpJobSummary(job.jobId);
 }
 
 function tabTarget(tabId: string, database?: string): string {
@@ -75,8 +60,10 @@ function tabTarget(tabId: string, database?: string): string {
 
 export function useDatabaseBackup() {
   const rt = useConnectionRuntimeCtx();
-  const [dbBackupRunning, setDbBackupRunning] = useState(false);
-  const [dbRestoreRunning, setDbRestoreRunning] = useState(false);
+  // The one job of the app (D11), wherever it was started from.
+  const activeKind = useDumpJobStore((st) => st.active?.kind ?? null);
+  const dbBackupRunning = activeKind === "backup";
+  const dbRestoreRunning = activeKind === "restore" || activeKind === "import";
 
   /** Registers a job before its file dialog (D11, D14). */
   const start = (kind: DumpJobKind, tabId: string, database?: string) => {
@@ -108,7 +95,6 @@ export function useDatabaseBackup() {
       }
       const job = start("backup", rt.profileId, databaseName);
       if (!job) return;
-      setDbBackupRunning(true);
       let outcome: DumpOutcome = { kind: "abandoned" };
       try {
         const stamp = new Date()
@@ -131,9 +117,8 @@ export function useDatabaseBackup() {
         };
       } finally {
         await job.finish(outcome);
-        setDbBackupRunning(false);
       }
-      present(job, outcome, "Database backup completed.");
+      present(outcome, "Database backup completed.");
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [rt.runtimeConnectionId, rt.metadata, rt.metaKey, rt.engine, rt.profileId]
@@ -157,7 +142,6 @@ export function useDatabaseBackup() {
     }
     const job = start(kind, tabId, opts.database);
     if (!job) return;
-    setDbRestoreRunning(true);
     let outcome: DumpOutcome = { kind: "abandoned" };
     try {
       const path = await openDialog({
@@ -185,9 +169,8 @@ export function useDatabaseBackup() {
       };
     } finally {
       await job.finish(outcome);
-      setDbRestoreRunning(false);
     }
-    present(job, outcome, opts.successToast);
+    present(outcome, opts.successToast);
   };
 
   const onRestoreDatabase = useCallback(

@@ -1,7 +1,11 @@
 import { act, renderHook } from "@testing-library/preact";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useScreenStore } from "src/stores/screen";
-import { DUMP_JOB_RUNNING_MESSAGE, useDumpJobStore } from "src/stores/dumpJob";
+import {
+  dismissDumpJobSummary,
+  DUMP_JOB_RUNNING_MESSAGE,
+  useDumpJobStore,
+} from "src/stores/dumpJob";
 
 const m = vi.hoisted(() => ({
   saveDialog: vi.fn(),
@@ -133,6 +137,23 @@ function streamDelivers(drive: (h: Handlers) => void) {
     return () => {};
   });
 }
+
+/**
+ * Stands in for the progress modal: a retained result (D15) is "shown"
+ * through the showMessage mock with the text the modal shows, then closed.
+ */
+let unsubscribeModal = () => {};
+beforeEach(async () => {
+  const { describeDumpOutcome } = await import("../lib/dump/dumpOutcomeText");
+  unsubscribeModal();
+  unsubscribeModal = useDumpJobStore.subscribe((state) => {
+    const summary = state.summary;
+    if (!summary) return;
+    const text = describeDumpOutcome(summary.outcome);
+    m.showMessage(text?.message ?? "", { title: "result", kind: text?.tone });
+    dismissDumpJobSummary(summary.jobId);
+  });
+});
 
 beforeEach(() => {
   vi.clearAllMocks();

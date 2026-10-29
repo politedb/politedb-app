@@ -1,3 +1,7 @@
+import {
+  tabCloseScope,
+  withCloseAdmission,
+} from "../lib/dump/dumpJobCloseGuard";
 import { useCallback, useRef } from "preact/hooks";
 
 import type {
@@ -895,7 +899,8 @@ export function useConnectionActions(
     saveObjectDrafts,
   ]);
 
-  const closeTab = useCallback(
+  /** Closes a tab whose close was admitted (closeTab, below). */
+  const closeTabAdmitted = useCallback(
     async (tabId: string, skipCheck = false) => {
       if (closingRef.current) return;
 
@@ -963,6 +968,23 @@ export function useConnectionActions(
     ]
   );
 
+  /**
+   * Closes a tab, refused while a backup or restore of it runs (D8): before
+   * any prompt or change, and holding the close's lease until it is done.
+   * `intent`: an outer close that already holds it (the bridge).
+   */
+  const closeTab = useCallback(
+    async (tabId: string, skipCheck = false, intent?: symbol) => {
+      const runtime = profileTabs.find(
+        (t) => t.id === tabId
+      )?.runtimeConnectionId;
+      await withCloseAdmission(tabCloseScope(tabId, runtime), intent, () =>
+        closeTabAdmitted(tabId, skipCheck)
+      );
+    },
+    [profileTabs, closeTabAdmitted]
+  );
+
   const closeNewWindows = useCallback(
     async (tabId: string) => {
       const draftWindowIds = new Set(
@@ -987,8 +1009,21 @@ export function useConnectionActions(
       useUnsavedChangesDialogStore.getState().pendingCloseTabId;
 
     if (pendingCloseTabId) {
-      clearChanges(pendingCloseTabId);
-      await closeTab(pendingCloseTabId, true);
+      // A job may have started since the dialog opened: checked again
+      // before the changes are discarded (refused: they are kept).
+      const runtime = profileTabs.find(
+        (t) => t.id === pendingCloseTabId
+      )?.runtimeConnectionId;
+      const intent = Symbol("discard and close tab");
+      const closed = await withCloseAdmission(
+        tabCloseScope(pendingCloseTabId, runtime),
+        intent,
+        async () => {
+          clearChanges(pendingCloseTabId);
+          await closeTab(pendingCloseTabId, true, intent);
+        }
+      );
+      if (!closed) return;
     } else {
       await closeNewWindows(activeProfileScreen);
       await discardObjectDrafts(activeProfileScreen);
@@ -1026,6 +1061,7 @@ export function useConnectionActions(
     closeTab,
     closeNewWindows,
     discardObjectDrafts,
+    profileTabs,
   ]);
 
   const renameRedisKey = useCallback(

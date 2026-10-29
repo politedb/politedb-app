@@ -63,6 +63,13 @@ APPROVED
 - **Phase 2 review round 3 fix committed `a7c543e`. Review round 4 (Codex: CHANGES REQUIRED, 1 P2) fix, 2026-10-29, not committed:**
   - R4-1: `runDumpImport` turns an error thrown by the run (a native prompt failing, say) into a failed outcome with its message before the catalog note is applied, so the note can no longer be lost on that path. Test: preflight timeout with refused cancel, then a failing confirmation → failed with both the dialog error and the catalog note.
   - Verification: `npx vitest run` 2464 passed; `npm run build` ok.
+- **Phase 2 VERIFIED WITH LIMITATIONS** (Codex round 5, 2026-10-29; round 4 fix `83548ca`).
+- **Phase 3 (UI and close guard) — implemented 2026-10-29, not committed:**
+  - `src/components/modal/DumpProgressDialog.tsx`, mounted once in `src/layout/index.tsx`: hidden while the job's native prompts come first (D14), then shown until the job ends (also through a Touch ID asked mid-run); title, phase/cancelling text ("waiting for compression"), progress bar (determinate or indeterminate), counts/rows/detail; Cancel through the controller, disabled with the reason in COMMIT/publication/refused; the D10 Stop/Continue question; Try again / Stop trying after a failed cancel; Esc, × and outside click ignored while running; the retained result (D15) with Close.
+  - Hook: outcomes to read are no longer shown with `showMessage` and dismissed: the modal shows them until Close; plain success and a quiet cancelled backup stay toasts. Running flags come from the job store (one job in the app).
+  - Close guard `lib/dump/dumpJobCloseGuard.ts` (`withCloseAdmission`, `tabCloseScope`): `requestCloseConnectionTab` (lease passed to the bridge as `intent`), its fallback, `useConnectionActions.closeTab` (wrapper over the old close, borrows the caller's lease), the discard-and-close continuations (`discardChanges`, `discardPendingTabCloseFromDialog`), app close request and discard-and-quit (`useConnectionQuitGuard`). Refused before any prompt or change; the lease is held until the close (save, disconnect, quit) is done.
+  - Verification: `npx vitest run` 2482 passed (new: modal 10, close guard 8; hook tests read results through a stand-in modal); `npm run build` ok; checked in the Vite preview by driving the store: running modal, Stop/Continue question, retained result and Close, no console errors.
+  - Not done: the manual `npm run tauri:dev` run against disposable databases (native IPC, real cancel, file publication), and a direct test of `useConnectionActions.closeTab` (its admission is the shared `withCloseAdmission`, tested).
 
 ## Task
 

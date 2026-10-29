@@ -7,6 +7,7 @@ import {
   discardAllConnectionChanges,
   hasAnyUnsavedConnectionChanges,
 } from "../lib/unsavedChanges";
+import { withCloseAdmission } from "../lib/dump/dumpJobCloseGuard";
 
 export function useConnectionQuitGuard() {
   const forceQuitRef = useRef(false);
@@ -31,12 +32,16 @@ export function useConnectionQuitGuard() {
 
         event.preventDefault();
 
-        if (!hasAnyUnsavedConnectionChanges()) {
-          void quitApp();
-          return;
-        }
-
-        useUnsavedChangesDialogStore.getState().openForAppQuit();
+        // Refused while a backup or restore runs (D8), before the unsaved
+        // changes prompt; the quit holds its lease until it is done.
+        void withCloseAdmission({ kind: "app" }, undefined, async () => {
+          if (!hasAnyUnsavedConnectionChanges()) {
+            await quitApp();
+            return;
+          }
+          // The prompt's own answer is admitted again (discardAndQuitApp).
+          useUnsavedChangesDialogStore.getState().openForAppQuit();
+        });
       })
       .then((off) => {
         if (disposed) {
@@ -53,11 +58,15 @@ export function useConnectionQuitGuard() {
   }, [quitApp]);
 
   const discardAndQuitApp = useCallback(async () => {
-    discardAllConnectionChanges();
-    await usePersistentStore.getState().saveNow();
+    // A job may have started since the prompt opened: checked again
+    // before anything is discarded (refused: the changes are kept).
+    await withCloseAdmission({ kind: "app" }, undefined, async () => {
+      discardAllConnectionChanges();
+      await usePersistentStore.getState().saveNow();
 
-    useUnsavedChangesDialogStore.getState().close();
-    await quitApp();
+      useUnsavedChangesDialogStore.getState().close();
+      await quitApp();
+    });
   }, [quitApp]);
 
   return { discardAndQuitApp };

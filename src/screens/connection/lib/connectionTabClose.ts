@@ -7,6 +7,12 @@ import { useObjectDraftStore } from "src/stores/objectDrafts";
 import { useUnsavedChangesDialogStore } from "src/stores/unsavedChangesDialog";
 import { getConnectionTabCloseBridge } from "./connectionTabCloseBridge";
 import { clearConnectionTabChanges, connectionTabHasChanges } from "./tabDirty";
+import { tabCloseScope, withCloseAdmission } from "./dump/dumpJobCloseGuard";
+
+function tabRuntime(tabId: string): string | undefined {
+  return useScreenStore.getState().profileTabs.find((t) => t.id === tabId)
+    ?.runtimeConnectionId;
+}
 
 function removeTableDataForTab(
   tabId: string,
@@ -79,18 +85,27 @@ export async function forceCloseConnectionTab(tabId: string) {
 }
 
 export async function requestCloseConnectionTab(tabId: string) {
-  const registered = getConnectionTabCloseBridge()?.closeTab;
-  if (registered) {
-    await registered(tabId);
-    return;
-  }
+  // Refused while a backup or restore of this tab runs (D8), before any
+  // prompt; the lease is passed on so the bridged close borrows it.
+  const intent = Symbol("close tab");
+  await withCloseAdmission(
+    tabCloseScope(tabId, tabRuntime(tabId)),
+    intent,
+    async () => {
+      const registered = getConnectionTabCloseBridge()?.closeTab;
+      if (registered) {
+        await registered(tabId, false, intent);
+        return;
+      }
 
-  if (connectionTabHasChanges(tabId)) {
-    useUnsavedChangesDialogStore.getState().openForTabClose(tabId);
-    return;
-  }
+      if (connectionTabHasChanges(tabId)) {
+        useUnsavedChangesDialogStore.getState().openForTabClose(tabId);
+        return;
+      }
 
-  await forceCloseConnectionTab(tabId);
+      await forceCloseConnectionTab(tabId);
+    }
+  );
 }
 
 export async function discardPendingTabCloseFromDialog() {
@@ -103,7 +118,15 @@ export async function discardPendingTabCloseFromDialog() {
   const tabId = useUnsavedChangesDialogStore.getState().pendingCloseTabId;
   if (!tabId) return;
 
-  clearConnectionTabChanges(tabId);
-  useUnsavedChangesDialogStore.getState().close();
-  await forceCloseConnectionTab(tabId);
+  // A job may have started since the dialog opened: checked again before
+  // the changes are discarded (refused: they are kept).
+  await withCloseAdmission(
+    tabCloseScope(tabId, tabRuntime(tabId)),
+    undefined,
+    async () => {
+      clearConnectionTabChanges(tabId);
+      useUnsavedChangesDialogStore.getState().close();
+      await forceCloseConnectionTab(tabId);
+    }
+  );
 }

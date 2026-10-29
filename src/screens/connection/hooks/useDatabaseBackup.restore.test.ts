@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/preact";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useScreenStore } from "src/stores/screen";
-import { useDumpJobStore } from "src/stores/dumpJob";
+import { dismissDumpJobSummary, useDumpJobStore } from "src/stores/dumpJob";
 
 const m = vi.hoisted(() => ({
   openDialog: vi.fn(),
@@ -122,6 +122,23 @@ async function restore(onRefresh?: () => void) {
   const { result } = renderHook(() => useDatabaseBackup());
   await act(() => result.current.onRestoreDatabase(onRefresh, "shop_db"));
 }
+
+/**
+ * Stands in for the progress modal: a retained result (D15) is "shown"
+ * through the showMessage mock with the text the modal shows, then closed.
+ */
+let unsubscribeModal = () => {};
+beforeEach(async () => {
+  const { describeDumpOutcome } = await import("../lib/dump/dumpOutcomeText");
+  unsubscribeModal();
+  unsubscribeModal = useDumpJobStore.subscribe((state) => {
+    const summary = state.summary;
+    if (!summary) return;
+    const text = describeDumpOutcome(summary.outcome);
+    m.showMessage(text?.message ?? "", { title: "result", kind: text?.tone });
+    dismissDumpJobSummary(summary.jobId);
+  });
+});
 
 beforeEach(() => {
   vi.clearAllMocks();
