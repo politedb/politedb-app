@@ -965,3 +965,37 @@ The three added regressions pass (committed restore, returned failure and dismis
 - In-memory actual-runner reproduction above: **confirmed R4-1**.
 
 Only `.agent/REVIEW.md` edited. Pre-existing untracked `.claude/launch.json` preserved. No application/test edits, commit, push or merge.
+
+
+## backup-restore-progress — Phase 2 review round 5
+
+Status: **VERIFIED WITH LIMITATIONS**
+
+Reviewed by Codex, 2026-10-29. Read `AGENTS.md`, `.agent/WORKFLOW.md` and referenced RTK instructions first. Reviewed `git show 83548ca` and the whole Phase 2 range `git diff e214f18..HEAD` (HEAD: `83548ca2330a4e9a54453f48e5fdb32397f54582`).
+
+### R4-1 disposition
+
+**Resolved.** `src/screens/connection/lib/dump/restoreRun.ts:225–241` now normalizes a thrown run error to a failed outcome before inspecting cumulative catalog-release evidence. A rejected confirmation preserves its original error message; when `queries.stopAll()` reports unconfirmed release, `withCatalogWarning` appends the catalog note to that same outcome. There is no longer a rethrow that bypasses the warning. The hook consumes the returned outcome, finishes the job with it and presents its message; the controller retains failed outcomes. The new regression (`src/screens/connection/lib/dump/dumpRun.test.ts:1021–1041`) covers swallowed preflight timeout with rejected catalog cancellation followed by rejected confirmation, asserts both messages, and confirms no transaction begins. It passes in the full suite.
+
+The catch does not change returned transaction outcomes: rollback evidence, statement counts, commit-unknown and committed-refresh-failed still pass through unchanged before any catalog note is appended. Confirmed catalog cleanup returns the original outcome without adding a warning.
+
+### New findings
+
+No new P0/P1/P2 findings established in the fix or remaining Phase 2 diff.
+
+### Whole-phase checks and limitations
+
+- Rechecked SQL/helper extraction against the original hook, helper re-exports and hook callers, job admission/identity, store and retained-summary transitions, close leases, controller cancellation/retry/stop decisions, cleanup evidence and progress scheduling.
+- Rechecked dump port disposal, late operation-ID adoption, retry stop checks, catalog-query ownership and cumulative cancel rejection, bus invalidation/ACK behavior and unaffected query callers. Rechecked transactional and non-transactional restore paths, independent failures after Cancel, final-statement stop decisions, COMMIT classification and refresh outcomes.
+- Rechecked backup snapshot/stream cleanup, compression checkpoints, temp-file discard/retry, publication/tombstone evidence and outcome presentation. No additional concrete destination-integrity, privacy/analytics or unrelated-caller regression established.
+- Phase 2's temporary toast/message presentation and summary dismissal remain documented scaffolding. Actual progress modal, D15 Close retention and close/quit integration require Phase 3 review.
+- No database or container touched. No live SQL, Rust tests, native desktop/UI run or real backup publication attempted. Mocked frontend tests verify control flow, not server termination, native IPC or filesystem behavior. Implementer's live-test notes remain handoff evidence, not reviewer-run verification.
+
+### Verification run
+
+- `npx vitest run --exclude '**/.claude/**'`: **281 files passed, 1 skipped; 2,464 tests passed, 1 skipped**.
+- `npx tsc --noEmit -p .`: **passed**.
+- `npm run build`: **passed**; warnings for `node:zlib` browser externalization, ineffective dynamic imports, large chunks and plugin timings remain.
+- `git diff --check e214f18..HEAD`: **passed**.
+
+Only `.agent/REVIEW.md` edited. Pre-existing untracked `.claude/launch.json` preserved. No application/test edits, commit, push or merge.
