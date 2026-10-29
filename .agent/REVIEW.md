@@ -1035,3 +1035,37 @@ Reviewed by Codex, 2026-10-29. Read `AGENTS.md`, `.agent/WORKFLOW.md` and refere
 - Findings above are source/control-flow and layout review; no reviewer-run native desktop or browser layout reproduction. No database or container touched; no live SQL, native IPC cancellation, real file publication, Rust tests or live fidelity tests run. These remain verification limitations, not waived requirements.
 
 Only `.agent/REVIEW.md` edited. Pre-existing untracked `.claude/launch.json` preserved. No application/test edits, commit, push or merge.
+
+## backup-restore-progress — Phase 3 review round 2
+
+Status: **CHANGES REQUIRED**
+
+Reviewed by Codex, 2026-10-29. Read `AGENTS.md`, `.agent/WORKFLOW.md` and referenced RTK instructions. Reviewed `git show 332c933` and the whole Phase 3 range `git diff e1f3494..HEAD`; HEAD: `332c933c8caa3e7501f56831478bc8b7beae7f87`. No P0/P1 established; one remaining P2 below.
+
+### Round 1 disposition
+
+1. **P1 keyboard modality / quit-guard lifetime — substantially resolved; shortcut isolation still incomplete (R2-1).** The body portal places the progress dialog outside inert `#root`; initial focus, Tab wrapping, opener restoration and accessible title/description are implemented. The modal regression checks these transitions and Cmd/Ctrl shortcuts. `MainLayout` now owns `useConnectionQuitGuard`, so leaving `ConnectionScreen` no longer unregisters the native close handler. Module-level `discardAndQuitApp` admits the app close before discard/persistence, and the window-level unsaved-changes host calls it directly without requiring the connection bridge. This resolves the original guard-removal path. Shift-only shortcut leakage remains below.
+2. **P2 initial native prompts — resolved in source.** `visible` starts false and is set explicitly by `showProgress()`: backup after the file is chosen; restore/import after confirmation and initial `ensureAllowed()`/Touch ID, with a current-job check. Reading/checking no longer open the modal; mid-run authentication leaves it visible. Runner coverage now holds confirmation and asserts the visibility boundary; it does not actually hold initial Touch ID despite its test title. Full hook + modal coverage across held file read/catalog/authentication remains a verification limitation.
+3. **P2 bridge intent — resolved.** `ConnectionScreen` constructs its production adapter with `connectionTabCloseBridgeFor`; that adapter forwards `(tabId, skipCheck, intent)` to the latest actions. Its new test exercises the real adapter via `requestCloseConnectionTab`. The close action passes that intent into admission, borrowing the outer lease. Direct `useConnectionActions.closeTab` regression coverage for duplicate early return and delayed disconnect remains absent.
+4. **P2 clipped recovery controls — resolved in source.** Both running and summary panels retain Dialog's `overflow-y-auto`; the `overflow-hidden` override is removed. Overflow can scroll to retry, Stop/Continue and Close controls. Implementer's 700×360 browser check is recorded in the plan; no reviewer-run browser layout verification performed.
+
+### New / remaining findings
+
+1. **P2 — Shift-only app shortcuts bypass the blocking modal.** `src/components/modal/DumpProgressDialog.tsx:330–335`: non-Tab keys are stopped only for Meta/Ctrl/Alt. Keyboard Settings accepts Shift-only chords (`src/components/settings/KeyboardSettings.tsx:54–79`; `src/stores/keyboardShortcuts.ts:261–277`), and `useConnectionShortcuts` handles them globally on window without a modal check. Configure Refresh as `Shift+R`, start a backup/restore, focus its Cancel button and press Shift+R: the event bubbles to `useConnectionShortcuts` and refreshes the background connection. Likewise Shift-only Save/Open/Close bindings reach their background actions; inertness does not disable global listeners. Block propagation of workspace keyboard input independently of those three modifiers, preserving modal Tab/Enter/Space and summary Escape behavior; add regression coverage with the real shortcut hook and Shift-only bindings. The new keyboard test's listener repeats the same Meta/Ctrl/Alt assumption and misses this case. This is a remaining part of round 1 finding 1, not a new quit-guard lifetime failure.
+
+### Whole-phase checks and limitations
+
+- Rechecked global running flags and all hook callers, retained-summary presentation/Close, store visibility transitions, controller ownership, cancellation/retry/stop controls, progress/counts and non-cancellable COMMIT/publication states. No additional concrete controller or outcome-retention regression established.
+- Rechecked request/fallback/direct action close paths, discard continuations, scope/intent borrowing, independent leases and `finally` release through delayed disconnect/persistence. Quit admission now survives screen navigation; no additional premature lease release established. Native listener registration failure is swallowed, and actual native registration/navigation behavior remains unverified.
+- Existing close tests exercise helper/fallback/adapter paths and mocked quit persistence, not the full MainLayout navigation + native-close integration, two concurrent actual quit requests, or direct action-close implementation. Hook outcome suites still use a stand-in summary subscriber. These are coverage limits, not passing integration evidence.
+- No database or container touched. No Rust tests, live SQL, native desktop launch, IPC cancellation, real file publication or live fidelity tests run. No reviewer-run browser scrolling/large-text or native Touch ID check. Implementer's manual evidence remains separately attributed above.
+
+### Verification run
+
+- `npx vitest run --exclude '**/.claude/**'`: **283 files passed, 1 skipped; 2,486 tests passed, 1 skipped; exit 0**. Prior teardown error did not recur.
+- `npx tsc --noEmit -p .`: **passed**, exit 0.
+- `npm run build`: **passed**, exit 0; browser externalization, ineffective dynamic-import and large-chunk warnings remain.
+- `git diff --check e1f3494..HEAD`: **passed**.
+- Inline Node/jsdom event-propagation probe reproducing the modal's capture predicate: Shift+S dispatched from a modal button reaches the background window shortcut listener (**1 call**). This verifies the propagation mechanism; it is not a mounted production-hook integration test.
+
+Only `.agent/REVIEW.md` edited. Pre-existing untracked `.claude/launch.json` preserved. No application/test edits, commit, push or merge.
