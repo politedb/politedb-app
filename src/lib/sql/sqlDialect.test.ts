@@ -5,6 +5,7 @@ import {
   quoteIdentifier,
   quoteTableName,
   sqlForDisplay,
+  sqlStringLiteral,
   truncateTableSql,
 } from "./sqlDialect";
 import { formatSqlChunk } from "../export-pipeline/exportFormats";
@@ -147,5 +148,15 @@ describe("sqlDialect", () => {
     expect(() =>
       cloneTableSql("dbo", "Users", "UsersCopy", "sqlserver")
     ).toThrow("Clone table is not supported");
+  });
+
+  it("writes E'…' strings for backslashes on PostgreSQL only", () => {
+    const text = "a\\b'c";
+    expect(sqlStringLiteral(text, "postgres")).toBe("E'a\\\\b''c'");
+    expect(sqlStringLiteral(text, undefined)).toBe("'a\\b''c'");
+    expect(sqlStringLiteral(text, "sqlite")).toBe("'a\\b''c'");
+    expect(sqlStringLiteral(text, "sqlserver")).toBe("N'a\\b''c'");
+    expect(sqlStringLiteral(text, "mysql")).toMatch(/^CONVERT\(UNHEX\('/);
+    expect(sqlStringLiteral("plain", "postgres")).toBe("'plain'");
   });
 });

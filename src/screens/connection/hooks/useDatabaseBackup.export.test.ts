@@ -45,7 +45,10 @@ beforeEach(() => {
     });
 });
 
-function exportWith(drive: (h: Handlers) => void) {
+function exportWith(
+  drive: (h: Handlers) => void,
+  engine: "postgres" | "mysql" = "postgres"
+) {
   m.subscribe.mockImplementation(async (_opId: string, h: Handlers) => {
     queueMicrotask(() => drive(h));
     return m.unsubscribe;
@@ -54,7 +57,7 @@ function exportWith(drive: (h: Handlers) => void) {
   const done = exportTableToSqlParts({
     append: (content) => parts.push(content),
     connectionId: "c1",
-    engine: "postgres",
+    engine,
     schema: "s",
     tableName: "t",
     columns: ["ms"],
@@ -92,6 +95,23 @@ describe("exportTableToSqlParts", () => {
     expect(m.cancel).toHaveBeenCalledTimes(1);
     expect(m.cancel).toHaveBeenCalledWith("op1");
     expect(parts.join("")).not.toContain("INSERT");
+    await vi.waitFor(() => expect(m.unsubscribe).toHaveBeenCalled());
+  });
+
+  it("fails a MySQL backup, instead of waiting, when a chunk cannot be written", async () => {
+    const { done, parts } = exportWith((h) => {
+      h.onChunk({ rows: "not rows" as never, columns: [] });
+      h.onDone();
+    }, "mysql");
+    await expect(done).rejects.toBeTruthy();
+    expect(m.cancel).toHaveBeenCalledWith("op1");
+    expect(parts.join("")).not.toContain("INSERT");
+    // No PostgreSQL catalog queries, no snapshot, no fixed text formats.
+    expect(m.runSqlQuery).not.toHaveBeenCalled();
+    expect(m.startSqlQueryStream.mock.calls[0]![2]).toMatchObject({
+      canonicalTextOutput: false,
+      snapshotId: undefined,
+    });
     await vi.waitFor(() => expect(m.unsubscribe).toHaveBeenCalled());
   });
 });

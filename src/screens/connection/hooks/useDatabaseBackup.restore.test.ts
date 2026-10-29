@@ -350,6 +350,28 @@ INSERT INTO "public"."t" ("a","b") VALUES ('x', 'y');`,
     expect(m.sessionBegin).not.toHaveBeenCalled();
   });
 
+  it.each(["mysql", "sqlite"])(
+    "runs a %s restore statement by statement, saying it cannot be undone",
+    async (engine) => {
+      m.rt.engine = engine;
+      m.unpack.mockResolvedValue({ sql: DUMP, engine });
+      await restore();
+      const [body] = m.confirmDialog.mock.calls[0]!;
+      expect(body).toContain(
+        "This runs 3 SQL statements on the database. They do not run in a transaction and cannot be undone."
+      );
+      expect(body).not.toContain("one transaction");
+      expect(m.sessionBegin).not.toHaveBeenCalled();
+      expect(m.savepoints).not.toHaveBeenCalled();
+      expect(m.runSqlQuery.mock.calls.map((call) => call[1])).toEqual(
+        DUMP.split(";\n").map((s) => s.replace(/;$/, ""))
+      );
+      expect(m.showToast).toHaveBeenCalledWith("Database restored.", {
+        tone: "success",
+      });
+    }
+  );
+
   it("warns before adding rows to tables that already have some", async () => {
     m.unpack.mockResolvedValue({
       sql: 'INSERT INTO "public"."t" ("a") VALUES (1);',
