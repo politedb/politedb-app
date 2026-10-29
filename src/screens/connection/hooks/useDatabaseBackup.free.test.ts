@@ -4,6 +4,7 @@ import type { LicenseState } from "src/lib/tauri";
 import { useLicenseStore } from "src/stores/license";
 import { useProUpgradeStore } from "src/stores/proUpgrade";
 import { useScreenStore } from "src/stores/screen";
+import { useDumpJobStore } from "src/stores/dumpJob";
 
 const mocks = vi.hoisted(() => ({
   openDialog: vi.fn(),
@@ -43,6 +44,7 @@ function setPro(pro_access: boolean) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  useDumpJobStore.setState({ active: null, summary: null, closing: [] });
   // The user cancels every file dialog: only whether one opened matters here.
   mocks.openDialog.mockResolvedValue(null);
   mocks.saveDialog.mockResolvedValue(null);
@@ -61,7 +63,8 @@ describe("useDatabaseBackup is free", () => {
       const { result } = renderHook(() => useDatabaseBackup());
 
       await act(() => result.current.onBackupDatabase("db"));
-      expect(mocks.metadataLoad).toHaveBeenCalledTimes(1);
+      // The file is chosen first (the job is registered before it).
+      expect(mocks.saveDialog).toHaveBeenCalledTimes(1);
 
       await act(() => result.current.onRestoreDatabase());
       expect(mocks.openDialog).toHaveBeenCalledTimes(1);

@@ -150,7 +150,7 @@ function raceAgainstAbort<T>(
   });
 }
 
-async function operationExecuteWithBusyRetry(
+export async function operationExecuteWithBusyRetry(
   payload: Parameters<typeof operationExecute>[0],
   signal?: AbortSignal,
   isTimedOut?: () => boolean

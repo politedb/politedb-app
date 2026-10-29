@@ -1,57 +1,211 @@
 import { useCallback, useState } from "preact/hooks";
+import { openDialog, saveDialog, showMessage } from "src/lib/system-dialog";
+import { showToast } from "src/stores/toast";
+import { useScreenStore } from "src/stores/screen";
+import { dumpRunGate, tabSafetyModeNow } from "src/lib/dump/dumpRestoreSafety";
+import {
+  dismissDumpJobSummary,
+  type DumpJobKind,
+  type DumpOutcome,
+} from "src/stores/dumpJob";
 import { useConnectionRuntimeCtx } from "../workspace/ConnectionRuntimeContext";
-import { runDatabaseBackup } from "../lib/dump/backupRun";
-import { runDumpImport } from "../lib/dump/restoreRun";
+import { canBackupDatabase } from "../lib/dump/backupSql";
+import {
+  BACKUP_CANCELLED_MESSAGE,
+  runDatabaseBackup,
+} from "../lib/dump/backupRun";
+import { runDumpImport, type DumpImportOptions } from "../lib/dump/restoreRun";
+import {
+  startDumpJob,
+  type DumpJobHandle,
+} from "../lib/dump/dumpJobController";
+import { describeDumpOutcome, dumpJobTitle } from "../lib/dump/dumpOutcomeText";
 
 // The SQL and catalog helpers moved to lib/dump/backupSql.ts; re-exported
 // for existing importers.
 export * from "../lib/dump/backupSql";
+
+/**
+ * Shows a finished job's outcome. The job's retained result (D15) is shown
+ * here as a message and closed with it, until the progress modal shows it.
+ */
+function present(
+  job: DumpJobHandle,
+  outcome: DumpOutcome,
+  successToast: string
+) {
+  if (outcome.kind === "succeeded") {
+    if (outcome.skipped > 0) {
+      showToast(
+        `${successToast} ${outcome.skipped} statement${outcome.skipped === 1 ? " was" : "s were"} skipped: objects that already existed or foreign keys the data did not allow.`,
+        { tone: "info" }
+      );
+    } else {
+      showToast(successToast, { tone: "success" });
+    }
+    return;
+  }
+  if (outcome.kind === "cancelled" && job.kind === "backup") {
+    showToast(BACKUP_CANCELLED_MESSAGE, { tone: "info" });
+    return;
+  }
+  const text = describeDumpOutcome(job.kind, outcome);
+  if (text) {
+    void showMessage(text.message, {
+      title: dumpJobTitle(job.kind, true),
+      kind: text.tone,
+    });
+  }
+  dismissDumpJobSummary(job.jobId);
+}
+
+function tabTarget(tabId: string, database?: string): string {
+  const tab = useScreenStore
+    .getState()
+    .profileTabs.find((item) => item.id === tabId);
+  return [tab?.label, database ? `(${database})` : ""]
+    .filter(Boolean)
+    .join(" ");
+}
 
 export function useDatabaseBackup() {
   const rt = useConnectionRuntimeCtx();
   const [dbBackupRunning, setDbBackupRunning] = useState(false);
   const [dbRestoreRunning, setDbRestoreRunning] = useState(false);
 
+  /** Registers a job before its file dialog (D11, D14). */
+  const start = (kind: DumpJobKind, tabId: string, database?: string) => {
+    const started = startDumpJob(kind, {
+      tabId,
+      runtimeConnectionId: rt.runtimeConnectionId!,
+      engine: rt.engine,
+      target: tabTarget(tabId, database),
+    });
+    if (!started.ok) {
+      void showMessage(started.message, {
+        title: dumpJobTitle(kind, false),
+        kind: "info",
+      });
+      return null;
+    }
+    return started.job;
+  };
+
   const onBackupDatabase = useCallback(
-    (databaseName?: string) =>
-      runDatabaseBackup(rt, databaseName, setDbBackupRunning),
+    async (databaseName?: string) => {
+      if (!rt.runtimeConnectionId) return;
+      if (!canBackupDatabase(rt.engine)) {
+        void showMessage(
+          "Database backup is available for PostgreSQL, MySQL and MariaDB.",
+          { title: "Backup database", kind: "info" }
+        );
+        return;
+      }
+      const job = start("backup", rt.profileId, databaseName);
+      if (!job) return;
+      setDbBackupRunning(true);
+      let outcome: DumpOutcome = { kind: "abandoned" };
+      try {
+        const stamp = new Date()
+          .toISOString()
+          .slice(0, 19)
+          .replace(/[:T]/g, "");
+        const path = await saveDialog({
+          title: "Backup database",
+          defaultPath: `${databaseName || "database"}-backup-${stamp}.dumb`,
+          filters: [{ name: "PoliteDB dump", extensions: ["dumb"] }],
+        });
+        if (path && job.isCurrent()) {
+          outcome = await runDatabaseBackup(rt, path, job);
+        }
+      } catch (err) {
+        outcome = {
+          kind: "failed",
+          message:
+            err instanceof Error ? err.message : "Backup database failed.",
+        };
+      } finally {
+        await job.finish(outcome);
+        setDbBackupRunning(false);
+      }
+      present(job, outcome, "Database backup completed.");
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rt.runtimeConnectionId, rt.metadata, rt.metaKey, rt.engine]
+    [rt.runtimeConnectionId, rt.metadata, rt.metaKey, rt.engine, rt.profileId]
   );
 
+  const runImport = async (
+    onRefresh: (() => void) | undefined,
+    opts: DumpImportOptions
+  ) => {
+    if (!rt.runtimeConnectionId) return;
+    const tabId = opts.tabId ?? rt.profileId;
+    const kind = opts.action === "restore" ? "restore" : "import";
+    // Lock and Production refuse before a file is even chosen.
+    const early = dumpRunGate(tabSafetyModeNow(tabId), opts.action);
+    if (early.kind === "blocked") {
+      void showMessage(early.message, {
+        title: dumpJobTitle(kind, true),
+        kind: "warning",
+      });
+      return;
+    }
+    const job = start(kind, tabId, opts.database);
+    if (!job) return;
+    setDbRestoreRunning(true);
+    let outcome: DumpOutcome = { kind: "abandoned" };
+    try {
+      const path = await openDialog({
+        title: opts.dialogTitle,
+        multiple: false,
+        directory: false,
+        filters: [
+          { name: "PoliteDB dump", extensions: ["dumb"] },
+          { name: "SQL", extensions: ["sql"] },
+        ],
+      });
+      if (path && typeof path === "string" && job.isCurrent()) {
+        outcome = await runDumpImport(
+          rt,
+          path,
+          { ...opts, tabId },
+          job,
+          onRefresh
+        );
+      }
+    } catch (err) {
+      outcome = {
+        kind: "failed",
+        message: err instanceof Error ? err.message : "SQL dump import failed.",
+      };
+    } finally {
+      await job.finish(outcome);
+      setDbRestoreRunning(false);
+    }
+    present(job, outcome, opts.successToast);
+  };
+
   const onRestoreDatabase = useCallback(
-    async (onRefresh?: () => void, database?: string) => {
-      await runDumpImport(
-        rt,
-        onRefresh,
-        {
-          action: "restore",
-          dialogTitle: "Restore database from dump",
-          successToast: "Database restored.",
-          database,
-        },
-        setDbRestoreRunning
-      );
-    },
+    (onRefresh?: () => void, database?: string) =>
+      runImport(onRefresh, {
+        action: "restore",
+        dialogTitle: "Restore database from dump",
+        successToast: "Database restored.",
+        database,
+      }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [rt.runtimeConnectionId, rt.refreshSchemaAndTables, rt.profileId, rt.engine]
   );
 
   // Table-level SQL dump import, like database backup and restore, is free.
   const onImportSqlDump = useCallback(
-    async (onRefresh?: () => void, opts?: { tabId?: string }) => {
-      await runDumpImport(
-        rt,
-        onRefresh,
-        {
-          action: "import",
-          dialogTitle: "Import SQL dump",
-          successToast: "SQL dump imported.",
-          tabId: opts?.tabId,
-        },
-        setDbRestoreRunning
-      );
-    },
+    (onRefresh?: () => void, opts?: { tabId?: string }) =>
+      runImport(onRefresh, {
+        action: "import",
+        dialogTitle: "Import SQL dump",
+        successToast: "SQL dump imported.",
+        tabId: opts?.tabId,
+      }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [rt.runtimeConnectionId, rt.refreshSchemaAndTables, rt.profileId, rt.engine]
   );

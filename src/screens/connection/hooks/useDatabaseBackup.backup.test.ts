@@ -1,6 +1,7 @@
 import { act, renderHook } from "@testing-library/preact";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useScreenStore } from "src/stores/screen";
+import { DUMP_JOB_RUNNING_MESSAGE, useDumpJobStore } from "src/stores/dumpJob";
 
 const m = vi.hoisted(() => ({
   saveDialog: vi.fn(),
@@ -32,11 +33,51 @@ vi.mock("src/lib/dump/politedbDumbFormat", () => ({
 vi.mock("src/lib/tauri/query", () => ({
   startSqlQueryStream: m.startSqlQueryStream,
   runSqlQuery: m.runSqlQuery,
+  // The dump port starts its operations here: reported as the stream
+  // start, with the same options.
+  operationExecuteWithBusyRetry: (input: {
+    connection_id: string;
+    sql: {
+      sql: string;
+      batch_size?: number;
+      max_rows?: number;
+      canonical_text_output?: boolean;
+      snapshot_id?: string;
+    };
+  }) =>
+    m.startSqlQueryStream(input.connection_id, input.sql.sql, {
+      batchSize: input.sql.batch_size,
+      maxRows: input.sql.max_rows,
+      canonicalTextOutput: input.sql.canonical_text_output,
+      snapshotId: input.sql.snapshot_id,
+    }),
+  createAbortError: () => new Error("AbortError"),
 }));
 vi.mock("src/lib/tauri/operationBus", () => ({
-  operationBus: { subscribe: m.subscribe },
+  operationBus: {
+    subscribe: m.subscribe,
+    ensureInit: async () => {},
+    invalidate: vi.fn(),
+  },
 }));
 vi.mock("src/lib/tauri/operation", () => ({ operationCancel: m.cancel }));
+// The backup file session: its one write is reported as writeFile(path).
+vi.mock("src/lib/tauri/backupFile", () => {
+  const paths = new Map<string, string>();
+  return {
+    BACKUP_FILE_ALREADY_PUBLISHED: "BACKUP_FILE_ALREADY_PUBLISHED",
+    BACKUP_FILE_TEMP_NOT_REMOVED: "BACKUP_FILE_TEMP_NOT_REMOVED",
+    backupFileBegin: async (path: string) => {
+      paths.set("f1", path);
+      return "f1";
+    },
+    backupFileWrite: async (id: string, bytes: Uint8Array) =>
+      m.writeFile(paths.get(id), bytes),
+    backupFilePublish: async () => {},
+    backupFileAbort: async () => {},
+    backupFileForget: async () => {},
+  };
+});
 vi.mock("src/lib/tauri/sqlSession", () => ({
   sqlSessionBegin: m.sessionBegin,
   sqlSessionEnd: m.sessionEnd,
@@ -76,6 +117,7 @@ function streamDelivers(drive: (h: Handlers) => void) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  useDumpJobStore.setState({ active: null, summary: null, closing: [] });
   m.saveDialog.mockResolvedValue("/tmp/out.dumb");
   m.pack.mockImplementation(async ({ sql }: { sql: string }) =>
     new TextEncoder().encode(sql)
@@ -174,7 +216,7 @@ describe("database backup file", () => {
     expect(m.showMessage.mock.calls[0]![0]).toMatch(/could not be read/);
   });
 
-  it("runs one backup of a connection at a time", async () => {
+  it("runs one backup or restore at a time", async () => {
     let finish: () => void = () => {};
     m.subscribe.mockImplementation(async (_op: string, h: Handlers) => {
       finish = () => h.onDone();
@@ -189,7 +231,7 @@ describe("database backup file", () => {
     });
     await act(() => result.current.onBackupDatabase("db"));
     expect(m.showMessage).toHaveBeenCalledWith(
-      "A backup of this connection is already running.",
+      DUMP_JOB_RUNNING_MESSAGE,
       expect.anything()
     );
     expect(m.sessionBegin).toHaveBeenCalledTimes(1);
@@ -200,7 +242,7 @@ describe("database backup file", () => {
     expect(m.writeFile).toHaveBeenCalledTimes(1);
   });
 
-  it("reserves a connection's backup before anything is awaited", async () => {
+  it("registers the job before anything is awaited", async () => {
     streamDelivers((h) => h.onDone());
     const { result } = renderHook(() => useDatabaseBackup());
     await act(async () => {
@@ -212,7 +254,7 @@ describe("database backup file", () => {
     });
     expect(m.sessionBegin).toHaveBeenCalledTimes(1);
     expect(m.showMessage).toHaveBeenCalledWith(
-      "A backup of this connection is already running.",
+      DUMP_JOB_RUNNING_MESSAGE,
       expect.anything()
     );
     // Released afterwards: another backup can run.

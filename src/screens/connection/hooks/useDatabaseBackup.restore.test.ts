@@ -1,6 +1,7 @@
 import { act, renderHook } from "@testing-library/preact";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useScreenStore } from "src/stores/screen";
+import { useDumpJobStore } from "src/stores/dumpJob";
 
 const m = vi.hoisted(() => ({
   openDialog: vi.fn(),
@@ -15,6 +16,7 @@ const m = vi.hoisted(() => ({
   rt: { engine: "postgres" as string },
   sessionBegin: vi.fn(),
   sessionEnd: vi.fn(),
+  sessionCancel: vi.fn(),
   savepoints: vi.fn(),
 }));
 
@@ -38,9 +40,25 @@ vi.mock("src/lib/tauri/query", () => ({
 }));
 // A PostgreSQL restore runs in a session; its statements still reach
 // runSqlQuery here, savepoint bookkeeping goes to its own mock.
+// Statements outside a transaction go through the dump port; here they
+// reach runSqlQuery too.
+vi.mock("src/lib/tauri/dumpOperation", () => ({
+  dumpStatement: (conn: string, sql: string) => {
+    const result = Promise.resolve().then(() => m.runSqlQuery(conn, sql));
+    return {
+      result,
+      cancel: vi.fn(),
+      settled: result.then(
+        () => ({ kind: "server-finished" }),
+        (error: unknown) => ({ kind: "server-finished", error })
+      ),
+    };
+  },
+}));
 vi.mock("src/lib/tauri/sqlSession", () => ({
   sqlSessionBegin: m.sessionBegin,
   sqlSessionEnd: m.sessionEnd,
+  sqlSessionCancel: m.sessionCancel,
   sqlSessionExecute: async (_session: string, sql: string) =>
     /^(SAVEPOINT|RELEASE|ROLLBACK TO) /.test(sql)
       ? m.savepoints(sql)
@@ -90,6 +108,7 @@ async function restore(onRefresh?: () => void) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  useDumpJobStore.setState({ active: null, summary: null, closing: [] });
   m.rt.engine = "postgres";
   setMode("default");
   m.openDialog.mockResolvedValue("/backups/shop-backup.dumb");
@@ -305,7 +324,13 @@ INSERT INTO "public"."t" ("a","b") VALUES ('x', 'y');`,
     await restore();
     const [message] = m.showMessage.mock.calls[0]!;
     expect(message).toContain("Stopped at statement 2 of 3: disk full");
-    expect(message).toContain("Nothing was changed: the run was rolled back.");
+    // D7: what is known about the transaction, and what a rollback
+    // does not undo.
+    expect(message).toContain("The transaction was rolled back.");
+    expect(message).toContain(
+      "Sequence changes (nextval, setval) and effects outside the database"
+    );
+    expect(message).not.toContain("Nothing was changed");
     expect(m.sessionBegin).toHaveBeenCalledWith("conn_1", "transaction");
     expect(m.sessionEnd).toHaveBeenCalledWith("s1", false);
     expect(m.sessionEnd).not.toHaveBeenCalledWith("s1", true);
@@ -386,7 +411,10 @@ INSERT INTO "public"."t" ("a","b") VALUES ('x', 'y');`,
     await restore();
     const [body] = m.confirmDialog.mock.calls[0]!;
     expect(body).toContain('These tables already have rows: "public"."t".');
-    expect(body).toContain("They run in one transaction");
+    expect(body).toContain(
+      "They run in one transaction: if one fails or the run is cancelled, it is not committed. Sequence changes and effects outside the database are not undone."
+    );
+    expect(body).not.toContain("nothing is changed");
   });
 });
 
@@ -421,7 +449,13 @@ describe("the safety mode is read again while a dump runs", () => {
     const [message] = m.showMessage.mock.calls[0]!;
     expect(message).toContain("so nothing was restored");
     expect(message).toContain("Stopped before statement 2 of 3.");
-    expect(message).toContain("Nothing was changed: the run was rolled back.");
+    // D7: what is known about the transaction, and what a rollback
+    // does not undo.
+    expect(message).toContain("The transaction was rolled back.");
+    expect(message).toContain(
+      "Sequence changes (nextval, setval) and effects outside the database"
+    );
+    expect(message).not.toContain("Nothing was changed");
     expect(m.showToast).not.toHaveBeenCalled();
   });
 

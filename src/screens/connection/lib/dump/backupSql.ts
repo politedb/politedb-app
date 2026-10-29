@@ -1,11 +1,6 @@
-import { startSqlQueryStream, runSqlQuery } from "src/lib/tauri/query";
-import { operationBus } from "src/lib/tauri/operationBus";
-import { operationCancel } from "src/lib/tauri/operation";
-import {
-  tableExportQuery,
-  qIdent,
-  qLiteral,
-} from "src/lib/queries/sql";
+import { runSqlQuery } from "src/lib/tauri/query";
+import { dumpStream, type DumpOperation } from "src/lib/tauri/dumpOperation";
+import { tableExportQuery, qIdent, qLiteral } from "src/lib/queries/sql";
 import { cellToString } from "src/utils/convert";
 import type { ConnectionCreateInput } from "src/lib/tauri";
 import {
@@ -313,7 +308,7 @@ export async function pgConstraintExists(args: {
         AND c.conname = ${pgLiteral(constraint)}
       LIMIT 1;
     `,
-    { timeoutMs: 30_000 }
+    { timeoutMs: 30_000, internal: true }
   );
 
   return Boolean(res.rows?.length);
@@ -338,11 +333,13 @@ export function backupQuery(
   sql: string,
   opts?: Parameters<typeof runSqlQuery>[2]
 ) {
+  // Dump queries never report to analytics (D13).
   const snapshotId = backupSnapshots.get(connectionId)?.snapshotId;
-  const withSnapshot = snapshotId ? { ...opts, snapshotId } : opts;
-  return withSnapshot
-    ? runSqlQuery(connectionId, sql, withSnapshot)
-    : runSqlQuery(connectionId, sql);
+  return runSqlQuery(connectionId, sql, {
+    ...opts,
+    internal: true,
+    ...(snapshotId ? { snapshotId } : {}),
+  });
 }
 
 /**
@@ -365,12 +362,14 @@ export async function pgTablesWithRows(
     try {
       const res = await runSqlQuery(
         connectionId,
-        `SELECT to_regclass(${pgLiteral(table)}) IS NOT NULL;`
+        `SELECT to_regclass(${pgLiteral(table)}) IS NOT NULL;`,
+        { internal: true }
       );
       if (!cellToBool(res.rows?.[0]?.[0])) continue;
       const rows = await runSqlQuery(
         connectionId,
-        `SELECT EXISTS (SELECT 1 FROM ${table});`
+        `SELECT EXISTS (SELECT 1 FROM ${table});`,
+        { internal: true }
       );
       if (cellToBool(rows.rows?.[0]?.[0])) found.push(table);
     } catch {
@@ -720,6 +719,10 @@ export async function exportTableToSqlParts(args: {
   columns: string[];
   /** PostgreSQL: the table has a GENERATED ALWAYS identity column. */
   overridingSystemValue?: boolean;
+  /** Called with each running stream, so a cancel can stop it. */
+  onStream?: (stream: DumpOperation<unknown>) => void;
+  /** Rows written so far for this table. */
+  onRows?: (rows: number) => void;
 }) {
   const { append, connectionId, engine, schema, tableName, columns } = args;
 
@@ -730,103 +733,67 @@ export async function exportTableToSqlParts(args: {
   const query = money
     ? postgresBackupRowsQuery(schema, tableName, columns, money)
     : tableExportQuery(schema, tableName, columns, undefined, "AND", engine);
-  const opId = await startSqlQueryStream(connectionId, query, {
+  let columnNames = columns;
+  let columnTypes: string[] = columns.map(() => "");
+  let rowsWritten = 0;
+
+  const appendChunk = (chunk: {
+    rows?: unknown[][];
+    columns?: { name: string; db_type?: string | null }[];
+  }) => {
+    const rows = chunk.rows ?? [];
+    if (!rows.length) return;
+
+    if (chunk.columns?.length) {
+      columnNames = chunk.columns.map((c) => c.name).filter(Boolean);
+      columnTypes = chunk.columns.map((c) => String(c.db_type ?? ""));
+      // Money read as numeric is written as a typed numeric.
+      if (money) {
+        columnTypes = columnTypes.map((type, i) =>
+          money.scalar.has(columnNames[i]!)
+            ? POSTGRES_MONEY_AS_NUMERIC
+            : money.array.has(columnNames[i]!)
+              ? POSTGRES_MONEY_ARRAY_AS_NUMERIC
+              : type
+        );
+      }
+    }
+
+    const content = formatSqlInsertChunk({
+      engine,
+      schema,
+      tableName,
+      columnNames,
+      columnTypes,
+      rows,
+      qIdent: (name, eng) => qIdent(name, eng as any),
+      overridingSystemValue: args.overridingSystemValue,
+    });
+    if (!content) return;
+    append(content);
+    rowsWritten += rows.length;
+    args.onRows?.(rowsWritten);
+  };
+
+  // A chunk that cannot be written fails the backup (finishing without it
+  // would save a file missing those rows): the stream stops, its query is
+  // cancelled, and nothing more is appended.
+  const stream = dumpStream(connectionId, query, appendChunk, {
     batchSize: 250,
     maxRows: 10_000_000,
     canonicalTextOutput: engine === "postgres",
     snapshotId: backupSnapshots.get(connectionId)?.snapshotId ?? undefined,
   });
-
-  await new Promise<void>((resolve, reject) => {
-    let completed = false;
-    let columnNames = columns;
-    let columnTypes: string[] = columns.map(() => "");
-
-    // Set once subscribed; a failure may come first (replayed chunks).
-    let unsubscribe: (() => void) | null = null;
-    let stopListening = false;
-    const stop = () => {
-      stopListening = true;
-      unsubscribe?.();
-    };
-
-    const done = () => {
-      if (completed) return;
-      completed = true;
-      stop();
-      resolve();
-    };
-
-    const fail = (err: unknown) => {
-      if (completed) return;
-      completed = true;
-      stop();
-      reject(err);
-    };
-
-    const appendChunk = (chunk: {
-      rows?: unknown[][];
-      columns?: { name: string; db_type?: string | null }[];
-    }) => {
-      const rows = chunk.rows ?? [];
-      if (!rows.length) return;
-
-      if (chunk.columns?.length) {
-        columnNames = chunk.columns.map((c) => c.name).filter(Boolean);
-        columnTypes = chunk.columns.map((c) => String(c.db_type ?? ""));
-        // Money read as numeric is written as a typed numeric.
-        if (money) {
-          columnTypes = columnTypes.map((type, i) =>
-            money.scalar.has(columnNames[i]!)
-              ? POSTGRES_MONEY_AS_NUMERIC
-              : money.array.has(columnNames[i]!)
-                ? POSTGRES_MONEY_ARRAY_AS_NUMERIC
-                : type
-          );
-        }
-      }
-
-      const content = formatSqlInsertChunk({
-        engine,
-        schema,
-        tableName,
-        columnNames,
-        columnTypes,
-        rows,
-        qIdent: (name, eng) => qIdent(name, eng as any),
-        overridingSystemValue: args.overridingSystemValue,
-      });
-      if (!content) return;
-      append(content);
-    };
-
-    void operationBus
-      .subscribe(opId, {
-        onChunk: (chunk) => {
-          // Nothing more is kept once the export has failed.
-          if (completed) return;
-          // A chunk that cannot be written fails the backup: finishing
-          // without it would save a file missing those rows. The rows
-          // still coming are not needed, so the query is cancelled.
-          try {
-            appendChunk(chunk);
-          } catch (err) {
-            fail(err);
-            void operationCancel(opId).catch(() => {});
-          }
-        },
-        onDone: () => done(),
-        onError: (err) => {
-          fail(
-            typeof err === "string" ? new Error(err) : (err ?? "EXPORT_FAILED")
-          );
-        },
-      })
-      .then((off) => {
-        unsubscribe = off;
-        if (stopListening) off();
-      });
-  });
+  args.onStream?.(stream);
+  const settled = await stream.settled;
+  if (settled.error !== undefined) {
+    const err = settled.error;
+    throw typeof err === "string"
+      ? new Error(err)
+      : err instanceof Error
+        ? err
+        : new Error("EXPORT_FAILED");
+  }
 }
 
 export type PgTypeRow = {

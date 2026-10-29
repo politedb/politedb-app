@@ -10,9 +10,32 @@ const m = vi.hoisted(() => ({
 vi.mock("src/lib/tauri/query", () => ({
   startSqlQueryStream: m.startSqlQueryStream,
   runSqlQuery: m.runSqlQuery,
+  // The dump port starts its operations here: reported as the stream
+  // start, with the same options.
+  operationExecuteWithBusyRetry: (input: {
+    connection_id: string;
+    sql: {
+      sql: string;
+      batch_size?: number;
+      max_rows?: number;
+      canonical_text_output?: boolean;
+      snapshot_id?: string;
+    };
+  }) =>
+    m.startSqlQueryStream(input.connection_id, input.sql.sql, {
+      batchSize: input.sql.batch_size,
+      maxRows: input.sql.max_rows,
+      canonicalTextOutput: input.sql.canonical_text_output,
+      snapshotId: input.sql.snapshot_id,
+    }),
+  createAbortError: () => new Error("AbortError"),
 }));
 vi.mock("src/lib/tauri/operationBus", () => ({
-  operationBus: { subscribe: m.subscribe },
+  operationBus: {
+    subscribe: m.subscribe,
+    ensureInit: async () => {},
+    invalidate: vi.fn(),
+  },
 }));
 vi.mock("src/lib/tauri/operation", () => ({ operationCancel: m.cancel }));
 vi.mock("src/stores/persistentStore", () => ({

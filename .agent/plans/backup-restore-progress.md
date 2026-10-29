@@ -27,6 +27,19 @@ APPROVED
   - The deferred trigger takes advisory lock 777, held by a separate test connection: the test checks in `pg_locks` that the COMMIT is waiting on the server, then cancels (refused, COMMIT still held) or force-closes (`COMMIT_OUTCOME_UNKNOWN`, one teardown), then releases the lock. No `pg_sleep` window, no fixed wait before cleanup.
   - The responsiveness test runs on a one-worker runtime with entry/release handshakes and requires an unrelated task to run while the file work is held; checked to fail (timeout) when `blocking()` is a plain call.
   - Verification: `cargo test` 488 passed; `backup_file` 10 passed; live `sql_session` 2 passed, 3 runs, on `pdb-review-session`; `cargo check --bin PoliteDB` ok.
+- **Phase 1 VERIFIED WITH LIMITATIONS** (Codex round 3, 2026-10-29).
+- **Phase 2 step 1 (move) — committed `57b6c98`:** SQL/catalog helpers → `lib/dump/backupSql.ts` (re-exported by the hook); backup and restore runs → `lib/dump/backupRun.ts` / `restoreRun.ts`, unchanged; tests green.
+- **Phase 2 step 2 — implemented 2026-10-29, not committed:**
+  - `src/stores/dumpJob.ts`: active job / retained summary / close leases (multiset, intent tokens), synchronous register/finish/dismiss/admitClose/release transitions; refusal messages.
+  - `lib/dump/dumpJobController.ts`: module-level owner of the job (`startDumpJob`, `cancelDumpJob`, `decideDumpJobStop`, `giveUpDumpJobCleanup`), `CleanupGroup` (serialized attempts, strongest evidence, sealing), cancel state, D10 stop decisions, retry offer, progress coalescing on an injectable frame scheduler, D15 retention rule.
+  - `lib/dumpProgress.ts`: monotonic/clamped progress, backup step count.
+  - `src/lib/tauri/dumpOperation.ts`: owned `dumpStatement` / `dumpStream` on `operationExecuteWithBusyRetry` + `operationBus` (one disposal routine; late id adoption; `server-finished` vs `client-disposed`; no analytics); `operationBus.invalidate(opId)` (later chunks ACKed and dropped, terminal events ignored, no re-cache).
+  - Restore runner: per-engine strategies (`runInTransaction`, `runStatementByStatement`), cancel latch at every boundary, PostgreSQL session cancel with evidence and ROLLBACK/cancel fallback, retry offer, COMMIT phase not cancellable, commit-unknown and committed-refresh-failed outcomes, D7 wording (confirmation, failure, safety stop, cancel), non-transactional D10 decision after the statement settles, timeout → unknown count and stop, refresh when anything may have changed.
+  - Backup runner: steps progress, row count, stream cancel through the port, compression waited for, backup file session (temp, write, publish), publication evidence (`ALREADY_PUBLISHED`), temp-not-removed after one retry (then `forget`), file-unconfirmed.
+  - `internal: true` for all dump catalog queries; statements and streams go through the port (no analytics).
+  - Hook: registers the job before the file dialog (D14), runs the runner, and until Phase 3 presents outcomes as today (toast / `showMessage`), dismissing the retained summary right after.
+  - Deviations, recorded: the app has one webview window, so the window close scope is the app scope (`origin` has no `windowId`); `backupSnapshots` stays as the snapshot lookup a backup run sets and clears (no reservation: the job store is the only exclusivity authority).
+  - Verification: `npx vitest run` 2430 passed (new: controller/store 17, dump port 8, bus invalidate 3, runner cancel paths 18; existing backup/restore suites updated for the port, D7 wording and the one-job message); `npm run build` ok; PR #88 live fidelity test on `pdb-review-session` passed.
 
 ## Task
 

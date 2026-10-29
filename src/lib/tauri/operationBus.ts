@@ -31,6 +31,11 @@ type BusState = {
   handlersByOp: Map<OpId, OpHandlers>;
   cacheByOp: Map<OpId, CachedOp>;
   cleanupTimer: ReturnType<typeof setInterval> | null;
+  /**
+   * Ops whose owner stopped listening for good (invalidate), with when:
+   * later events for them are ACKed and dropped, never cached or delivered.
+   */
+  invalidated: Map<OpId, number>;
 };
 
 /* =============================================================================
@@ -53,6 +58,7 @@ const state: BusState = {
   handlersByOp: new Map(),
   cacheByOp: new Map(),
   cleanupTimer: null,
+  invalidated: new Map(),
 };
 
 /* =============================================================================
@@ -134,6 +140,9 @@ function runCleanup() {
     if (!hasSubscriber && (isTerminal || isExpired)) {
       state.cacheByOp.delete(opId);
     }
+  }
+  for (const [opId, at] of state.invalidated) {
+    if (now - at > CACHE_TTL_MS) state.invalidated.delete(opId);
   }
 }
 
@@ -252,6 +261,13 @@ async function setupListeners(): Promise<UnlistenFn[]> {
     const opId = getOpId(payload);
     if (!opId) return;
 
+    // Its owner is gone: ACK so the backend is not left waiting on flow
+    // control while its cancel takes effect, and drop it.
+    if (state.invalidated.has(opId)) {
+      ackChunk(opId);
+      return;
+    }
+
     const chunk = payload as TableChunk;
     const handlers = state.handlersByOp.get(opId);
 
@@ -259,7 +275,12 @@ async function setupListeners(): Promise<UnlistenFn[]> {
       if (handlers.awaitChunkHandlers) {
         // Serial backpressure: ACK only after onChunk settles.
         void enqueueSerial(opId, async () => {
-          // Re-check subscription; unsubscribed ops must not ACK late work.
+          // Re-check subscription; unsubscribed ops must not ACK late work
+          // (an invalidated one is ACKed and dropped, as its later chunks).
+          if (state.invalidated.has(opId)) {
+            ackChunk(opId);
+            return;
+          }
           const current = state.handlersByOp.get(opId);
           if (!current?.onChunk) return;
           try {
@@ -286,6 +307,8 @@ async function setupListeners(): Promise<UnlistenFn[]> {
     const payload = e.payload;
     const opId = getOpId(payload);
     if (!opId) return;
+
+    if (state.invalidated.has(opId)) return;
 
     const done = payload as OperationDone;
     const cache = getOrCreateCache(opId);
@@ -317,6 +340,8 @@ async function setupListeners(): Promise<UnlistenFn[]> {
     const payload = e.payload;
     const opId = getOpId(payload);
     if (!opId) return;
+
+    if (state.invalidated.has(opId)) return;
 
     const error = payload as any;
     const cache = getOrCreateCache(opId);
@@ -387,6 +412,8 @@ export const operationBus = {
    */
   async subscribe(opId: string, handlers: OpHandlers): Promise<() => void> {
     await initOnce();
+
+    if (state.invalidated.has(opId)) return () => {};
 
     // Register handlers first
     state.handlersByOp.set(opId, handlers);
@@ -478,6 +505,21 @@ export const operationBus = {
       clearCache(opId);
       clearSerialQueue(opId);
     };
+  },
+
+  /**
+   * Stops all delivery for an op whose owner has given it up (opt-in; used
+   * by dump operations): handlers and cache are dropped now, and later
+   * chunks are ACKed and dropped (so the backend is not stalled on flow
+   * control while its cancel takes effect), later done/error ignored, and
+   * a later subscribe gets nothing. Chunk handlers already running are not
+   * interrupted; their owner awaits them.
+   */
+  invalidate(opId: string): void {
+    state.invalidated.set(opId, Date.now());
+    state.handlersByOp.delete(opId);
+    clearCache(opId);
+    clearSerialQueue(opId);
   },
 
   /**
