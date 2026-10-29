@@ -127,6 +127,11 @@ export type ActiveDumpJob = {
   cancellable: boolean;
   /** A non-transactional run asking whether to stop (D10). */
   stopDecision: { decisionId: number; counts: DumpCounts } | null;
+  /**
+   * Its progress modal is shown: set by the run once its native prompts
+   * (file dialog, confirmation, first Touch ID) are done (D14), and kept.
+   */
+  visible: boolean;
 };
 
 export type DumpJobSummary = {
@@ -197,6 +202,7 @@ export function registerDumpJob(
       cancel: { kind: "none" },
       cancellable: false,
       stopDecision: null,
+      visible: false,
     },
   });
   return { ok: true };

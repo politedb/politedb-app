@@ -54,7 +54,10 @@ import { ConnectionActionsProvider } from "./workspace/ConnectionActionsContext"
 import { ConnectionRuntimeProvider } from "./workspace/ConnectionRuntimeContext";
 import { useConnectionShortcuts } from "./hooks/useConnectionShortcuts";
 import { useRefreshTrigger } from "./hooks/useRefreshTrigger";
-import { registerConnectionTabCloseBridge } from "./lib/connectionTabCloseBridge";
+import {
+  connectionTabCloseBridgeFor,
+  registerConnectionTabCloseBridge,
+} from "./lib/connectionTabCloseBridge";
 import type { TableItem } from "src/types";
 import { ConnectingPanel } from "./workspace/ConnectingPanel";
 import { useProfileStore } from "src/stores/profile";
@@ -65,7 +68,7 @@ import {
 import type { PatchMap } from "src/lib/patches/generateSql";
 import { pickHostDbUser } from "src/lib/connection/connection";
 import { tableRowsStreamLoadPercent } from "src/utils/tableRowsProgress";
-import { useConnectionQuitGuard } from "./hooks/useConnectionQuitGuard";
+import { discardAndQuitApp } from "./hooks/useConnectionQuitGuard";
 import { useConnectionScreenState } from "./hooks/useConnectionScreenState";
 import { useInsertSqlIntoActiveEditor } from "./hooks/useInsertSqlIntoActiveEditor";
 import { StandaloneTableExportHost } from "./export/StandaloneTableExportHost";
@@ -177,7 +180,6 @@ export function ConnectionScreen() {
     healthInspectorOpen,
     setHealthInspectorOpen,
   } = useConnectionScreenState();
-  const { discardAndQuitApp } = useConnectionQuitGuard();
   const [snippetEditorOpen, setSnippetEditorOpen] = useState(false);
   const [snippetEditorInitial, setSnippetEditorInitial] = useState<
     (Partial<SavedSnippet> & { sql?: string }) | undefined
@@ -602,16 +604,10 @@ export function ConnectionScreen() {
     actionsRef.current.refresh()
   );
 
-  const discardAndQuitAppRef = useRef(discardAndQuitApp);
-  discardAndQuitAppRef.current = discardAndQuitApp;
-
   useEffect(() => {
-    registerConnectionTabCloseBridge({
-      closeTab: (tabId, skipCheck) =>
-        actionsRef.current.closeTab(tabId, skipCheck),
-      discardChanges: () => actionsRef.current.discardChanges(),
-      discardAndQuitApp: () => discardAndQuitAppRef.current(),
-    });
+    registerConnectionTabCloseBridge(
+      connectionTabCloseBridgeFor(() => actionsRef.current, discardAndQuitApp)
+    );
     return () => registerConnectionTabCloseBridge(null);
   }, []);
 

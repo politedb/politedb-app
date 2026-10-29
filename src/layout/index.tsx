@@ -11,6 +11,7 @@ import { WelcomeDialogHost } from "src/components/modal/WelcomeDialogHost";
 import { ProUpgradeDialogHost } from "src/components/license/ProUpgradeDialogHost";
 import { ExplainAnalyzeConfirmHost } from "src/components/editor/query-analyzer/ExplainAnalyzeConfirmHost";
 import { DumpProgressDialog } from "src/components/modal/DumpProgressDialog";
+import { useConnectionQuitGuard } from "src/screens/connection/hooks/useConnectionQuitGuard";
 import { Spinner } from "src/components/common/Spinner";
 import { Toast } from "@root/src/components/common/Toast";
 import { createRetryableLazy } from "src/components/common/RetryableLazy";
@@ -40,6 +41,8 @@ export function MainLayout() {
   const { activeProfileScreen, setActiveProfileScreen, profileTabs } =
     useScreenStore();
   const loadLicense = useLicenseStore((state) => state.load);
+  // For the window's whole life: no screen change can drop it (D8).
+  useConnectionQuitGuard();
 
   const isTab = !!activeProfileScreen && activeProfileScreen.startsWith("tab-");
   const activeTab = isTab

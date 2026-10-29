@@ -1040,3 +1040,40 @@ describe("Codex Phase 2 review round 4 case", () => {
     expect(m.begin).not.toHaveBeenCalled();
   });
 });
+
+describe("Codex Phase 3 review case: the modal waits for the prompts", () => {
+  it("shows a restore only once its confirmation and first Touch ID are done", async () => {
+    const answer = deferred<boolean>();
+    m.confirm.mockReturnValue(answer.promise);
+    const j = job("restore", "postgres");
+    const run = restore("postgres", j);
+    await vi.waitFor(() => expect(m.confirm).toHaveBeenCalled());
+    // File read and catalog checks are done; still the native prompt.
+    expect(useDumpJobStore.getState().active?.visible).toBe(false);
+    answer.resolve(true);
+    await vi.waitFor(() =>
+      expect(useDumpJobStore.getState().active?.visible).toBe(true)
+    );
+    await run;
+  });
+
+  it("shows a backup once its file was chosen", async () => {
+    m.runSqlQuery.mockImplementation(async () => ({ rows: [] }));
+    const loaded = deferred<{ tables: unknown[]; columnsByTable: object }>();
+    const j = job("backup", "mysql");
+    expect(useDumpJobStore.getState().active?.visible).toBe(false);
+    const run = runDatabaseBackup(
+      {
+        runtimeConnectionId: "c1",
+        engine: "mysql" as never,
+        metaKey: "meta",
+        metadata: { load: () => loaded.promise } as never,
+      },
+      "/out.dumb",
+      j
+    );
+    expect(useDumpJobStore.getState().active?.visible).toBe(true);
+    loaded.resolve({ tables: [], columnsByTable: {} });
+    expect((await run).kind).toBe("failed");
+  });
+});

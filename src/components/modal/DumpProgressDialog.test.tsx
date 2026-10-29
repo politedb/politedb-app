@@ -35,13 +35,18 @@ beforeEach(() => {
 });
 
 describe("DumpProgressDialog", () => {
-  it("stays hidden while the native prompts come first, then stays shown", () => {
+  it("stays hidden until its run reports the prompts done, then stays shown", () => {
     const job = start();
     render(<DumpProgressDialog />);
     expect(screen.queryByRole("progressbar")).toBeNull();
+    // Preflight phases before the confirmation: still hidden.
+    act(() => job.setPhase("checking", false));
     act(() => job.setPhase("confirming", false));
     expect(screen.queryByRole("progressbar")).toBeNull();
-    act(() => job.setPhase("running", true));
+    act(() => {
+      job.showProgress();
+      job.setPhase("running", true);
+    });
     expect(screen.getByText("Restoring into shop (shop_db)")).toBeTruthy();
     // Touch ID asked mid-run: still shown.
     act(() => job.setPhase("authenticating", false));
@@ -52,6 +57,7 @@ describe("DumpProgressDialog", () => {
     const job = start();
     render(<DumpProgressDialog />);
     act(() => {
+      job.showProgress();
       job.setPhase("running", true);
       job.progress({
         stepsTotal: 4,
@@ -74,7 +80,10 @@ describe("DumpProgressDialog", () => {
     }));
     job.setCancelAction(action);
     render(<DumpProgressDialog />);
-    act(() => job.setPhase("running", true));
+    act(() => {
+      job.showProgress();
+      job.setPhase("running", true);
+    });
     const cancel = screen.getByRole("button", { name: "Cancel" });
     await act(async () => {
       fireEvent.click(cancel);
@@ -87,7 +96,10 @@ describe("DumpProgressDialog", () => {
   it("disables Cancel during COMMIT, saying why", () => {
     const job = start();
     render(<DumpProgressDialog />);
-    act(() => job.setPhase("committing", false));
+    act(() => {
+      job.showProgress();
+      job.setPhase("committing", false);
+    });
     const cancel = screen.getByRole("button", { name: "Cancel" });
     expect((cancel as HTMLButtonElement).disabled).toBe(true);
     expect(
@@ -99,6 +111,7 @@ describe("DumpProgressDialog", () => {
     const job = start("backup");
     render(<DumpProgressDialog />);
     act(() => {
+      job.showProgress();
       job.setPhase("compressing", true);
       useDumpJobStore.setState({
         active: {
@@ -115,7 +128,10 @@ describe("DumpProgressDialog", () => {
   it("asks Stop or Continue with the settled counts", async () => {
     const job = start();
     render(<DumpProgressDialog />);
-    act(() => job.setPhase("running", true));
+    act(() => {
+      job.showProgress();
+      job.setPhase("running", true);
+    });
     let answer: Promise<boolean> = Promise.resolve(false);
     act(() => {
       answer = job.askStop({ completed: 3, skipped: 1, unknown: 0, total: 9 });
@@ -135,7 +151,10 @@ describe("DumpProgressDialog", () => {
   it("offers Try again and Stop trying after a failed cancel", async () => {
     const job = start();
     render(<DumpProgressDialog />);
-    act(() => job.setPhase("running", true));
+    act(() => {
+      job.showProgress();
+      job.setPhase("running", true);
+    });
     let choice: Promise<"retry" | "stop"> = Promise.resolve("retry");
     act(() => {
       choice = job.offerRetry("The transaction could not be closed.");
@@ -150,7 +169,10 @@ describe("DumpProgressDialog", () => {
   it("ignores Esc while the job runs", () => {
     const job = start();
     render(<DumpProgressDialog />);
-    act(() => job.setPhase("running", true));
+    act(() => {
+      job.showProgress();
+      job.setPhase("running", true);
+    });
     fireEvent.keyDown(window, { key: "Escape" });
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.getByRole("progressbar")).toBeTruthy();
@@ -160,7 +182,10 @@ describe("DumpProgressDialog", () => {
   it("keeps a result to read until Close", async () => {
     const job = start();
     render(<DumpProgressDialog />);
-    act(() => job.setPhase("running", true));
+    act(() => {
+      job.showProgress();
+      job.setPhase("running", true);
+    });
     await act(() =>
       job.finish({
         kind: "cancelled",
@@ -187,9 +212,64 @@ describe("DumpProgressDialog", () => {
   it("closes quietly after a success", async () => {
     const job = start();
     render(<DumpProgressDialog />);
-    act(() => job.setPhase("running", true));
+    act(() => {
+      job.showProgress();
+      job.setPhase("running", true);
+    });
     await act(() => job.finish({ kind: "succeeded", skipped: 0 }));
     expect(screen.queryByRole("progressbar")).toBeNull();
     expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
+  });
+
+  it("keeps focus and keys inside while it runs, then gives focus back", () => {
+    const root = document.createElement("div");
+    root.id = "root";
+    const opener = document.createElement("button");
+    opener.textContent = "Backup database";
+    root.appendChild(opener);
+    document.body.appendChild(root);
+    opener.focus();
+    // Counts only app shortcuts (a modifier held) reaching the app.
+    const shortcut = vi.fn();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) shortcut(e.key);
+    };
+    window.addEventListener("keydown", onKey);
+    try {
+      const job = start();
+      job.setCancelAction(async () => ({ kind: "accepted", evidence: null }));
+      render(<DumpProgressDialog />);
+      act(() => {
+        job.showProgress();
+        job.setPhase("running", true);
+      });
+      // The app behind it is inert, focus is inside, the dialog is named.
+      expect((root as HTMLElement & { inert?: boolean }).inert).toBe(true);
+      const cancel = screen.getByRole("button", { name: "Cancel" });
+      expect(document.activeElement).toBe(cancel);
+      const dialog = screen.getByRole("dialog");
+      expect(dialog.getAttribute("aria-labelledby")).toBeTruthy();
+      expect(
+        document.getElementById(dialog.getAttribute("aria-labelledby")!)
+          ?.textContent
+      ).toBe("Restoring into shop (shop_db)");
+      // Tab wraps inside it.
+      fireEvent.keyDown(cancel, { key: "Tab" });
+      expect(document.activeElement).toBe(cancel);
+      // App shortcuts do not reach the app.
+      fireEvent.keyDown(cancel, { key: "w", metaKey: true });
+      fireEvent.keyDown(cancel, { key: "s", ctrlKey: true });
+      expect(shortcut).not.toHaveBeenCalled();
+      // Ended quietly: the app is usable again and focus is back.
+      return act(() => job.finish({ kind: "succeeded", skipped: 0 })).then(
+        () => {
+          expect((root as HTMLElement & { inert?: boolean }).inert).toBe(false);
+          expect(document.activeElement).toBe(opener);
+        }
+      );
+    } finally {
+      window.removeEventListener("keydown", onKey);
+      setTimeout(() => root.remove());
+    }
   });
 });

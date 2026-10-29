@@ -128,7 +128,12 @@ export type ConnectionActions = {
   selectTable: (table: TableItem) => Promise<void>;
   closeWindow: (windowId: string, e: MouseEvent) => Promise<void>;
   closeWindows: (windowIds: string[]) => Promise<void>;
-  closeTab: (tabId: string, skipCheck?: boolean) => Promise<void>;
+  closeTab: (
+    tabId: string,
+    skipCheck?: boolean,
+    /** An outer close already holding the lease (see withCloseAdmission). */
+    intent?: symbol
+  ) => Promise<void>;
   refresh: () => Promise<void>;
   pageChange: (limit: number, offset: number) => Promise<void>;
   beforeSaveChanges: () => void;

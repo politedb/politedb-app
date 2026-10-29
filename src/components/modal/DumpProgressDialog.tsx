@@ -1,4 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
+import { createPortal } from "preact/compat";
 import { Button } from "src/components/common/Button";
 import {
   Dialog,
@@ -33,13 +34,6 @@ import { cn } from "src/utils/cn";
  * first (D14), and ignores Esc, × and outside clicks while the job runs:
  * only Cancel cancels (D12). Presentational: the controller does the work.
  */
-
-/** Phases before the modal opens: the native prompts are the way out. */
-const PROMPT_PHASES: ReadonlySet<DumpPhase> = new Set([
-  "choosing-file",
-  "confirming",
-  "authenticating",
-]);
 
 const PHASE_TEXT: Record<DumpPhase, string> = {
   "choosing-file": "Choosing the file…",
@@ -106,9 +100,13 @@ function RunningJob({ job }: { job: ActiveDumpJob }) {
   return (
     <>
       <DialogHeader className="shrink-0 border-b border-neutral-200 pr-4">
-        <DialogTitle>{title(job.kind, job.origin.target)}</DialogTitle>
+        <DialogTitle>
+          <span id={TITLE_ID}>{title(job.kind, job.origin.target)}</span>
+        </DialogTitle>
         <DialogDescription className="dark:text-neutral-400">
-          {status}
+          <span id={DESCRIPTION_ID} aria-live="polite">
+            {status}
+          </span>
         </DialogDescription>
       </DialogHeader>
       <DialogContent className="flex flex-col gap-3">
@@ -241,7 +239,9 @@ function JobSummary({ summary }: { summary: DumpJobSummary }) {
   return (
     <>
       <DialogHeader className="shrink-0 border-b border-neutral-200">
-        <DialogTitle>{summaryTitle(summary.kind)}</DialogTitle>
+        <DialogTitle>
+          <span id={TITLE_ID}>{summaryTitle(summary.kind)}</span>
+        </DialogTitle>
         {summary.origin.target ? (
           <DialogDescription className="dark:text-neutral-400">
             {summary.origin.target}
@@ -250,6 +250,7 @@ function JobSummary({ summary }: { summary: DumpJobSummary }) {
       </DialogHeader>
       <DialogContent>
         <p
+          id={DESCRIPTION_ID}
           role={text?.tone === "error" ? "alert" : "status"}
           class={cn(
             "text-sm wrap-break-word whitespace-pre-wrap",
@@ -272,46 +273,113 @@ function JobSummary({ summary }: { summary: DumpJobSummary }) {
   );
 }
 
+const TITLE_ID = "dump-progress-title";
+const DESCRIPTION_ID = "dump-progress-description";
+
+const FOCUSABLE =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * Makes the modal really modal while it is open: the app behind it is
+ * inert (no focus, no click), focus moves into it and Tab stays in it,
+ * app shortcuts do not reach the app behind it, and focus returns to
+ * where it was when it closes.
+ */
+function useModalFocus(open: boolean, container: HTMLElement | null) {
+  useEffect(() => {
+    if (!open || !container) return;
+    const opener =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    const root = document.getElementById("root");
+    const wasInert = root?.inert ?? false;
+    if (root) root.inert = true;
+
+    const panel = container.querySelector<HTMLElement>('[role="dialog"]');
+    if (panel) {
+      panel.setAttribute("aria-labelledby", TITLE_ID);
+      panel.setAttribute("aria-describedby", DESCRIPTION_ID);
+      panel.tabIndex = -1;
+    }
+    const focusables = () =>
+      Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE));
+    (focusables()[0] ?? panel)?.focus();
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Tab") {
+        const items = focusables();
+        if (!items.length) {
+          e.preventDefault();
+          panel?.focus();
+          return;
+        }
+        const first = items[0]!;
+        const last = items[items.length - 1]!;
+        const inside = container.contains(document.activeElement);
+        if (e.shiftKey && (!inside || document.activeElement === first)) {
+          e.preventDefault();
+          last.focus();
+        } else if (
+          !e.shiftKey &&
+          (!inside || document.activeElement === last)
+        ) {
+          e.preventDefault();
+          first.focus();
+        }
+        return;
+      }
+      // App shortcuts (save, close tab, run…) must not act behind it.
+      if (e.metaKey || e.ctrlKey || e.altKey) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      if (root) root.inert = wasInert;
+      if (opener?.isConnected) opener.focus();
+    };
+  }, [open, container]);
+}
+
 export function DumpProgressDialog() {
   const active = useDumpJobStore((s) => s.active);
   const summary = useDumpJobStore((s) => s.summary);
+  const [container, setContainer] = useState<HTMLElement | null>(null);
 
-  // Once shown, a job stays shown (a Touch ID asked mid-run included).
-  const [shownJob, setShownJob] = useState<string | null>(null);
-  const showActive =
-    !!active && (shownJob === active.jobId || !PROMPT_PHASES.has(active.phase));
-  useEffect(() => {
-    if (showActive && active && shownJob !== active.jobId) {
-      setShownJob(active.jobId);
-    }
-  }, [showActive, active, shownJob]);
+  // Shown once its run reported its native prompts done (D14).
+  const showActive = !!active?.visible;
+  const open = showActive || !!summary;
+  useModalFocus(open, container);
 
-  if (showActive && active) {
-    return (
-      <Dialog
-        open
-        size="sm"
-        showCloseButton={false}
-        closeOnOutsideClick={false}
-        closeOnEsc={false}
-        className="mx-auto flex w-full flex-col overflow-hidden"
-      >
-        <RunningJob job={active} />
-      </Dialog>
-    );
-  }
-  if (summary) {
-    return (
-      <Dialog
-        open
-        size="sm"
-        onClose={() => dismissDumpJobSummary(summary.jobId)}
-        closeOnOutsideClick={false}
-        className="mx-auto flex w-full flex-col overflow-hidden"
-      >
-        <JobSummary summary={summary} />
-      </Dialog>
-    );
-  }
-  return null;
+  if (!open) return null;
+  return createPortal(
+    <div ref={setContainer}>
+      {showActive && active ? (
+        <Dialog
+          open
+          size="sm"
+          showCloseButton={false}
+          closeOnOutsideClick={false}
+          closeOnEsc={false}
+          className="mx-auto flex w-full flex-col"
+        >
+          <RunningJob job={active} />
+        </Dialog>
+      ) : summary ? (
+        <Dialog
+          open
+          size="sm"
+          onClose={() => dismissDumpJobSummary(summary.jobId)}
+          closeOnOutsideClick={false}
+          className="mx-auto flex w-full flex-col"
+        >
+          <JobSummary summary={summary} />
+        </Dialog>
+      ) : null}
+    </div>,
+    document.body
+  );
 }

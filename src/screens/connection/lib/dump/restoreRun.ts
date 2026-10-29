@@ -362,6 +362,8 @@ async function runHeld(
     };
   }
   if (!job.isCurrent()) return { kind: "abandoned" };
+  // The confirmation and the first Touch ID are done: the run is shown.
+  job.showProgress();
 
   const refresh = async () => {
     await rt.refreshSchemaAndTables();

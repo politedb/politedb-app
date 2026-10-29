@@ -121,6 +121,8 @@ export async function runDatabaseBackup(
     | { kind: "cancelled"; failure?: string }
     | { kind: "failed"; error: unknown };
   try {
+    // The file was chosen (its dialog was the backup's only prompt).
+    job.showProgress();
     job.setPhase("preparing", true);
     const meta = await rt.metadata.load({
       metaKey: rt.metaKey,

@@ -101,6 +101,8 @@ export type DumpJobHandle = {
   /** A cancel was asked (and not refused): start no new work. */
   stopRequested(): boolean;
   setPhase(phase: DumpPhase, cancellable: boolean): void;
+  /** Its native prompts are done: the progress modal opens (D14). */
+  showProgress(): void;
   progress(update: Partial<DumpProgress>): void;
   /** What Cancel does now (null: the run stops at its next check). */
   setCancelAction(action: (() => Promise<CancelActionResult>) | null): void;
@@ -214,6 +216,9 @@ export function startDumpJob(
     },
     setPhase(phase, cancellable) {
       updateDumpJob(jobId, () => ({ phase, cancellable }));
+    },
+    showProgress() {
+      updateDumpJob(jobId, () => ({ visible: true }));
     },
     progress(update) {
       const c = current(jobId);

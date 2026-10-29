@@ -57,7 +57,10 @@ import {
   discardPendingTabCloseFromDialog,
   requestCloseConnectionTab,
 } from "../connectionTabClose";
-import { registerConnectionTabCloseBridge } from "../connectionTabCloseBridge";
+import {
+  connectionTabCloseBridgeFor,
+  registerConnectionTabCloseBridge,
+} from "../connectionTabCloseBridge";
 import { useConnectionQuitGuard } from "../../hooks/useConnectionQuitGuard";
 
 const origin = (tabId = "t1", runtime = "c1") => ({
@@ -150,6 +153,18 @@ describe("closing a connection tab", () => {
     // One lease while nested, still held after the nested close returned.
     expect(seen).toEqual([1, 1]);
     expect(useDumpJobStore.getState().closing).toHaveLength(0);
+  });
+
+  it("the screen's real bridge passes the intent on to its close", async () => {
+    const closeTab = vi.fn(async () => {});
+    registerConnectionTabCloseBridge(
+      connectionTabCloseBridgeFor(
+        () => ({ closeTab, discardChanges: async () => {} }),
+        async () => {}
+      )
+    );
+    await requestCloseConnectionTab("t1");
+    expect(closeTab).toHaveBeenCalledWith("t1", false, expect.any(Symbol));
   });
 
   it("keeps the changes when a job started since the unsaved-changes prompt", async () => {
