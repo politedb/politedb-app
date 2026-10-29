@@ -63,7 +63,10 @@ vi.mock("src/lib/tauri/dumpOperation", () => ({
           m.catalogCancelRejected
             ? { kind: "client-disposed", cancelRejected: true }
             : { kind: "server-finished" },
-        (error: unknown) => ({ kind: "server-finished", error })
+        (error: unknown) =>
+          m.catalogCancelRejected
+            ? { kind: "client-disposed", error, cancelRejected: true }
+            : { kind: "server-finished", error }
       ),
     };
   },
@@ -951,5 +954,65 @@ describe("Codex Phase 2 review round 2 cases", () => {
     expect((outcome as { warning?: string }).warning).toContain(
       "could not be confirmed closed"
     );
+  });
+});
+
+describe("Codex Phase 2 review round 3 case", () => {
+  it("warns on a committed restore when a check before it could not be confirmed stopped", async () => {
+    // The overlay check of an INSERT target runs, times out, and its
+    // backend cancel is refused; the helper swallows its error.
+    m.unpack.mockResolvedValue({
+      sql: 'INSERT INTO "public"."a" ("id") VALUES (1);',
+      engine: null,
+    });
+    m.runSqlQuery.mockImplementation(async (_c: string, sql: string) => {
+      if (sql.includes("to_regclass")) throw new Error("SQL_QUERY_TIMEOUT");
+      return { rows: [] };
+    });
+    m.catalogCancelRejected = true;
+    const j = job("restore", "postgres");
+    const outcome = await restore("postgres", j);
+    expect(outcome).toMatchObject({ kind: "succeeded" });
+    expect((outcome as { warning?: string }).warning).toContain(
+      "catalog query of this run could not be confirmed stopped"
+    );
+    // The transaction's own result is unchanged.
+    expect(m.end).toHaveBeenCalledWith("s1", true);
+  });
+
+  it("adds it to a failure and keeps that outcome's rollback evidence", async () => {
+    m.unpack.mockResolvedValue({
+      sql: 'INSERT INTO "public"."a" ("id") VALUES (1);',
+      engine: null,
+    });
+    m.runSqlQuery.mockImplementation(async () => ({ rows: [] }));
+    m.catalogCancelRejected = true;
+    m.execute.mockImplementation(async (_s: string, sql: string) => {
+      if (sql.startsWith("INSERT")) throw new Error("ERROR: disk full");
+    });
+    const j = job("restore", "postgres");
+    const outcome = await restore("postgres", j);
+    expect(outcome).toMatchObject({ kind: "failed", rollback: "rolled-back" });
+    const message = (outcome as { message: string }).message;
+    expect(message).toContain("ERROR: disk full");
+    expect(message).toContain(
+      "catalog query of this run could not be confirmed stopped"
+    );
+  });
+
+  it("does not stay quiet when the prompt was dismissed after such a check", async () => {
+    m.unpack.mockResolvedValue({
+      sql: 'INSERT INTO "public"."a" ("id") VALUES (1);',
+      engine: null,
+    });
+    m.catalogCancelRejected = true;
+    m.confirm.mockResolvedValue(false);
+    const j = job("restore", "postgres");
+    const outcome = await restore("postgres", j);
+    expect(outcome).toMatchObject({
+      kind: "cancelled",
+      rollback: "nothing-run",
+    });
+    expect(m.begin).not.toHaveBeenCalled();
   });
 });

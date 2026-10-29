@@ -220,12 +220,52 @@ export async function runDumpImport(
   onRefresh: (() => void) | undefined
 ): Promise<DumpOutcome> {
   const queries = holdJobQueries(job);
+  let run: { ok: true; outcome: DumpOutcome } | { ok: false; error: unknown };
   try {
-    return await runHeld(rt, path, opts, job, onRefresh);
-  } finally {
-    // Catalog queries still running are stopped and joined.
-    await queries.stopAll();
-    queries.release();
+    run = { ok: true, outcome: await runHeld(rt, path, opts, job, onRefresh) };
+  } catch (error) {
+    run = { ok: false, error };
+  }
+  // Catalog queries still running are stopped and joined; whether every
+  // one of the run was released goes into its outcome.
+  const released = await queries.stopAll();
+  queries.release();
+  if (!run.ok) throw run.error;
+  return released ? run.outcome : withCatalogWarning(run.outcome);
+}
+
+export const CATALOG_UNCONFIRMED_NOTE =
+  "A catalog query of this run could not be confirmed stopped: close the connection to end it.";
+
+/**
+ * Adds that a catalog query (run on its own connection, outside the
+ * restore's transaction) could not be confirmed stopped, keeping the
+ * outcome's own commit or rollback evidence.
+ */
+export function withCatalogWarning(outcome: DumpOutcome): DumpOutcome {
+  const note = CATALOG_UNCONFIRMED_NOTE;
+  switch (outcome.kind) {
+    case "succeeded":
+      return {
+        ...outcome,
+        warning: outcome.warning ? `${outcome.warning} ${note}` : note,
+      };
+    case "abandoned":
+      // Nothing ran, but a check before the prompt may still run.
+      return {
+        kind: "cancelled",
+        rollback: "nothing-run",
+        message: `Nothing was run. ${note}`,
+      };
+    case "cancelled":
+    case "stopped":
+    case "failed":
+    case "committed-refresh-failed":
+    case "commit-unknown":
+      return { ...outcome, message: `${outcome.message}\n\n${note}` };
+    case "temp-not-removed":
+    case "file-unconfirmed":
+      return outcome;
   }
 }
 

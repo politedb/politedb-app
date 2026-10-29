@@ -57,6 +57,9 @@ APPROVED
   - P2-2: `DumpSettled.cancelRejected` marks a disposal whose backend cancel was refused (also a port-started timeout); `holdJobQueries` keeps that evidence for the whole run, so a refused catalog cancel still makes the backup's cleanup unconfirmed after the query left. Tests over the real port (user cancel, timeout) and a backup warning test.
   - P2-3: an error seen after Cancel is left out only when the cancel closed the session **and** the error is one that closing causes (`causedByCancel`: session ended/gone, connection closed, statement cancelled, catalog query refused/aborted); independent catalog or statement errors are reported ("Also: …"). Tests for both and for the three cancel-caused errors.
   - Verification: `npx vitest run` all passed; `npm run build` ok; PR #88 live fidelity test on `pdb-review-session` passed.
+- **Phase 2 review round 2 fixes committed `cc73633`. Review round 3 (Codex: CHANGES REQUIRED, 1 P2) fix, 2026-10-29, not committed:**
+  - R3-1: restore/import reads its job's catalog release evidence after the run (`holdJobQueries.stopAll()`), and when a catalog query could not be confirmed stopped adds `CATALOG_UNCONFIRMED_NOTE` (`withCatalogWarning`): a warning on success (kept to read), appended to failure/stop/cancel/commit messages without changing their commit or rollback evidence; a dismissed prompt after such a check becomes a cancelled "Nothing was run." outcome instead of a quiet one. Tests: swallowed preflight timeout with refused cancel then COMMIT, failure with the same evidence, dismissed prompt.
+  - Verification: `npx vitest run` 2463 passed; `npm run build` ok.
 
 ## Task
 
