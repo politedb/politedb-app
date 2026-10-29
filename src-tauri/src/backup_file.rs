@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use uuid::Uuid;
 
@@ -34,6 +34,8 @@ enum State {
     AbortFailed,
     /// Renamed onto the destination. Kept, without paths, as a tombstone.
     Published,
+    /// Temp removed (or let go); being unlisted.
+    Aborted,
 }
 
 struct Session {
@@ -42,9 +44,15 @@ struct Session {
     paths: Option<(PathBuf, PathBuf)>,
 }
 
-/// Sessions by id. One lock for all: every step is a short file operation.
+type Shared = Arc<Mutex<Session>>;
+
+/// Sessions by id. The registry lock is held only to find, add or remove a
+/// session; each session's own lock is held through its file work, so its
+/// steps (write, publish, abort) never overlap while other sessions and
+/// the registry stay free. These calls block on file I/O: commands run
+/// them off the IPC thread.
 pub struct BackupFiles {
-    sessions: Mutex<HashMap<Uuid, Session>>,
+    sessions: Mutex<HashMap<Uuid, Shared>>,
 }
 
 static BACKUP_FILES: OnceLock<BackupFiles> = OnceLock::new();
@@ -61,8 +69,16 @@ impl BackupFiles {
         }
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<Uuid, Session>> {
+    fn registry(&self) -> MutexGuard<'_, HashMap<Uuid, Shared>> {
         self.sessions.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn get(&self, id: Uuid) -> Option<Shared> {
+        self.registry().get(&id).cloned()
+    }
+
+    fn lock(session: &Shared) -> MutexGuard<'_, Session> {
+        session.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     /// Creates an exclusive temp sibling of `final_path`.
@@ -73,22 +89,24 @@ impl BackupFiles {
         let id = Uuid::new_v4();
         let temp = file_storage::export_create_temp(&final_path, &id.to_string())
             .map_err(|_| BEGIN_FAILED.to_string())?;
-        self.lock().insert(
+        self.registry().insert(
             id,
-            Session {
+            Arc::new(Mutex::new(Session {
                 state: State::Open,
                 paths: Some((temp, final_path)),
-            },
+            })),
         );
         Ok(id)
     }
 
     /// Writes the whole backup, once.
     pub fn write(&self, id: Uuid, bytes: &[u8]) -> Result<(), String> {
-        let mut sessions = self.lock();
-        let session = sessions.get_mut(&id).ok_or(NOT_FOUND)?;
+        let shared = self.get(id).ok_or(NOT_FOUND)?;
+        let mut session = Self::lock(&shared);
         match (session.state, &session.paths) {
             (State::Published, _) => Err(ALREADY_PUBLISHED.into()),
+            // Aborted while this call waited for the session.
+            (State::Aborted, _) => Err(NOT_FOUND.into()),
             (State::Open, Some((temp, _))) => {
                 if std::fs::write(temp, bytes).is_ok() {
                     session.state = State::Written;
@@ -105,10 +123,12 @@ impl BackupFiles {
     /// Renames the written temp onto the destination. On failure the
     /// destination keeps its content and the temp waits for abort.
     pub fn publish(&self, id: Uuid) -> Result<(), String> {
-        let mut sessions = self.lock();
-        let session = sessions.get_mut(&id).ok_or(NOT_FOUND)?;
+        let shared = self.get(id).ok_or(NOT_FOUND)?;
+        let mut session = Self::lock(&shared);
         match (session.state, &session.paths) {
             (State::Published, _) => Err(ALREADY_PUBLISHED.into()),
+            // Aborted while this call waited for the session.
+            (State::Aborted, _) => Err(NOT_FOUND.into()),
             (State::Written, Some((temp, dest))) => {
                 if file_storage::export_publish_temp(temp, dest).is_ok() {
                     session.state = State::Published;
@@ -127,19 +147,24 @@ impl BackupFiles {
     /// before, unknown) is Ok; a published one answers ALREADY_PUBLISHED.
     /// A failed removal keeps the session so abort can be tried again.
     pub fn abort(&self, id: Uuid) -> Result<(), String> {
-        let mut sessions = self.lock();
-        let Some(session) = sessions.get_mut(&id) else {
+        let Some(shared) = self.get(id) else {
             return Ok(());
         };
-        if session.state == State::Published {
-            return Err(ALREADY_PUBLISHED.into());
+        let mut session = Self::lock(&shared);
+        match session.state {
+            State::Published => return Err(ALREADY_PUBLISHED.into()),
+            // Removed meanwhile by another abort or forget.
+            State::Aborted => return Ok(()),
+            _ => {}
         }
         let removed = match &session.paths {
             Some((temp, _)) => file_storage::export_discard_temp(temp).is_ok(),
             None => true,
         };
         if removed {
-            sessions.remove(&id);
+            session.state = State::Aborted;
+            session.paths = None;
+            self.registry().remove(&id);
             Ok(())
         } else {
             session.state = State::AbortFailed;
@@ -150,15 +175,20 @@ impl BackupFiles {
     /// Lets go of a session whose temp could not be removed (it stays on
     /// disk; the user was told). Only from AbortFailed: never a tombstone.
     pub fn forget(&self, id: Uuid) -> Result<(), String> {
-        let mut sessions = self.lock();
-        match sessions.get(&id).map(|s| s.state) {
-            None => Ok(()),
-            Some(State::AbortFailed) => {
-                sessions.remove(&id);
+        let Some(shared) = self.get(id) else {
+            return Ok(());
+        };
+        let mut session = Self::lock(&shared);
+        match session.state {
+            State::AbortFailed => {
+                session.state = State::Aborted;
+                session.paths = None;
+                self.registry().remove(&id);
                 Ok(())
             }
-            Some(State::Published) => Err(ALREADY_PUBLISHED.into()),
-            Some(_) => Err(WRONG_STATE.into()),
+            State::Aborted => Ok(()),
+            State::Published => Err(ALREADY_PUBLISHED.into()),
+            _ => Err(WRONG_STATE.into()),
         }
     }
 }
@@ -229,8 +259,9 @@ mod tests {
         let id = files.begin(d.join("shop.dumb")).unwrap();
         // The temp replaced by a directory: writing it fails.
         let temp = {
-            let s = files.lock();
-            s.get(&id).unwrap().paths.as_ref().unwrap().0.clone()
+            let shared = files.get(id).unwrap();
+            let s = BackupFiles::lock(&shared);
+            s.paths.as_ref().unwrap().0.clone()
         };
         fs::remove_file(&temp).unwrap();
         fs::create_dir(&temp).unwrap();
@@ -291,5 +322,79 @@ mod tests {
         files.abort(id).unwrap();
         assert_eq!(temps(&d), 0);
         fs::remove_dir_all(d).unwrap();
+    }
+
+    /// Runs `a` and `b` on two threads released together, many times.
+    fn race(rounds: usize, f: impl Fn(&BackupFiles, &std::path::Path) + Sync) {
+        for _ in 0..rounds {
+            let files = BackupFiles::new();
+            let d = dir();
+            f(&files, &d);
+            fs::remove_dir_all(d).unwrap();
+        }
+    }
+
+    #[test]
+    fn publish_and_abort_racing_agree_on_one_outcome() {
+        race(50, |files, d| {
+            let dest = d.join("shop.dumb");
+            fs::write(&dest, b"old").unwrap();
+            let id = files.begin(dest.clone()).unwrap();
+            files.write(id, b"new").unwrap();
+            let start = std::sync::Barrier::new(2);
+            let (published, aborted) = std::thread::scope(|s| {
+                let p = s.spawn(|| {
+                    start.wait();
+                    files.publish(id)
+                });
+                let a = s.spawn(|| {
+                    start.wait();
+                    files.abort(id)
+                });
+                (p.join().unwrap(), a.join().unwrap())
+            });
+            match (published, aborted) {
+                // Published first: abort finds the tombstone.
+                (Ok(()), Err(e)) => {
+                    assert_eq!(e, ALREADY_PUBLISHED);
+                    assert_eq!(fs::read(&dest).unwrap(), b"new");
+                }
+                // Aborted first: nothing left to publish.
+                (Err(e), Ok(())) => {
+                    assert_eq!(e, NOT_FOUND);
+                    assert_eq!(fs::read(&dest).unwrap(), b"old");
+                }
+                other => panic!("inconsistent outcome: {other:?}"),
+            }
+            assert_eq!(temps(d), 0);
+        });
+    }
+
+    #[test]
+    fn write_and_abort_racing_never_leave_a_publishable_session() {
+        race(50, |files, d| {
+            let dest = d.join("shop.dumb");
+            let id = files.begin(dest.clone()).unwrap();
+            let bytes = vec![7u8; 256 * 1024];
+            let start = std::sync::Barrier::new(2);
+            let (written, aborted) = std::thread::scope(|s| {
+                let w = s.spawn(|| {
+                    start.wait();
+                    files.write(id, &bytes)
+                });
+                let a = s.spawn(|| {
+                    start.wait();
+                    files.abort(id)
+                });
+                (w.join().unwrap(), a.join().unwrap())
+            });
+            // Abort always wins in the end: the temp is gone and nothing
+            // can be published, whichever ran first.
+            assert_eq!(aborted, Ok(()));
+            assert!(written.is_ok() || written == Err(NOT_FOUND.to_string()));
+            assert_eq!(files.publish(id), Err(NOT_FOUND.into()));
+            assert!(!dest.exists());
+            assert_eq!(temps(d), 0);
+        });
     }
 }

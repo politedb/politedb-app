@@ -54,15 +54,16 @@ const OPEN: u8 = 0;
 const ENDING: u8 = 1;
 /// end() owns the connection and sends COMMIT/ROLLBACK.
 const COMMITTING: u8 = 2;
-/// A cancel or a forced close owns it: nothing more is sent.
-const CLOSED: u8 = 3;
+/// Closed by a cancel, or by a forced close (the connection going away, a
+/// timeout): nothing more is sent. Who closed it is part of the state, set
+/// by the same compare-exchange that takes it, so it is never seen closed
+/// without its owner.
+const CLOSED_BY_CANCEL: u8 = 3;
+const CLOSED_FORCED: u8 = 4;
 
-/// Who closed a session (`closed_by`), set by whoever took it last from
-/// OPEN/ENDING (cancel, forced close) or by end() once it owns COMMITTING.
-const BY_NONE: u8 = 0;
-const BY_CANCEL: u8 = 1;
-const BY_END: u8 = 2;
-const BY_FORCED: u8 = 3;
+fn is_closed(state: u8) -> bool {
+    state == CLOSED_BY_CANCEL || state == CLOSED_FORCED
+}
 
 /// What a cancel established. Each says only that this side has closed
 /// the session's connection and that no COMMIT was sent by end() — never
@@ -99,22 +100,20 @@ struct PgSqlSession {
     /// lock (a statement may hold it): the socket closes, the statement
     /// fails, and the server rolls back.
     abort: tokio::task::AbortHandle,
-    /// OPEN → ENDING → COMMITTING, or → CLOSED (forced). Past OPEN no
-    /// statement starts. ENDING → COMMITTING and → CLOSED are taken by
-    /// compare-exchange, so exactly one of end() and a forced close owns
-    /// the outcome: a close that wins sends nothing; one that comes after
-    /// COMMIT was sent leaves its outcome unknown, and says so.
+    /// OPEN → ENDING → COMMITTING, or OPEN/ENDING → CLOSED_BY_CANCEL /
+    /// CLOSED_FORCED. Past OPEN no statement starts. Each step is taken by
+    /// compare-exchange, so exactly one of end(), a cancel and a forced
+    /// close owns the outcome: a close that wins sends nothing; one that
+    /// comes after COMMIT was sent leaves its outcome unknown, and says so.
     state: std::sync::atomic::AtomicU8,
     /// None once ended. Dropping it closes the connection; the server then
     /// rolls back anything still open.
     client: Mutex<Option<(Client, SessionTask)>>,
     last_used: std::sync::Mutex<Instant>,
-    /// BY_*: who closed it.
-    closed_by: std::sync::atomic::AtomicU8,
     /// Taken by the one caller that tears the session down.
     teardown_started: std::sync::atomic::AtomicBool,
     /// True once torn down (connection closed, client dropped, unlisted).
-    /// Until then the session stays listed as CLOSED, so a late cancel or
+    /// Until then the session stays listed as closed, so a late cancel or
     /// end() sees it ended instead of not found.
     torn_down: tokio::sync::watch::Sender<bool>,
 }
@@ -142,20 +141,70 @@ pub struct SqlSessionRegistry {
     hooks: TestHooks,
 }
 
-/// Lets a test hold a teardown at its start, to order races.
+/// Lets a test hold a step (gates) and see where calls are (counters), to
+/// order races by handshakes rather than sleeps.
 #[cfg(test)]
 #[derive(Default)]
 struct TestHooks {
-    teardown_gate: std::sync::Mutex<Option<Arc<tokio::sync::Semaphore>>>,
+    /// Held at the start of a teardown.
+    teardown_gate: Gate,
+    /// Held right after a cancel took the session, before its teardown.
+    cancel_took_gate: Gate,
+    /// Held right after end() moved OPEN → ENDING, before it waits for the
+    /// client.
+    ending_gate: Gate,
+    /// Teardowns actually run (not waits on another's).
+    teardowns: std::sync::atomic::AtomicUsize,
+    /// execute() calls that reached the client lock (waiting or holding).
+    at_lock: std::sync::atomic::AtomicUsize,
+    /// Statements sent to the server.
+    sent: std::sync::atomic::AtomicUsize,
+    /// Cancels that took the session (passed their compare-exchange).
+    cancels_took: std::sync::atomic::AtomicUsize,
+    /// end() calls past OPEN → ENDING.
+    endings: std::sync::atomic::AtomicUsize,
+}
+
+#[cfg(test)]
+#[derive(Default)]
+struct Gate(std::sync::Mutex<Option<Arc<tokio::sync::Semaphore>>>);
+
+#[cfg(test)]
+impl Gate {
+    /// Closes the gate: each pass then needs one permit.
+    fn hold(&self) -> Arc<tokio::sync::Semaphore> {
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *self.0.lock().unwrap() = Some(Arc::clone(&gate));
+        gate
+    }
+
+    fn open(&self) {
+        *self.0.lock().unwrap() = None;
+    }
+
+    async fn pass(&self) {
+        let gate = self.0.lock().unwrap().clone();
+        if let Some(gate) = gate {
+            let _ = gate.acquire().await.map(|p| p.forget());
+        }
+    }
 }
 
 #[cfg(test)]
 impl TestHooks {
     async fn before_teardown(&self) {
-        let gate = self.teardown_gate.lock().unwrap().clone();
-        if let Some(gate) = gate {
-            let _ = gate.acquire().await.map(|p| p.forget());
-        }
+        self.teardowns.fetch_add(1, SeqCst);
+        self.teardown_gate.pass().await;
+    }
+
+    async fn after_cancel_took(&self) {
+        self.cancels_took.fetch_add(1, SeqCst);
+        self.cancel_took_gate.pass().await;
+    }
+
+    async fn after_ending(&self) {
+        self.endings.fetch_add(1, SeqCst);
+        self.ending_gate.pass().await;
     }
 }
 
@@ -233,7 +282,6 @@ impl SqlSessionRegistry {
                 state: std::sync::atomic::AtomicU8::new(OPEN),
                 client: Mutex::new(Some((client, task))),
                 last_used: std::sync::Mutex::new(Instant::now()),
-                closed_by: std::sync::atomic::AtomicU8::new(BY_NONE),
                 teardown_started: std::sync::atomic::AtomicBool::new(false),
                 torn_down: tokio::sync::watch::channel(false).0,
             }),
@@ -252,6 +300,8 @@ impl SqlSessionRegistry {
             .map(|s| Arc::clone(&s))
             .ok_or("SQL_SESSION_NOT_FOUND")?;
         session.touch();
+        #[cfg(test)]
+        self.hooks.at_lock.fetch_add(1, SeqCst);
         let result = {
             let guard = session.client.lock().await;
             // Closed while this call waited for the lock.
@@ -259,6 +309,8 @@ impl SqlSessionRegistry {
                 return Err("SQL_SESSION_ENDED".into());
             }
             let (client, _) = guard.as_ref().ok_or("SQL_SESSION_ENDED")?;
+            #[cfg(test)]
+            self.hooks.sent.fetch_add(1, SeqCst);
             tokio::time::timeout(
                 STATEMENT_LIMIT + Duration::from_secs(5),
                 client.execute(sql, &[]),
@@ -296,11 +348,13 @@ impl SqlSessionRegistry {
         {
             // Already ending, or closed: a close is torn down before this
             // answers, so the caller never sees it half done.
-            if session.state.load(SeqCst) == CLOSED {
+            if is_closed(session.state.load(SeqCst)) {
                 Self::wait_torn_down(&session).await;
             }
             return Err("SQL_SESSION_ENDED".into());
         }
+        #[cfg(test)]
+        self.hooks.after_ending().await;
         let result = match tokio::time::timeout(END_LIMIT, session.client.lock()).await {
             // A statement still running past the limit: close instead.
             Err(_) => Err("SQL_SESSION_END_TIMEOUT".to_string()),
@@ -318,9 +372,6 @@ impl SqlSessionRegistry {
                     Self::wait_torn_down(&session).await;
                     return Err("SQL_SESSION_ENDED".into());
                 } else if let Some((client, _task)) = guard.take() {
-                    let _ = session
-                        .closed_by
-                        .compare_exchange(BY_NONE, BY_END, SeqCst, SeqCst);
                     let end = if commit { "COMMIT" } else { "ROLLBACK" };
                     match tokio::time::timeout(END_LIMIT, client.batch_execute(end)).await {
                         Ok(Ok(())) => Ok(()),
@@ -355,25 +406,23 @@ impl SqlSessionRegistry {
         let Some(session) = self.sessions.get(&session_id).map(|s| Arc::clone(&s)) else {
             return Ok(CancelOutcome::Unknown);
         };
-        let took = session
-            .state
-            .compare_exchange(OPEN, CLOSED, SeqCst, SeqCst)
-            .or_else(|_| {
-                session
-                    .state
-                    .compare_exchange(ENDING, CLOSED, SeqCst, SeqCst)
-            })
-            .is_ok();
-        if took {
-            session.closed_by.store(BY_CANCEL, SeqCst);
-            self.teardown(session_id, &session, true).await;
-            return Ok(CancelOutcome::Cancelled);
-        }
-        if session.state.load(SeqCst) == COMMITTING {
+        let took = session.state.fetch_update(SeqCst, SeqCst, |state| {
+            (state == OPEN || state == ENDING).then_some(CLOSED_BY_CANCEL)
+        });
+        let state = match took {
+            Ok(_) => {
+                #[cfg(test)]
+                self.hooks.after_cancel_took().await;
+                self.teardown(session_id, &session, true).await;
+                return Ok(CancelOutcome::Cancelled);
+            }
+            Err(state) => state,
+        };
+        if state == COMMITTING {
             return Err("SQL_SESSION_COMMITTING".into());
         }
         Self::wait_torn_down(&session).await;
-        Ok(if session.closed_by.load(SeqCst) == BY_CANCEL {
+        Ok(if state == CLOSED_BY_CANCEL {
             CancelOutcome::AlreadyClosedByCancel
         } else {
             CancelOutcome::AlreadyEnded
@@ -390,12 +439,9 @@ impl SqlSessionRegistry {
         };
         // Own the session unless end() already owns the outcome (its
         // COMMIT is in flight): the connection still closes below.
-        let taken = session.state.fetch_update(SeqCst, SeqCst, |state| {
-            (state == OPEN || state == ENDING).then_some(CLOSED)
+        let _ = session.state.fetch_update(SeqCst, SeqCst, |state| {
+            (state == OPEN || state == ENDING).then_some(CLOSED_FORCED)
         });
-        if taken.is_ok() {
-            session.closed_by.store(BY_FORCED, SeqCst);
-        }
         self.teardown(session_id, &session, true).await;
     }
 
@@ -762,14 +808,29 @@ mod tests {
             .unwrap();
     }
 
+    /// Waits until `cond` holds (a handshake, not a timed guess).
+    async fn until(what: &str, cond: impl Fn() -> bool) {
+        for _ in 0..1000 {
+            if cond() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("timed out waiting for: {what}");
+    }
+
+    fn state_of(reg: &SqlSessionRegistry, id: Uuid) -> Option<u8> {
+        reg.sessions.get(&id).map(|s| s.state.load(SeqCst))
+    }
+
     /// Cancelling sessions, against a disposable PostgreSQL:
     /// `HEALTH_PG_URL=… cargo test sql_session_cancel_live -- --ignored`
     /// Creates and drops the table `zz_cancel_t` and its trigger function.
+    /// Races are ordered by gates and counters (TestHooks), not sleeps.
     #[tokio::test]
     #[ignore]
     async fn sql_session_cancel_live() {
         use deadpool_postgres::{Manager, ManagerConfig};
-        use tokio::sync::Semaphore;
 
         let cfg: tokio_postgres::Config = std::env::var("HEALTH_PG_URL")
             .expect("set HEALTH_PG_URL")
@@ -788,10 +849,10 @@ mod tests {
             .batch_execute(
                 "DROP TABLE IF EXISTS zz_cancel_t; CREATE TABLE zz_cancel_t (v int);
                  CREATE OR REPLACE FUNCTION zz_cancel_slow() RETURNS trigger
-                   LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_sleep(2); RETURN NULL; END $$;
+                   LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_sleep(3); RETURN NULL; END $$;
                  CREATE CONSTRAINT TRIGGER zz_cancel_slow AFTER INSERT ON zz_cancel_t
                    DEFERRABLE INITIALLY DEFERRED FOR EACH ROW
-                   WHEN (NEW.v = 500) EXECUTE FUNCTION zz_cancel_slow();",
+                   WHEN (NEW.v >= 500) EXECUTE FUNCTION zz_cancel_slow();",
             )
             .await
             .unwrap();
@@ -807,9 +868,10 @@ mod tests {
         };
         let conn = Uuid::new_v4();
         let reg = Arc::new(SqlSessionRegistry::default());
+        let h = &reg.hooks;
 
-        // A running statement is cut short; nothing it or earlier ones did
-        // stays, and its locks are released.
+        // A running statement is cut short, and one queued behind it never
+        // runs; nothing stays and the session's locks are released.
         let (id, _) = reg
             .begin(conn, &cfg, SqlSessionMode::Transaction)
             .await
@@ -820,19 +882,34 @@ mod tests {
         reg.execute(id, "SELECT pg_advisory_lock(434343)")
             .await
             .unwrap();
+        let (at_lock, sent) = (h.at_lock.load(SeqCst), h.sent.load(SeqCst));
         let running = {
             let reg = Arc::clone(&reg);
             tokio::spawn(async move { reg.execute(id, "SELECT pg_sleep(60)").await })
         };
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        until("the sleep is sent", || h.sent.load(SeqCst) == sent + 1).await;
+        let queued = {
+            let reg = Arc::clone(&reg);
+            tokio::spawn(async move { reg.execute(id, "INSERT INTO zz_cancel_t VALUES (2)").await })
+        };
+        until("the insert waits for the lock", || {
+            h.at_lock.load(SeqCst) == at_lock + 2
+        })
+        .await;
         let started = Instant::now();
         assert_eq!(reg.cancel(id).await, Ok(CancelOutcome::Cancelled));
         assert!(running.await.unwrap().is_err());
+        assert_eq!(
+            queued.await.unwrap(),
+            Err("SQL_SESSION_ENDED".to_string()),
+            "the queued statement never ran"
+        );
+        assert_eq!(h.sent.load(SeqCst), sent + 1);
         assert!(
             started.elapsed() < Duration::from_secs(15),
             "cancelled promptly"
         );
-        assert_eq!(rows(1).await, 0, "not committed");
+        assert_eq!(rows(1).await + rows(2).await, 0, "not committed");
         let mut free = false;
         for _ in 0..50 {
             free = other
@@ -850,64 +927,117 @@ mod tests {
             .batch_execute("SELECT pg_advisory_unlock(434343)")
             .await
             .unwrap();
-        // Later calls see it ended or gone, never a fresh session.
+        // Later calls see it gone, never a fresh session.
         assert!(reg.execute(id, "SELECT 1").await.is_err());
         assert!(reg.end(id, true).await.is_err());
         assert_eq!(reg.cancel(id).await, Ok(CancelOutcome::Unknown));
 
-        // Two cancels during one held teardown: both wait for it.
-        let gate = Arc::new(Semaphore::new(0));
-        *reg.hooks.teardown_gate.lock().unwrap() = Some(Arc::clone(&gate));
+        // A cancel that took the session (held before its teardown), then a
+        // forced close and a second cancel: the owner is never lost, the
+        // teardown runs once, and everyone answers after it.
         let (id, _) = reg
             .begin(conn, &cfg, SqlSessionMode::Transaction)
             .await
             .unwrap();
+        let took_gate = h.cancel_took_gate.hold();
+        let (took, teardowns) = (h.cancels_took.load(SeqCst), h.teardowns.load(SeqCst));
         let first = {
             let reg = Arc::clone(&reg);
             tokio::spawn(async move { reg.cancel(id).await })
         };
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        until("the first cancel took it", || {
+            h.cancels_took.load(SeqCst) == took + 1
+        })
+        .await;
+        assert_eq!(state_of(&reg, id), Some(CLOSED_BY_CANCEL));
+        let teardown_gate = h.teardown_gate.hold();
+        let forced = {
+            let reg = Arc::clone(&reg);
+            tokio::spawn(async move { reg.end_for_connection(conn).await })
+        };
+        until("the forced close holds the teardown", || {
+            h.teardowns.load(SeqCst) == teardowns + 1
+        })
+        .await;
         let second = {
             let reg = Arc::clone(&reg);
             tokio::spawn(async move { reg.cancel(id).await })
         };
-        // end() racing them answers only once the teardown is done.
         let ending = {
             let reg = Arc::clone(&reg);
             tokio::spawn(async move { reg.end(id, true).await })
         };
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        assert!(!second.is_finished() && !ending.is_finished(), "waiting");
-        gate.add_permits(1);
+        // Nobody answers while the teardown is held.
+        tokio::task::yield_now().await;
+        assert!(!second.is_finished() && !ending.is_finished() && !forced.is_finished());
+        assert_eq!(state_of(&reg, id), Some(CLOSED_BY_CANCEL), "owner kept");
+        h.teardown_gate.open();
+        teardown_gate.add_permits(1);
+        h.cancel_took_gate.open();
+        took_gate.add_permits(1);
+        forced.await.unwrap();
         assert_eq!(first.await.unwrap(), Ok(CancelOutcome::Cancelled));
         assert_eq!(
             second.await.unwrap(),
             Ok(CancelOutcome::AlreadyClosedByCancel)
         );
         assert_eq!(ending.await.unwrap(), Err("SQL_SESSION_ENDED".to_string()));
+        assert_eq!(h.teardowns.load(SeqCst), teardowns + 1, "torn down once");
+        assert_eq!(state_of(&reg, id), None);
+
+        // An end() already ENDING (held there) loses to a cancel: it sends
+        // nothing, does not close again, and answers after the teardown.
+        let (id, _) = reg
+            .begin(conn, &cfg, SqlSessionMode::Transaction)
+            .await
+            .unwrap();
+        reg.execute(id, "INSERT INTO zz_cancel_t VALUES (3)")
+            .await
+            .unwrap();
+        let ending_gate = h.ending_gate.hold();
+        let (endings, teardowns) = (h.endings.load(SeqCst), h.teardowns.load(SeqCst));
+        let ending = {
+            let reg = Arc::clone(&reg);
+            tokio::spawn(async move { reg.end(id, true).await })
+        };
+        until("end() is ENDING", || h.endings.load(SeqCst) == endings + 1).await;
+        assert_eq!(state_of(&reg, id), Some(ENDING));
+        assert_eq!(reg.cancel(id).await, Ok(CancelOutcome::Cancelled));
+        h.ending_gate.open();
+        ending_gate.add_permits(1);
+        assert_eq!(ending.await.unwrap(), Err("SQL_SESSION_ENDED".to_string()));
+        assert_eq!(h.teardowns.load(SeqCst), teardowns + 1, "torn down once");
+        assert_eq!(rows(3).await, 0, "no COMMIT was sent");
 
         // A forced close is no evidence for a cancel arriving during it.
         let (id, _) = reg
             .begin(conn, &cfg, SqlSessionMode::Transaction)
             .await
             .unwrap();
+        let teardown_gate = h.teardown_gate.hold();
+        let teardowns = h.teardowns.load(SeqCst);
         let forced = {
             let reg = Arc::clone(&reg);
             tokio::spawn(async move { reg.end_for_connection(conn).await })
         };
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        until("the forced close holds the teardown", || {
+            h.teardowns.load(SeqCst) == teardowns + 1
+        })
+        .await;
+        assert_eq!(state_of(&reg, id), Some(CLOSED_FORCED));
         let late = {
             let reg = Arc::clone(&reg);
             tokio::spawn(async move { reg.cancel(id).await })
         };
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        gate.add_permits(1);
+        tokio::task::yield_now().await;
+        assert!(!late.is_finished());
+        h.teardown_gate.open();
+        teardown_gate.add_permits(1);
         forced.await.unwrap();
         assert_eq!(late.await.unwrap(), Ok(CancelOutcome::AlreadyEnded));
-        *reg.hooks.teardown_gate.lock().unwrap() = None;
 
-        // Once COMMIT is sent, a cancel is refused and changes nothing: the
-        // commit (slowed by a deferred trigger) completes.
+        // Once COMMIT is sent (slowed by a deferred trigger), a cancel is
+        // refused and changes nothing: the commit completes.
         let (id, _) = reg
             .begin(conn, &cfg, SqlSessionMode::Transaction)
             .await
@@ -919,7 +1049,7 @@ mod tests {
             let reg = Arc::clone(&reg);
             tokio::spawn(async move { reg.end(id, true).await })
         };
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        until("COMMIT is sent", || state_of(&reg, id) == Some(COMMITTING)).await;
         assert_eq!(
             reg.cancel(id).await,
             Err("SQL_SESSION_COMMITTING".to_string())
@@ -929,6 +1059,33 @@ mod tests {
         // Gone after a completed end: unknown, not a cancel.
         assert_eq!(reg.cancel(id).await, Ok(CancelOutcome::Unknown));
 
+        // The connection going away during a COMMIT in flight: the forced
+        // close cannot take the session from end(), which reports the
+        // outcome as unknown (the existing contract), and tears down once.
+        let (id, _) = reg
+            .begin(conn, &cfg, SqlSessionMode::Transaction)
+            .await
+            .unwrap();
+        reg.execute(id, "INSERT INTO zz_cancel_t VALUES (501)")
+            .await
+            .unwrap();
+        let teardowns = h.teardowns.load(SeqCst);
+        let committing = {
+            let reg = Arc::clone(&reg);
+            tokio::spawn(async move { reg.end(id, true).await })
+        };
+        until("COMMIT is sent", || state_of(&reg, id) == Some(COMMITTING)).await;
+        reg.end_for_connection(conn).await;
+        assert_eq!(
+            committing.await.unwrap(),
+            Err(COMMIT_OUTCOME_UNKNOWN.to_string())
+        );
+        assert_eq!(h.teardowns.load(SeqCst), teardowns + 1, "torn down once");
+        assert_eq!(state_of(&reg, id), None);
+
+        // The server may still finish that COMMIT; wait for it before the
+        // cleanup so the drop does not block on its lock.
+        tokio::time::sleep(Duration::from_secs(4)).await;
         other
             .batch_execute("DROP TABLE zz_cancel_t; DROP FUNCTION zz_cancel_slow()")
             .await
