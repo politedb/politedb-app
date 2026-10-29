@@ -232,9 +232,7 @@ describe("DumpProgressDialog", () => {
     // Any key reaching the app's window or document listeners (its
     // shortcuts), other than the Tab the modal handles.
     const shortcut = vi.fn();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Tab") shortcut(e.key);
-    };
+    const onKey = (e: KeyboardEvent) => shortcut(e.key);
     window.addEventListener("keydown", onKey);
     document.addEventListener("keydown", onKey);
     try {
@@ -255,8 +253,10 @@ describe("DumpProgressDialog", () => {
         document.getElementById(dialog.getAttribute("aria-labelledby")!)
           ?.textContent
       ).toBe("Restoring into shop (shop_db)");
-      // Tab wraps inside it.
+      // Tab and Shift+Tab wrap inside it.
       fireEvent.keyDown(cancel, { key: "Tab" });
+      expect(document.activeElement).toBe(cancel);
+      fireEvent.keyDown(cancel, { key: "Tab", shiftKey: true });
       expect(document.activeElement).toBe(cancel);
       // App shortcuts do not reach the app.
       fireEvent.keyDown(cancel, { key: "w", metaKey: true });

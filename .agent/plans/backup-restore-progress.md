@@ -79,6 +79,9 @@ APPROVED
 - **Phase 3 review round 1 fixes committed `332c933`. Review round 2 (Codex: CHANGES REQUIRED, 1 P2) fix, 2026-10-29, not committed:**
   - R2-1: the modal stops every key at the window capture phase (not only Meta/Ctrl/Alt chords), so no app shortcut acts behind it, Shift-only bindings included; the default action is kept (Enter/Space press the focused modal button), Tab is trapped, and Esc on a retained result closes it in the same handler. Tests: plain, Shift-only, Enter and Esc keys reach neither window nor document listeners; Esc closes a result; the real `useConnectionShortcuts` with a Shift+R refresh binding does not refresh behind the modal.
   - Verification: `npx vitest run` all passed; `npm run build` ok.
+- **Phase 3 review round 2 fix committed `25c10f5`. Review round 3 (Codex: CHANGES REQUIRED, 1 P2) fix, 2026-10-29, not committed:**
+  - R3-1: Tab keys (Shift+Tab and other Tab chords included) are stopped at the window capture phase too, before the focus trap handles them, so a Tab-chord shortcut cannot act behind the modal. Tests: Tab/Shift+Tab wrap and reach no window/document listener; the real `useConnectionShortcuts` with a Shift+Tab binding does not run behind the modal (and does without it).
+  - Verification: `npx vitest run` all passed; `npm run build` ok.
 
 ## Task
 

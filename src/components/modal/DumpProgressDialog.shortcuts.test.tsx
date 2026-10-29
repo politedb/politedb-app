@@ -23,6 +23,8 @@ vi.mock("src/stores/keyboardShortcuts", async (importActual) => {
       actual.SHORTCUT_DEFINITIONS.map((d) => [d.id, d.defaultBinding])
     ),
     refresh: "Shift+R",
+    // A Tab chord too (Keyboard Settings accepts it).
+    openSql: "Shift+Tab",
   };
   return {
     ...actual,
@@ -48,14 +50,15 @@ beforeEach(() => {
 });
 
 describe("the progress modal and the app's shortcuts", () => {
-  it("keeps a Shift-only shortcut from acting behind it", () => {
+  it("keeps Shift-only and Tab-chord shortcuts from acting behind it", () => {
     const refresh = vi.fn();
+    const openSql = vi.fn();
     renderHook(() =>
       useConnectionShortcuts({
         activeWindowId: null,
         activeProfileScreen: "t1",
         actions: {
-          openSql: vi.fn(),
+          openSql,
           beforeSaveChanges: vi.fn(),
           saveChanges: vi.fn(),
           refresh,
@@ -66,7 +69,9 @@ describe("the progress modal and the app's shortcuts", () => {
     );
     // Without the modal the binding works.
     fireEvent.keyDown(document.body, { key: "R", shiftKey: true });
+    fireEvent.keyDown(document.body, { key: "Tab", shiftKey: true });
     expect(refresh).toHaveBeenCalledTimes(1);
+    expect(openSql).toHaveBeenCalledTimes(1);
 
     const started = startDumpJob("restore", {
       tabId: "t1",
@@ -82,6 +87,10 @@ describe("the progress modal and the app's shortcuts", () => {
     });
     const cancel = screen.getByRole("button", { name: "Cancel" });
     fireEvent.keyDown(cancel, { key: "R", shiftKey: true });
+    // Shift+Tab: the modal moves focus (wrapping), nothing runs behind it.
+    fireEvent.keyDown(cancel, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(cancel);
     expect(refresh).toHaveBeenCalledTimes(1);
+    expect(openSql).toHaveBeenCalledTimes(1);
   });
 });

@@ -314,6 +314,11 @@ function useModalFocus(
     (focusables()[0] ?? panel)?.focus();
 
     const onKeyDown = (e: KeyboardEvent) => {
+      // No key reaches the app behind it: its shortcuts listen on the
+      // window and may use any chord (Shift-only, Shift+Tab, …). Stopping
+      // the event here keeps its default action, so Enter and Space still
+      // press the focused modal button; Tab and Esc are handled here.
+      e.stopPropagation();
       if (e.key === "Tab") {
         const items = focusables();
         if (!items.length) {
@@ -336,11 +341,6 @@ function useModalFocus(
         }
         return;
       }
-      // No key reaches the app behind it: its shortcuts listen on the
-      // window and may use any chord (Shift-only ones too). Stopping the
-      // event here keeps its default action, so Enter and Space still
-      // press the focused modal button; Esc is handled here.
-      e.stopPropagation();
       if (e.key === "Escape") {
         e.preventDefault();
         onEscapeRef.current?.();
