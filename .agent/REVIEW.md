@@ -691,3 +691,37 @@ Non-blocking documentation correction: `src-tauri/src/engines/postgres/sql_sessi
 - `git diff --check`: passed before report edit. Only round 15 appended to `.agent/REVIEW.md`; unrelated dialog change and untracked `.claude/launch.json` preserved. No source edits, commit, push or merge.
 
 **Verdict for `6761e1a`: VERIFIED WITH LIMITATIONS. Verdict for the complete `main..HEAD` branch: VERIFIED WITH LIMITATIONS.** Round 14's atomic ownership issue is resolved; missing deterministic/live concurrency coverage, sandbox-blocked full Rust verification and the documented compatibility limits remain. Partition duplication/topology is separately tracked and non-blocking.
+
+
+## backup-restore-progress — Phase 1 review
+
+Status: **CHANGES REQUIRED**
+
+Reviewed by Codex, 2026-10-29. Scope: `git show 523e9b3` (HEAD `523e9b32a176f9c9d67f4ab357c84840eb8f4c4c`), all nine changed files and their affected teardown/file-storage paths, against the APPROVED plan's PostgreSQL Session Cancel and Backup File Session contracts and Rust verification items. No P0 established. Findings below are static findings; live reproduction was blocked by sandbox networking. Only this review file was edited; existing untracked `.claude/launch.json` was left untouched.
+
+### P1 — Move whole-file I/O off the synchronous IPC handler
+
+`src-tauri/src/commands/backup_file.rs:18` (`backup_file_write`; publication at `:32`), `src-tauri/src/backup_file.rs:93`: these synchronous commands execute the entire backup write and publication's `sync_all()` inline in the IPC handler. A large backup or slow/network destination can block the desktop event/IPC thread for seconds or longer, freezing progress and preventing responsive cancellation/close handling. The installed Tauri command macro's blocking wrapper directly invokes the function; it does not dispatch this work to a blocking worker. Keep commands thin, but move owned request bytes and filesystem work onto a blocking worker through an asynchronous command boundary, including publication and other potentially blocking filesystem operations. Preserve serialization of each session. Verify with a deliberately held write/sync that unrelated IPC/UI work remains responsive and abort joins the same session operation rather than racing publication.
+
+### P2 — Publish closure ownership atomically with CLOSED
+
+`src-tauri/src/engines/postgres/sql_session.rs:368` (also `:393–399`, `:405–429`): `cancel()` first changes state to CLOSED, then separately stores BY_CANCEL. In between, a forced `close()` can observe CLOSED, skip ownership assignment, win `teardown_started`, remove the entry and signal completion. A second cancel that already captured the session can then finish waiting and read BY_NONE, returning `AlreadyEnded` although Cancel won the state transition. SeqCst does not make these separate operations atomic. This loses the required cancellation evidence and makes concurrent outcomes disagree. Encode owner in the atomic transition (or guard state/owner publication together), or ensure only the transition winner can start teardown and publish completion after its owner is recorded. Add a deterministic gate immediately after OPEN/ENDING → CLOSED, then interleave forced close and a second cancel; assert both cancellation ownership and once-only teardown.
+
+### P2 — Complete the planned boundary tests; sleeps do not establish race ordering
+
+`src-tauri/src/engines/postgres/sql_session.rs:770`, `src-tauri/src/backup_file.rs:177`, `src-tauri/src/commands/backup_file.rs:18`: the new SQL lifecycle coverage is one ignored live test whose ordering depends on 200/500 ms sleeps. The teardown semaphore pauses teardown, but no handshake establishes that the intended caller reached CLOSED/COMMITTING before its competitor starts. Missing required cases include an end already in ENDING losing to cancel, an execute queued before cancellation, and `end_for_connection` during an in-flight COMMIT with the existing commit-unknown result preserved. The existing live test covers queued work and forced close before COMMITTING, which does not cover those new boundaries. The six file-service tests are sequential and omit write-vs-abort and publish-vs-abort; raw IPC header/body parsing has no command-level test. Add deterministic state/teardown-entry handshakes and assertions for those interleavings, once-only teardown and completion waiters; add concurrent file tests and raw binary IPC tests (including invalid JSON/missing or invalid session header). Keep live DB cases restricted to the authorized disposable instance. These are Phase 1 verification requirements, not deferred runner/UI tests.
+
+### Contract assessment and limitations
+
+- File service correctly gates publication on Written, rejects duplicate/failed writes, retains AbortFailed for retry, removes successful aborts, and keeps path-free Published tombstones that refuse abort/write/publish/forget. Existing publication helper syncs then atomically replaces the destination; no delete-destination fallback was introduced. Binary service round-trip passes. Frontend invoke uses Uint8Array plus `x-session-id`, matching the command's Raw branch; actual webview IPC transport was not exercised.
+- The plan specifies a per-session mutex; implementation holds one global registry mutex through whole-file write/sync/rename/delete (`backup_file.rs:45–47,88,108`). This serializes unrelated sessions too. Use brief registry locking plus session-local locking when fixing I/O scheduling; retain atomic publication-versus-abort behavior.
+- COMMITTING cancel refusal has no direct abort side effect; end losing its CAS drops the client guard before waiting and avoids re-closing. Existing COMMIT_OUTCOME_UNKNOWN mapping remains. Successful end and forced close share once-only teardown, but the ownership race above remains. Teardown completion is client-side evidence only: spawned server cancellation is intentionally not joined; no server-confirmed rollback is claimed.
+- New commands are thin delegates; no new sensitive SQL/path/credential logging found. Generic BACKUP_FILE_* errors mask filesystem details. No implementation or tests were modified during review.
+
+### Verification run
+
+- `rtk cargo test` in `src-tauri`: **437 passed, 47 failed, 23 ignored**. Failures include local HTTP fixture bind/connect failures (`PermissionDenied: Operation not permitted`) and dependent fixture failures in AI/license tests. This is not a green full suite; no claim that all failures were independently reproduced on the parent commit.
+- `rtk cargo test backup_file`: **6 passed**, 501 filtered out.
+- `rtk cargo clippy --all-targets -- -D warnings`: **failed**, six reported errors in unchanged `commands/export.rs` (LazyLock/MSRV), `engines/mysql/driver.rs` and `security/credential_identity.rs` (useless format). No changed-file diagnostic reported.
+- Exact authorized live target only: `HEALTH_PG_URL=postgres://postgres:review@127.0.0.1:55440/postgres cargo test sql_session -- --ignored --test-threads=1` (through `rtk proxy env`): **both live tests failed to connect**, `PermissionDenied: Operation not permitted`, before SQL setup. No alternative database used; no container commands run or container state changed.
+- No desktop/webview run, frontend build or frontend tests in this backend review. Responsiveness, raw transport and live server rollback/lock/COMMIT-unknown behavior remain unverified locally. Implementer's earlier plan evidence was read but is not represented as reviewer-run verification.
