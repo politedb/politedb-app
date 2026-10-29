@@ -229,12 +229,14 @@ describe("DumpProgressDialog", () => {
     root.appendChild(opener);
     document.body.appendChild(root);
     opener.focus();
-    // Counts only app shortcuts (a modifier held) reaching the app.
+    // Any key reaching the app's window or document listeners (its
+    // shortcuts), other than the Tab the modal handles.
     const shortcut = vi.fn();
     const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey) shortcut(e.key);
+      if (e.key !== "Tab") shortcut(e.key);
     };
     window.addEventListener("keydown", onKey);
+    document.addEventListener("keydown", onKey);
     try {
       const job = start();
       job.setCancelAction(async () => ({ kind: "accepted", evidence: null }));
@@ -259,6 +261,11 @@ describe("DumpProgressDialog", () => {
       // App shortcuts do not reach the app.
       fireEvent.keyDown(cancel, { key: "w", metaKey: true });
       fireEvent.keyDown(cancel, { key: "s", ctrlKey: true });
+      // Shift-only and plain keys too (a custom Shift+R refresh, say).
+      fireEvent.keyDown(cancel, { key: "R", shiftKey: true });
+      fireEvent.keyDown(cancel, { key: "r" });
+      fireEvent.keyDown(cancel, { key: "Enter" });
+      fireEvent.keyDown(cancel, { key: "Escape" });
       expect(shortcut).not.toHaveBeenCalled();
       // Ended quietly: the app is usable again and focus is back.
       return act(() => job.finish({ kind: "succeeded", skipped: 0 })).then(
@@ -269,7 +276,28 @@ describe("DumpProgressDialog", () => {
       );
     } finally {
       window.removeEventListener("keydown", onKey);
+      document.removeEventListener("keydown", onKey);
       setTimeout(() => root.remove());
+    }
+  });
+
+  it("closes a retained result with Esc, which reaches nothing behind it", async () => {
+    const behind = vi.fn();
+    window.addEventListener("keydown", behind);
+    try {
+      const job = start();
+      render(<DumpProgressDialog />);
+      await act(() =>
+        job.finish({ kind: "failed", message: "Stopped at statement 2." })
+      );
+      expect(screen.getByText("Stopped at statement 2.")).toBeTruthy();
+      fireEvent.keyDown(screen.getByRole("button", { name: "Close" }), {
+        key: "Escape",
+      });
+      expect(useDumpJobStore.getState().summary).toBeNull();
+      expect(behind).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener("keydown", behind);
     }
   });
 });

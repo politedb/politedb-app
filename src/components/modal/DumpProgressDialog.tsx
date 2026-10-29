@@ -1,4 +1,4 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { createPortal } from "preact/compat";
 import { Button } from "src/components/common/Button";
 import {
@@ -285,7 +285,14 @@ const FOCUSABLE =
  * app shortcuts do not reach the app behind it, and focus returns to
  * where it was when it closes.
  */
-function useModalFocus(open: boolean, container: HTMLElement | null) {
+function useModalFocus(
+  open: boolean,
+  container: HTMLElement | null,
+  /** Esc: closes a retained result; null while a job runs (ignored). */
+  onEscape: (() => void) | null
+) {
+  const onEscapeRef = useRef(onEscape);
+  onEscapeRef.current = onEscape;
   useEffect(() => {
     if (!open || !container) return;
     const opener =
@@ -329,10 +336,14 @@ function useModalFocus(open: boolean, container: HTMLElement | null) {
         }
         return;
       }
-      // App shortcuts (save, close tab, run…) must not act behind it.
-      if (e.metaKey || e.ctrlKey || e.altKey) {
+      // No key reaches the app behind it: its shortcuts listen on the
+      // window and may use any chord (Shift-only ones too). Stopping the
+      // event here keeps its default action, so Enter and Space still
+      // press the focused modal button; Esc is handled here.
+      e.stopPropagation();
+      if (e.key === "Escape") {
         e.preventDefault();
-        e.stopPropagation();
+        onEscapeRef.current?.();
       }
     };
     window.addEventListener("keydown", onKeyDown, true);
@@ -352,7 +363,11 @@ export function DumpProgressDialog() {
   // Shown once its run reported its native prompts done (D14).
   const showActive = !!active?.visible;
   const open = showActive || !!summary;
-  useModalFocus(open, container);
+  useModalFocus(
+    open,
+    container,
+    !showActive && summary ? () => dismissDumpJobSummary(summary.jobId) : null
+  );
 
   if (!open) return null;
   return createPortal(

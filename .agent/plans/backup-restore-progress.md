@@ -76,6 +76,9 @@ APPROVED
   - P2: the connection screen's bridge is built by `connectionTabCloseBridgeFor`, which passes the close intent on (`closeTab(tabId, skipCheck, intent)`); tested on that adapter.
   - P2: the modal panel scrolls (no `overflow-hidden` override), so footer buttons stay reachable at short heights; checked in the Vite preview at 700×360 with a long retry error (Try again / Stop trying reachable, `#root` inert, focus on a modal button).
   - Verification: `npx vitest run` 2486 passed, twice, exit 0 (the reviewer's one-off `EnvironmentTeardownError` in unchanged `connectionLog.test.ts` did not recur); `npm run build` ok.
+- **Phase 3 review round 1 fixes committed `332c933`. Review round 2 (Codex: CHANGES REQUIRED, 1 P2) fix, 2026-10-29, not committed:**
+  - R2-1: the modal stops every key at the window capture phase (not only Meta/Ctrl/Alt chords), so no app shortcut acts behind it, Shift-only bindings included; the default action is kept (Enter/Space press the focused modal button), Tab is trapped, and Esc on a retained result closes it in the same handler. Tests: plain, Shift-only, Enter and Esc keys reach neither window nor document listeners; Esc closes a result; the real `useConnectionShortcuts` with a Shift+R refresh binding does not refresh behind the modal.
+  - Verification: `npx vitest run` all passed; `npm run build` ok.
 
 ## Task
 
