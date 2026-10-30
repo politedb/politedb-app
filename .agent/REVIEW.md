@@ -1167,3 +1167,36 @@ Reviewed by Codex, 2026-10-30. Read supplied `AGENTS.md`, `.agent/WORKFLOW.md`, 
 - No database, container, live SQL, native IPC, actual backup/restore/import or Rust test run. No application or test code edited.
 
 Only `.agent/REVIEW.md` edited. Pre-existing untracked `.claude/launch.json` preserved. No commit, push or merge.
+
+
+## backup-restore-progress — Phase 3 review round 6 (cancel while reading a sequence)
+
+Status: **VERIFIED WITH LIMITATIONS**
+
+Reviewed by Codex, 2026-10-30. Read supplied `AGENTS.md`, `.agent/WORKFLOW.md`, referenced RTK instructions, Phase 3 plan and previous rounds. Reviewed `c25ca6e9..HEAD` on `feat/backup-restore-progress`: `f606fceb` (sequence-read cancellation) and `b7a5fb41` (footer padding). Scope includes catch blocks in `backupSql.ts`, `backupRun.ts` and `restoreRun.ts`, plus the owned query port, cancellation admission and outcome presentation needed to assess reachability.
+
+### Findings
+
+- **P0: none established.**
+- **P1: none established.**
+- **P2: none established.** No additional reachable stop-to-failure, misleading cancellation message or continued SQL execution after Cancel established in the inspected paths.
+
+### Cancellation fix and adjacent paths
+
+- **Reported sequence-read cancellation addressed.** `backupSql.ts:364–372,1330–1336`: `rethrowIfStopped` preserves both `DumpStopped` (a query refused after the stop latch) and an Error named `AbortError` (the owned port's cancellation error). Both sequence options and last-value reads share this catch; identity and serial sequences share `readOwnedSequence`. These errors now reach `backupRun.ts`'s `isOwnStop` / outer catch unchanged, producing `cancelled` without `failure`, rather than the fabricated permission/sequence failure. With confirmed cleanup, rollback is `n/a`; the controller retains no summary and the hook shows only the informational cancellation toast. Rejected cleanup still correctly retains a warning; the fix does not promise every cancellation will be quiet regardless of cleanup evidence.
+- **Real unreadable sequences still stop backup.** Other query errors and malformed sequence state still produce the existing actionable sequence message. The existing unreadable-sequence test and new AbortError test both pass. A real read failure arriving after Cancel still belongs in `failure` / “Also: …”; cancellation alone must not hide an independent error. No sequence state is silently omitted or file published on these failure paths.
+- **`pgTablesWithRows` now stops its target loop on stop errors.** Ordinary unreadable-table checks remain best-effort; `DumpStopped` / `AbortError` escape immediately instead of advancing through remaining targets. Restore preflight catches (`restoreRun.ts:228,292`) still classify thrown errors as failures, but reading/checking are explicitly non-cancellable and `cancelDumpJob` rejects Cancel in those phases. Therefore they are not an established user-Cancel regression. An externally aborted preflight query could still appear as a failure; no normal job-cancel route to that state was found.
+- **Other `backupSql.ts` catches are synchronous JSON parsing**, for collation definitions and domain sequence dependencies. They enclose no awaited operation or stop checkpoint and cannot swallow the owned query port's stop rejection.
+- **Backup runner catches preserve cancellation and cleanup evidence.** The stream catch and outer catch recognize own stops; checkpoints and the query scope prevent later query/compression/file work after the stop latch. Snapshot-end and temporary-file abort catches retry cleanup and report unconfirmed release, rather than continuing backup generation. Publication is non-cancellable and recognizes already-published evidence; forget errors concern releasing a failed temp-file record, not resuming backup. No additional swallowing catch found.
+- **Restore runner catches distinguish execution from cleanup.** Transaction statement/constraint and savepoint-recovery catches check the stop latch before skip/failure handling and route to `cancelledBy`; cancellation-caused errors are omitted only with own cancel evidence, while independent failures remain visible. Session-begin failure is reported alongside Cancel because Cancel waits for begin and cannot itself abort that call. Touch ID catches represent native authentication failure; initial authentication is non-cancellable, and mid-run callers check the stop latch before sending another statement. COMMIT and post-commit refresh are non-cancellable, so their error catches must retain commit/refresh truth rather than relabel as cancellation. Rollback/cancel catches perform necessary cleanup. Non-transactional restore deliberately waits for the running statement, then offers Stop/Continue; independent statement failure and unknown completion remain failures under the accepted contract.
+- **Footer style change is confined to `pt-1`** on the running dialog's existing non-shrinking footer. No action wiring, cancellation state, summary rendering or overflow policy changed.
+
+### Verification run and limitations
+
+- `npm run build`: **passed**, exit 0. Existing warnings: `node:zlib` browser externalization, ineffective dynamic imports, large chunks and plugin timings.
+- `npx vitest run src/screens/connection src/lib/tauri src/components/modal --exclude '**/.claude/**'`: **89 files passed, 1 skipped; 718 tests passed, 1 skipped**, exit 0. Includes sequence unreadable/AbortError coverage, runner cancellation and cleanup evidence, controller retention and modal behavior.
+- `git diff --check c25ca6e9..HEAD`: **passed**, exit 0.
+- The new regression exercises a mocked last-value query rejection at the SQL-builder boundary. It does not itself exercise `DumpStopped`, sequence-options cancellation, serial-sequence cancellation, the `pgTablesWithRows` stop loop, or a full builder → runner → controller → modal/toast cancellation. Conclusions for those paths combine source review with existing separate runner/controller tests, not a new end-to-end reproduction.
+- No reviewer-run native desktop/browser layout test, real PostgreSQL cancellation, permission-denied query, native IPC, file publication, Rust tests or live backup/restore/import. Earlier Phase 3 native/manual limitations remain outstanding. No database or container touched.
+
+Only `.agent/REVIEW.md` edited. Pre-existing untracked `.claude/launch.json` preserved. No application/test edits, commit, push or merge.
