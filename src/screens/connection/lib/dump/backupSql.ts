@@ -357,6 +357,20 @@ export class DumpStopped extends Error {
 }
 
 /**
+ * Rethrows an error a stop caused (a cancel or a refused query), so a catch
+ * that reports or ignores what it could not read never turns a cancel into
+ * a failure or keeps working after it.
+ */
+export function rethrowIfStopped(err: unknown): void {
+  if (
+    err instanceof DumpStopped ||
+    (err instanceof Error && err.name === "AbortError")
+  ) {
+    throw err;
+  }
+}
+
+/**
  * A catalog query of a backup or restore, through the owned dump port (no
  * analytics, D13), reading the backup's snapshot when it has one.
  */
@@ -417,7 +431,8 @@ export async function pgTablesWithRows(
         { snapshot: false }
       );
       if (cellToBool(rows.rows?.[0]?.[0])) found.push(table);
-    } catch {
+    } catch (err) {
+      rethrowIfStopped(err);
       // Not readable here: the restore itself will say.
     }
   }
@@ -1312,7 +1327,9 @@ export async function buildPostgresTableStructure(args: {
           `SET START WITH ${start} SET CACHE ${cache} SET ${cycle}`,
         setval: `SELECT pg_catalog.setval(${sequenceFor}, ${last}, ${cellToBool(stateRes.rows?.[0]?.[1]) ? "true" : "false"})`,
       };
-    } catch {
+    } catch (err) {
+      // Cancelled meanwhile: a cancel, not an unreadable sequence.
+      rethrowIfStopped(err);
       throw new Error(
         `The sequence numbering "${col}" of ${schema}.${tableName} could not be read (reading it needs SELECT on the sequence), so nothing was backed up: restored without it, the numbering would start over and collide with the restored rows.`
       );

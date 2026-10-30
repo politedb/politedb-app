@@ -594,6 +594,27 @@ describe("buildPostgresTableStructure: generated and identity columns", () => {
     ).rejects.toThrow(/sequence numbering "id" of app\.g could not be read/);
   });
 
+  it("passes a cancel on as a cancel, not as an unreadable sequence", async () => {
+    catalog();
+    const base = m.runSqlQuery.getMockImplementation()!;
+    m.runSqlQuery.mockImplementation(async (c: string, sql = "") => {
+      if (sql.includes("last_value")) {
+        // What the dump port rejects with once the job cancels the query.
+        const err = new Error("Aborted");
+        err.name = "AbortError";
+        throw err;
+      }
+      return base(c, sql);
+    });
+    const built = buildPostgresTableStructure({
+      connectionId: "c1",
+      schema: "app",
+      tableName: "g",
+    });
+    await expect(built).rejects.toMatchObject({ name: "AbortError" });
+    await expect(built).rejects.not.toThrow(/could not be read/);
+  });
+
   it("restores the rows of a table of generated columns by count", async () => {
     m.runSqlQuery.mockResolvedValueOnce({ rows: [[S("3")]] });
     expect(await postgresGeneratedOnlyRowsSql("c1", "app", "g")).toBe(
