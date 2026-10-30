@@ -1136,3 +1136,34 @@ Reviewed by Codex, 2026-10-29. Read `AGENTS.md`, `.agent/WORKFLOW.md` and refere
 - `git diff --check e1f3494..HEAD`: **passed**, exit 0.
 
 Only `.agent/REVIEW.md` edited. Pre-existing untracked `.claude/launch.json` preserved. No application/test edits, commit, push or merge.
+
+
+## backup-restore-progress — Phase 3 review round 5 (progress bar fix)
+
+Status: **VERIFIED WITH LIMITATIONS**
+
+Reviewed by Codex, 2026-10-30. Read supplied `AGENTS.md`, `.agent/WORKFLOW.md`, referenced RTK instructions, Phase 3 plan requirements and previous review rounds. Reviewed commit `31f48f39c010d8831ac4a044416b9180bb6cdeaa` against its parent on `feat/backup-restore-progress`; HEAD matches the reviewed commit. Scope is this follow-up fix and affected progress paths, not a new whole-phase/native integration certification.
+
+### Findings
+
+- **P0: none established.**
+- **P1: none established.**
+- **P2: none established.** No concrete correctness or accessibility regression found in the three-file change.
+
+### Progress fix and adjacent states
+
+- **Reported backup restart appearance addressed.** Previously one element changed from a static one-third width to an animated determinate width, so discovering a total with zero steps done animated backwards. `DumpProgressDialog.tsx` now gives the indeterminate stripe and determinate fill different keys. The passing new regression confirms the DOM child is replaced when total 98 / done 0 arrives, with the new fill at `0%`. Its width transition therefore has no previous one-third width to interpolate from. Unknown work now uses a moving stripe instead of a static apparent fraction; the determinate fill retains normal width transitions for subsequent updates.
+- **All three callers share the fix.** Backup shows progress in `preparing`, discovers its ordered tables and reports its known step total starting at zero. Restore and SQL dump import both use `runDumpImport` and the same `RunningJob` renderer; both restore strategies call `report(job, counts)` before running statements. Rendering does not branch on job kind for the bar. If a known total is available at first paint, the determinate fill mounts directly; if an indeterminate frame appears first, the keyed replacement applies equally. Restore/import applicability is source-derived; the new transition regression specifically exercises backup.
+- **Other progress states preserved.** Fraction calculation, rounding, monotonic/clamped merging, counts, row/detail labels and runner scheduling are unchanged. Unknown/zero totals remain indeterminate; known zero, partial and complete values retain their computed widths. Later determinate updates retain the same keyed fill. Compression/publication, COMMIT/refresh, cancellation, refusal, Stop/Continue and cleanup retry controls are unchanged. A 100% step count can remain busy during finalization, as before. Success removes the dialog; retained results replace the running body and remove its progressbar rather than leaving a stale busy bar.
+- **Accessibility preserved.** One stable, full-width track now owns `role="progressbar"`, accessible name `Progress` and `aria-busy="true"` while active. Unknown totals omit `aria-valuenow` (and explicit bounds); known totals expose the computed percentage with min 0 / max 100. Replacing only the decorative child preserves the accessible track across the transition. The child has no duplicate role or values; existing polite phase status remains outside the progressbar. Busy denotes ongoing work, including cancellation/cleanup/finalization, rather than being cleared prematurely at 100%.
+- **Production CSS present.** Inspected generated `dist/assets/index-*.css`: it includes the arbitrary animation utility with `animation:1.1s ease-in-out infinite dump-progress-indeterminate` and the matching transform keyframes. Track clipping and stripe width are present in source; determinate width animation remains separate from the stripe's transform animation. The new uniquely named keyframes do not replace existing loading animations.
+
+### Verification run and limitations
+
+- `npm run build`: **passed**, exit 0 (TypeScript and production Vite build). Warnings remain for `node:zlib` browser externalization, ineffective dynamic imports, large chunks and plugin timings.
+- `npx vitest run src/components/modal --exclude '**/.claude/**'`: **15 files, 130 tests passed**, exit 0. Includes the new element-identity/zero-width regression plus existing progress/count, visibility, cancellation, COMMIT, compression, Stop/Continue, retry, success/retained-result, focus and shortcut checks.
+- `git diff --check 31f48f39^ 31f48f39`: **passed**, exit 0.
+- No reviewer-run real browser/native desktop animation or assistive-technology check. jsdom verifies DOM replacement and attributes, not painted CSS interpolation or screen-reader announcements. The new test does not independently assert every ARIA attribute/state or parameterize restore/import; those conclusions above combine passing focused coverage with source review. Earlier Phase 3 native/manual integration limitations remain outstanding; this targeted review does not close them.
+- No database, container, live SQL, native IPC, actual backup/restore/import or Rust test run. No application or test code edited.
+
+Only `.agent/REVIEW.md` edited. Pre-existing untracked `.claude/launch.json` preserved. No commit, push or merge.
