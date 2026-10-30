@@ -212,7 +212,7 @@ function RunningJob({ job }: { job: ActiveDumpJob }) {
           <p class="text-xs text-neutral-500">{blocked}</p>
         ) : null}
       </DialogContent>
-      <DialogFooter className="shrink-0 justify-end gap-2">
+      <DialogFooter className="shrink-0 justify-end gap-2 pt-1">
         {job.cancel.kind === "failed" ? (
           <>
             <Button
