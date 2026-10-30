@@ -72,6 +72,31 @@ describe("DumpProgressDialog", () => {
     expect(screen.getByText("INSERT INTO a …")).toBeTruthy();
   });
 
+  it("starts a known total from its own width, not from the indeterminate stripe", () => {
+    const job = start("backup");
+    render(<DumpProgressDialog />);
+    act(() => {
+      job.showProgress();
+      job.setPhase("running", true);
+    });
+    const bar = screen.getByRole("progressbar");
+    expect(bar.getAttribute("aria-valuenow")).toBeNull();
+    const stripe = bar.firstElementChild as HTMLElement;
+    expect(stripe.className).toContain("dump-progress-indeterminate");
+    act(() =>
+      job.progress({
+        stepsTotal: 98,
+        stepsDone: 0,
+        counts: { completed: 0, skipped: 0, unknown: 0, total: 0 },
+      })
+    );
+    const fill = bar.firstElementChild as HTMLElement;
+    // A new element: no width transition from the stripe's 1/3 down to 0.
+    expect(fill).not.toBe(stripe);
+    expect(fill.style.width).toBe("0%");
+    expect(bar.getAttribute("aria-valuenow")).toBe("0");
+  });
+
   it("cancels through the controller, once", async () => {
     const job = start();
     const action = vi.fn(async () => ({

@@ -675,6 +675,21 @@ table {
   @apply transition-all duration-300 ease-in-out;
 }
 
+/* Backup/restore progress bar with no known total yet */
+@keyframes dump-progress-indeterminate {
+  0% {
+    transform: translateX(-120%);
+  }
+
+  50% {
+    transform: translateX(40%);
+  }
+
+  100% {
+    transform: translateX(220%);
+  }
+}
+
 /* Tab view mode animations */
 @keyframes slide-in-right {
   from {

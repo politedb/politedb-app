@@ -110,26 +110,33 @@ function RunningJob({ job }: { job: ActiveDumpJob }) {
         </DialogDescription>
       </DialogHeader>
       <DialogContent className="flex flex-col gap-3">
-        <div class="h-2 w-full overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-700">
-          <div
-            class={cn(
-              "h-full rounded-full bg-blue-500",
-              pct === null
-                ? "w-1/3 animate-pulse"
-                : "transition-[width] duration-300 ease-out"
-            )}
-            style={pct === null ? undefined : { width: `${pct}%` }}
-            role="progressbar"
-            aria-label="Progress"
-            aria-busy={true}
-            {...(pct === null
-              ? {}
-              : {
-                  "aria-valuenow": pct,
-                  "aria-valuemin": 0,
-                  "aria-valuemax": 100,
-                })}
-          />
+        <div
+          class="h-2 w-full overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-700"
+          role="progressbar"
+          aria-label="Progress"
+          aria-busy={true}
+          {...(pct === null
+            ? {}
+            : {
+                "aria-valuenow": pct,
+                "aria-valuemin": 0,
+                "aria-valuemax": 100,
+              })}
+        >
+          {/* Keyed apart: a determinate bar starts from its own width, not
+              animated down from the indeterminate stripe's. */}
+          {pct === null ? (
+            <div
+              key="indeterminate"
+              class="h-full w-1/3 animate-[dump-progress-indeterminate_1.1s_ease-in-out_infinite] rounded-full bg-blue-500"
+            />
+          ) : (
+            <div
+              key="determinate"
+              class="h-full rounded-full bg-blue-500 transition-[width] duration-300 ease-out"
+              style={{ width: `${pct}%` }}
+            />
+          )}
         </div>
         <div class="flex min-w-0 items-center justify-between gap-2 text-xs text-neutral-600 dark:text-neutral-300">
           <span class="min-w-0 truncate" title={detail}>
