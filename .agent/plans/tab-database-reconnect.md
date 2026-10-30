@@ -36,6 +36,11 @@ APPROVED
   - R2-P1-2: a table load acquires the connection first, then reads the table's state and caches live from the store and plans from them (no snapshot from before the acquisition, no fallback to it); a load whose tab closed or moved to another connection meanwhile does nothing.
   - R2-P2-1: hook-level tests through the real `useLoadTableData` + `connectTabOnce` (deferred A then B after a reconnect: B dispatches on B, A's late end publishes nothing; table-first load never sees or restores foreign columns/constraints, fetches the new target's columns), both failing without the fix; SQL row stream tests (late start reply cancelled, stale chunk stops and retires the window, stale done/error unpublished); Rust: agent data access through the published state for default, override and override-equal-to-default connections (`bind_runtime` + `data_profile`), and a captured trace of a failed connect without database/host/path/label markers.
   - Verification: `cargo test` 500 passed; fmt ok; clippy: no warning in touched files. `npm run build` ok; Vitest 2416 passed; prettier ok; eslint clean on changed files.
+- **Phase 1 review round 3 fixes (Codex: CHANGES REQUIRED, 3 P2), 2026-10-30, not committed:**
+  - R3-P2-1: pending (busy) state belongs to the request that set it (`pendingByKey`, a per-request token); a load that lost authority retires only its own pending flag, also when it settles, never a newer request's.
+  - R3-P2-2: a failed acquisition reports its error only while the tab is still in the same lifetime without a connection and no newer request owns the table; `TAB_CONNECT_SUPERSEDED` is silent.
+  - R3-P2-3: a table-first load re-registers its in-flight slots (and loading guard, stream owner) under the connection lifetime it installed, so identical ordinary loads still join it; forced and meta refreshes still bypass.
+  - Verification: deferred real-hook regressions (old load settling after a runtime replacement and after an epoch move while the new one is pending; late connect failure after a newer load succeeded; superseded connect; coalescing after acquisition with a forced refresh control), all five failing without the fix; Vitest 2421 passed; `npm run build` ok; prettier/eslint clean. Rust unchanged since round 2 (500 passed).
 
 ## Problem
 
