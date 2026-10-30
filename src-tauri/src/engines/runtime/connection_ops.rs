@@ -101,7 +101,11 @@ impl ConnectionOps for EngineConnection {
     #[allow(dead_code)]
     async fn close(self) {
         match self {
-            EngineConnection::Postgres(pg) => drop(pg.pool),
+            // Closed, not only dropped: a task or service still holding a
+            // clone of the pool would otherwise keep its idle connections
+            // open (and the database in use, so it cannot be dropped).
+            // Connections in use are closed when given back.
+            EngineConnection::Postgres(pg) => pg.pool.close(),
             EngineConnection::MySql(my) => {
                 let _ = my.pool.clone().disconnect().await;
             }
@@ -785,5 +789,91 @@ impl EngineConnection {
         input: RedisCommandInput,
     ) -> Result<(), String> {
         ConnectionOps::spawn_redis_command(self, ctx, input)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::super::postgres::connection::PgConn;
+    use super::super::super::EngineConnection;
+
+    /// Live check against a disposable PostgreSQL (never a customer database):
+    /// `HEALTH_PG_URL=postgres://user:pass@127.0.0.1:55440/postgres \
+    ///  cargo test close_ends_pooled_postgres_sessions -- --ignored`
+    ///
+    /// Closing a connection ends its pooled sessions even while something
+    /// else still holds a clone of its pool; otherwise they stay open and
+    /// keep the database in use (DROP DATABASE refused).
+    #[tokio::test]
+    #[ignore]
+    async fn close_ends_pooled_postgres_sessions() {
+        use deadpool_postgres::{Manager, ManagerConfig};
+        use tokio_postgres::NoTls;
+
+        let mut cfg: tokio_postgres::Config = std::env::var("HEALTH_PG_URL")
+            .expect("set HEALTH_PG_URL")
+            .parse()
+            .expect("valid HEALTH_PG_URL");
+        let app_name = format!("pdb-close-test-{}", uuid::Uuid::new_v4());
+        cfg.application_name(&app_name);
+        let pool = deadpool_postgres::Pool::builder(Manager::from_config(
+            cfg.clone(),
+            NoTls,
+            ManagerConfig::default(),
+        ))
+        .max_size(4)
+        .build()
+        .unwrap();
+
+        // Four sessions opened, then all idle in the pool.
+        let held: Vec<_> = futures_util::future::join_all((0..4).map(|_| pool.get()))
+            .await
+            .into_iter()
+            .map(|c| c.unwrap())
+            .collect();
+        drop(held);
+
+        let (watcher, watcher_conn) = cfg.connect(NoTls).await.unwrap();
+        tokio::spawn(watcher_conn);
+        watcher
+            .batch_execute("SET application_name = 'pdb-close-test-watcher'")
+            .await
+            .unwrap();
+        let count = || async {
+            watcher
+                .query_one(
+                    "SELECT count(*) FROM pg_stat_activity WHERE application_name = $1",
+                    &[&app_name],
+                )
+                .await
+                .unwrap()
+                .get::<_, i64>(0)
+        };
+        assert_eq!(count().await, 4);
+
+        // Something else still holds the pool (a task, a cached service).
+        let lingering = pool.clone();
+        EngineConnection::Postgres(PgConn {
+            id: uuid::Uuid::new_v4(),
+            label: "close test".into(),
+            pool,
+            config: cfg,
+        })
+        .close()
+        .await;
+
+        let mut left = count().await;
+        for _ in 0..50 {
+            if left == 0 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            left = count().await;
+        }
+        assert_eq!(left, 0, "pooled sessions still open after close");
+        assert!(
+            lingering.get().await.is_err(),
+            "a closed pool hands out nothing"
+        );
     }
 }
