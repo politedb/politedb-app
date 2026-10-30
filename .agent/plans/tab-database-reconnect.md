@@ -41,6 +41,7 @@ APPROVED
   - R3-P2-2: a failed acquisition reports its error only while the tab is still in the same lifetime without a connection and no newer request owns the table; `TAB_CONNECT_SUPERSEDED` is silent.
   - R3-P2-3: a table-first load re-registers its in-flight slots (and loading guard, stream owner) under the connection lifetime it installed, so identical ordinary loads still join it; forced and meta refreshes still bypass.
   - Verification: deferred real-hook regressions (old load settling after a runtime replacement and after an epoch move while the new one is pending; late connect failure after a newer load succeeded; superseded connect; coalescing after acquisition with a forced refresh control), all five failing without the fix; Vitest 2421 passed; `npm run build` ok; prettier/eslint clean. Rust unchanged since round 2 (500 passed).
+- **Phase 1 VERIFIED WITH LIMITATIONS** (Codex round 4, 2026-10-31, at `cea6a514`): no P0/P1/P2; limitations: no live PostgreSQL / native `tauri:dev` run. Phase 2 next.
 
 ## Problem
 

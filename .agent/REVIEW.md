@@ -837,3 +837,44 @@ The owner used for slots is captured before acquisition, while publication curre
 - `git diff --check`: passed before report append; rerun after append. Only this review section retained; existing untracked `.claude/launch.json` preserved. No commit, push or merge.
 
 **Verdict for Phase 1 at `208b2653`: CHANGES REQUIRED.** Fix the three P2 lifecycle/coalescing defects with deferred orchestration regressions, then re-review. Phase 2 and the workflow's second security pass remain required before the combined PR ships.
+
+
+## tab-database-reconnect — Phase 1 review round 4
+
+### Status
+
+VERIFIED WITH LIMITATIONS
+
+Reviewed by Codex, 2026-10-31, at `cea6a514` on `fix/tab-database-reconnect`; fixes reviewed against `37c00ba4`. Read `AGENTS.md`, `.agent/WORKFLOW.md`, the approved plan and its Progress section, and the preceding Phase 1 reviews. Reviewed the hook changes and tests alongside load planning, metadata patching, SQL execution/stream ownership, runtime acquisition/installation and screen epochs. No application code changed.
+
+### Findings
+
+- **P0:** None established.
+- **P1:** None established.
+- **P2:** No new actionable defect established in the reviewed fixes. R3-P2-1, R3-P2-2 and R3-P2-3 are resolved for their reported cases.
+
+### Round 3 disposition
+
+| Finding | Round 4 result |
+| --- | --- |
+| R3-P2-1 — obsolete load clears replacement busy state | **Resolved.** `src/hooks/useLoadTableData.ts:224-239` uses a unique request token for pending ownership; stale publications and settlement retire only that request's pending flag. Committed deferred tests settle A while B remains pending, for both runtime replacement and same-runtime epoch invalidation; B stays busy until B settles. |
+| R3-P2-2 — late acquisition failure overwrites replacement state | **Resolved.** `src/hooks/useLoadTableData.ts:171-193` requires a live, still-disconnected tab in the original lifetime with no competing pending owner, and suppresses `TAB_CONNECT_SUPERSEDED`. Committed tests cover a late rejection after replacement success and the superseded error. Additional review probes cover rejection while replacement stays pending, close-before-rejection, current failure/retry, and real `connectTabOnce` supersession: old native success arrives after a forced newer acquisition and newer pending table load, with no old error/busy publication. |
+| R3-P2-3 — acquired load no longer coalesces | **Resolved.** `src/hooks/useLoadTableData.ts:207-216` registers the same task under its installed runtime lifetime and updates the loading guard; the executor/stream receives that lifetime at line 296. Committed real-acquisition test keeps the initial executor pending, confirms an ordinary repeated load joins it, and confirms force refresh dispatches separately. |
+
+### Compatibility and cleanup
+
+- Signature coalescing remains scoped to runtime/epoch. Different-lifetime work dispatches without waiting for the old executor. Re-registration preserves the original alias until settlement and adds the acquired-lifetime alias; cleanup compares each map entry with the task before deletion (`src/hooks/useLoadTableData.ts:319-325`).
+- Force/meta refresh bypass flags remain unchanged. Additional hook probes verify separate dispatch for `force`, `forceRefresh`, `forceRows`, `refreshMeta`, `refreshForeignKeys`, `refreshStats`, and `refreshRowCount` while an ordinary load is pending. Identical-signature requests retain their existing coalescing behavior, including identical refresh requests.
+- Additional late-acquisition-failure probe starts another identical ordinary request while the replacement remains pending; it joins the replacement, demonstrating old cleanup did not remove that signature slot. Each bypass control also performs another ordinary load after settlement and confirms fresh dispatch, checking settled slots are removed.
+- Live metadata/cache rereading remains after acquisition. Foreign metadata regression and SQL stale-start/chunk/done/error tests pass in the full suite. No new row-publication, error-reporting or slot-cleanup regression established within these paths.
+
+### Verification
+
+- `npm run build`: **passed**, exit 0 (TypeScript + Vite). Existing browser externalization, ineffective dynamic imports, chunk size and plugin timing warnings remain.
+- `npx vitest run --exclude '**/.claude/**'`: **284 files passed / 1 skipped; 2421 tests passed / 1 skipped**, exit 0. Completed before the temporary review probe file was created. Log: `/tmp/pdb-r4-vitest.log`.
+- Temporary review probes: **18 passed**, exit 0: seven copied committed hook tests plus eleven additional controls described above. Real hook/stores/acquisition with native connect and engine executor I/O mocked. Scratch copy: `/tmp/pdb-round4.probe.test.ts`; log: `/tmp/pdb-r4-probe.log`. Probe removed from the repository after execution; no application/test edits retained.
+- Rust tests not rerun: Rust is unchanged since round 2. Prior round 3 review records **453 passed / 47 failed / 22 ignored**, with sandbox loopback socket failures and dependent AI/license assertions; that historical result is not a current green Rust run.
+- No native desktop/live database/SSH/engine matrix run in this review. Earlier live PostgreSQL, native restart/restore and full trace/network limitations remain unverified; unit orchestration coverage does not replace them. No new Docker or database access attempted.
+- `git diff --check`: passed after report append. Only `.agent/REVIEW.md` changed; pre-existing untracked `.claude/launch.json` preserved. No commit, push or merge.
+
+**Verdict for Phase 1 at `cea6a514`: VERIFIED WITH LIMITATIONS.** Round 3 findings closed. Phase 2's frontend D3 guard remains intentionally unimplemented and is not a Phase 1 finding; both phases and the workflow's second security pass remain required before the combined release ships. D5 profile/Keychain atomicity and frontend profile-response ordering remain separate follow-ups.
