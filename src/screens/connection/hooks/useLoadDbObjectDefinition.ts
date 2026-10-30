@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { loadDatabaseObjectDefinition } from "src/lib/databaseObjects";
+import { useRuntimeLifetime } from "src/hooks/useRuntimeLifetime";
 import type { DatabaseEngine, DatabaseObjectItem } from "src/types";
 import { useObjectDraftStore } from "src/stores/objectDrafts";
 import { useScreenStore } from "src/stores/screen";
@@ -34,6 +35,14 @@ export function useLoadDbObjectDefinition(args: {
   currentRef.current = { tabId, draftKey, connectionId };
 
   const itemId = item?.id ?? null;
+
+  // The tab's epoch moved or its connection was refused: retire the
+  // obsolete request now (its late result is ignored anyway).
+  const lifetime = useRuntimeLifetime(connectionId);
+  useEffect(() => {
+    requestSeqRef.current += 1;
+    setLoading(false);
+  }, [lifetime]);
 
   useEffect(() => {
     const target = itemRef.current;

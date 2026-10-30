@@ -189,50 +189,94 @@ export async function connectTabOnce(
 }
 
 /**
- * Makes `runtimeId` the tab's connection (bumping its epoch, R5) and
- * detaches table entries of this tab that refer to another connection.
+ * Makes `runtimeId` the tab's connection (bumping its epoch, R5). Table data
+ * loaded through any other connection is dropped, never relabelled as this
+ * one's (R4); the tab has no unsaved changes here (R21).
  */
 export function installTabRuntime(tabId: string, runtimeId: string): void {
   const previous = tabOf(tabId)?.runtimeConnectionId;
   useRuntimeTargetsStore.getState().setOwner(runtimeId, tabId);
-  // Data loaded through another connection is not this one's (R5); the tab
-  // has no unsaved changes here (R21), so nothing of the user's is lost.
   if (previous && previous !== runtimeId) invalidateTabData(tabId);
+  else detachForeignTableConnections(tabId, runtimeId);
   useScreenStore
     .getState()
     .updateTab(tabId, { runtimeConnectionId: runtimeId });
-  detachForeignTableConnections(tabId, runtimeId);
 }
 
-/** Drops a tab's loaded table data and stops its row streams. */
-export function invalidateTabData(tabId: string): void {
-  const store = useConnectionStore.getState();
-  const prefix = `${tabId}.`;
-  for (const key of Object.keys(store.tableDataMap)) {
-    if (!key.startsWith(prefix)) continue;
-    const opId = store.getRowsWindowInfo(key)?.opId;
-    if (opId) operationCancel(opId).catch(() => {});
-    store.clearRows(key);
-    store.removeTableDataMap(key);
-  }
-}
-
-/** Table entries of `tabId` keep only the tab's own connection (R4). */
+/** Drops the table entries of `tabId` loaded through another connection. */
 export function detachForeignTableConnections(
   tabId: string,
   runtimeId: string
 ): void {
   const { tableDataMap } = useConnectionStore.getState();
   const prefix = `${tabId}.`;
-  let changed = false;
-  const next = { ...tableDataMap };
-  for (const [key, entry] of Object.entries(tableDataMap)) {
-    if (!key.startsWith(prefix) || !entry?.connectionId) continue;
-    if (entry.connectionId === runtimeId) continue;
-    next[key] = { ...entry, connectionId: runtimeId };
-    changed = true;
+  const foreign = Object.entries(tableDataMap)
+    .filter(
+      ([key, entry]) =>
+        key.startsWith(prefix) &&
+        !!entry?.connectionId &&
+        entry.connectionId !== runtimeId
+    )
+    .map(([key]) => key);
+  invalidateTableKeys(foreign, []);
+}
+
+/**
+ * Drops everything a tab loaded through its connection (R5): table data,
+ * rows, caches, filters, sort, structure and constraints; running row
+ * streams are stopped. Unsaved changes are not here (R21).
+ */
+export function invalidateTabData(tabId: string): void {
+  const prefix = `${tabId}.`;
+  const store = useConnectionStore.getState();
+  const keys = new Set<string>();
+  for (const map of [
+    store.tableDataMap,
+    store.tableRowsByKey,
+    store.columnsCache,
+    store.sizeInfoCache,
+    store.tableFilterByKey,
+    store.tableSortByKey,
+  ]) {
+    for (const key of Object.keys(map ?? {})) {
+      if (key.startsWith(prefix)) keys.add(key);
+    }
   }
-  if (changed) useConnectionStore.setState({ tableDataMap: next });
+  invalidateTableKeys([...keys], [tabId]);
+}
+
+function invalidateTableKeys(keys: string[], wholeTabs: string[]): void {
+  if (!keys.length && !wholeTabs.length) return;
+  const store = useConnectionStore.getState();
+  for (const key of keys) {
+    const opId = store.getRowsWindowInfo(key)?.opId;
+    if (opId) operationCancel(opId).catch(() => {});
+    store.clearRows(key);
+  }
+  const drop = <T>(map: Record<string, T> | undefined) => {
+    if (!map) return map;
+    const next = { ...map };
+    for (const key of keys) delete next[key];
+    return next;
+  };
+  const dropTabs = <T>(map: Record<string, T> | undefined) => {
+    if (!map) return map;
+    const next = { ...map };
+    for (const id of wholeTabs) delete next[id];
+    return next;
+  };
+  useConnectionStore.setState((s) => ({
+    tableDataMap: drop(s.tableDataMap)!,
+    tableRowCacheByKey: drop(s.tableRowCacheByKey)!,
+    columnsCache: drop(s.columnsCache)!,
+    sizeInfoCache: drop(s.sizeInfoCache)!,
+    tableFilterByKey: drop(s.tableFilterByKey)!,
+    tableSortByKey: drop(s.tableSortByKey)!,
+    selectedRowByKey: drop(s.selectedRowByKey)!,
+    virtualKeySafetyByKey: drop(s.virtualKeySafetyByKey)!,
+    tableStructure: dropTabs(s.tableStructure)!,
+    tableConstraints: dropTabs(s.tableConstraints)!,
+  }));
 }
 
 /*
@@ -290,3 +334,27 @@ export function runtimeWorkIsCurrent(runtimeId: string): () => boolean {
     lifetimeOf() === start &&
     !useRuntimeTargetsStore.getState().refused[runtimeId];
 }
+
+/**
+ * Stops the row streams still running in a tab whose epoch moved (R5): they
+ * belong to work that may no longer publish, and nothing else would end a
+ * stream that stalled.
+ */
+export function retireTabStreams(tabId: string): void {
+  const store = useConnectionStore.getState();
+  const prefix = `${tabId}.`;
+  for (const key of Object.keys(store.tableRowsByKey ?? {})) {
+    if (!key.startsWith(prefix)) continue;
+    const info = store.getRowsWindowInfo(key);
+    if (!info?.opId || !info.running) continue;
+    operationCancel(info.opId).catch(() => {});
+    store.endRowsStream(key, info.opId);
+  }
+}
+
+useScreenStore.subscribe((state, previous) => {
+  if (state.tabEpoch === previous.tabEpoch) return;
+  for (const [tabId, epoch] of Object.entries(state.tabEpoch)) {
+    if (previous.tabEpoch[tabId] !== epoch) retireTabStreams(tabId);
+  }
+});

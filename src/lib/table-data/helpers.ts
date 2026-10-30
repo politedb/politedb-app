@@ -4,6 +4,17 @@ export function isNonEmptyName(v: ColumnRow) {
   return (v.name ?? "").trim().length > 0;
 }
 
+/**
+ * A load that may no longer publish (its tab changed connection, or its
+ * epoch moved: profile saved again, connection refused). Thrown instead of
+ * writing rows; the guarded meta setters drop the error it causes.
+ */
+export const STALE_LOAD = "STALE_LOAD";
+
+export function assertCurrent(isCurrent?: () => boolean): void {
+  if (isCurrent && !isCurrent()) throw new Error(STALE_LOAD);
+}
+
 export function getErrorMessage(e: unknown) {
   if (e && typeof e === "object") {
     const rec = e as Record<string, unknown>;

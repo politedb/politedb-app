@@ -245,11 +245,17 @@ pub async fn ai_agent_sql_safety(
     if sql.len() > MAX_SAFETY_SQL_BYTES {
         return Ok(SqlSafety::Unknown);
     }
-    let Some(executor) = uuid::Uuid::parse_str(&connection_id)
-        .ok()
-        .and_then(|id| crate::engines::runtime::admission::admit_runtime(&state, id).ok())
-        .and_then(|connection| catalog::executor_for(&connection))
-    else {
+    let Ok(id) = uuid::Uuid::parse_str(&connection_id) else {
+        return Ok(SqlSafety::Unknown);
+    };
+    let connection = match crate::engines::runtime::admission::admit_runtime(&state, id) {
+        Ok(connection) => connection,
+        Err(e) if e == "CONNECTION_NOT_FOUND" => return Ok(SqlSafety::Unknown),
+        // A stale or unknown connection: the caller treats it as unknown and
+        // the tab learns why.
+        Err(e) => return Err(e),
+    };
+    let Some(executor) = catalog::executor_for(&connection) else {
         return Ok(SqlSafety::Unknown);
     };
     Ok(safety_on(executor.as_ref(), &sql).await)

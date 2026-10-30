@@ -15,6 +15,8 @@ export type LoadExecutionContext = {
   offset: number;
   engine: DatabaseEngine;
   profileId: string;
+  /** False once this load may no longer publish (R5); rows are not written. */
+  isCurrent?: () => boolean;
   /** The database / keyspace the tab was opened on instead of the profile's own. */
   databaseOverride?: string | null;
   supportsMeta: boolean;

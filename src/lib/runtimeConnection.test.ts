@@ -8,7 +8,9 @@ const m = vi.hoisted(() => ({
 
 vi.mock("src/lib/tauri/profile", () => ({ profileConnect: m.connect }));
 vi.mock("src/lib/tauri/connection", () => ({ connectionRemove: m.remove }));
-vi.mock("src/lib/tauri/operation", () => ({ operationCancel: vi.fn() }));
+vi.mock("src/lib/tauri/operation", () => ({
+  operationCancel: vi.fn(async () => {}),
+}));
 vi.mock("src/screens/connection/lib/tabDirty", () => ({
   connectionTabHasChanges: m.dirty,
 }));
@@ -209,5 +211,66 @@ describe("a refused (stale) connection (R20)", () => {
     expect(useRuntimeTargetsStore.getState().refused[second]).toBe(
       "RUNTIME_STALE"
     );
+  });
+});
+
+describe("installing a connection (R4/R5)", () => {
+  const tableState = (connectionId: string) => ({
+    "t.public.items": { connectionId, loaded: true, columns: [{ name: "a" }] },
+  });
+
+  it("drops table data loaded through a foreign connection instead of relabelling it", async () => {
+    setTabs([tab("t", { kind: "default" })]);
+    useConnectionStore.setState({
+      tableDataMap: tableState("foreign"),
+      columnsCache: { "t.public.items": [{ name: "a" }] },
+    } as never);
+    const id = await connectTabOnce("t");
+    expect(
+      useConnectionStore.getState().tableDataMap["t.public.items"]
+    ).toBeUndefined();
+    expect(
+      useConnectionStore.getState().columnsCache["t.public.items"]
+    ).toBeUndefined();
+    expect(tabOf("t")?.runtimeConnectionId).toBe(id);
+  });
+
+  it("drops caches, filters and sort of the old connection on replacement", async () => {
+    setTabs([tab("t", { kind: "default" })]);
+    const first = await connectTabOnce("t");
+    useConnectionStore.setState({
+      tableDataMap: tableState(first),
+      columnsCache: { "t.public.items": [{ name: "a" }] },
+      sizeInfoCache: { "t.public.items": { totalSize: "1" } },
+      tableFilterByKey: {
+        "t.public.items": { filters: [], filterCombine: "AND" },
+      },
+      tableSortByKey: { "t.public.items": { column: "a", direction: "asc" } },
+      tableStructure: { t: { w: [] } },
+    } as never);
+    await connectTabOnce("t", { force: true });
+    const s = useConnectionStore.getState();
+    expect(s.tableDataMap["t.public.items"]).toBeUndefined();
+    expect(s.columnsCache["t.public.items"]).toBeUndefined();
+    expect(s.sizeInfoCache["t.public.items"]).toBeUndefined();
+    expect(s.tableFilterByKey["t.public.items"]).toBeUndefined();
+    expect(s.tableSortByKey["t.public.items"]).toBeUndefined();
+    expect(s.tableStructure.t).toBeUndefined();
+  });
+});
+
+describe("streams of a tab whose epoch moved (R5)", () => {
+  it("are stopped, so nothing stays pending", async () => {
+    setTabs([tab("t", { kind: "default" })]);
+    useConnectionStore.setState({
+      tableRowsByKey: {
+        "t.public.items": { opId: "op-1", running: true, rows: [] },
+        "other.public.items": { opId: "op-2", running: true, rows: [] },
+      },
+    } as never);
+    useScreenStore.getState().bumpTabEpochs(["t"]);
+    const rows = useConnectionStore.getState().tableRowsByKey;
+    expect(rows["t.public.items"]?.running).toBe(false);
+    expect(rows["other.public.items"]?.running).toBe(true);
   });
 });

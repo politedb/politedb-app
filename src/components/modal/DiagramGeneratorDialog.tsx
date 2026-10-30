@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { useScreenStore } from "src/stores/screen";
+import { useRuntimeLifetime } from "src/hooks/useRuntimeLifetime";
 import { DiagramCanvas } from "src/components/diagram/DiagramCanvas";
 import { loadDiagramState } from "src/components/diagram/diagramMetadata";
 import type { DiagramState } from "src/components/diagram/diagramTypes";
@@ -37,6 +38,12 @@ export function DiagramGeneratorDialog(props: DiagramGeneratorDialogProps) {
   const disabled = !connectionId || !schema || engine === "redis";
 
   const seqRef = useRef(0);
+  // The connection lost authority: retire the obsolete load now.
+  const lifetime = useRuntimeLifetime(connectionId);
+  useEffect(() => {
+    seqRef.current += 1;
+    setLoading(false);
+  }, [lifetime]);
   const connectionRef = useRef(connectionId);
   connectionRef.current = connectionId;
 

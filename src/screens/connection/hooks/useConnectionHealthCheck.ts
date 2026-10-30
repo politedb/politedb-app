@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { runtimeWorkIsCurrent } from "src/lib/runtimeConnection";
+import { useRuntimeLifetime } from "src/hooks/useRuntimeLifetime";
 import { connectionVersion } from "src/lib/tauri";
 import { runSqlQuery } from "src/lib/tauri/query";
 import type { DatabaseEngine } from "src/types";
@@ -29,6 +30,12 @@ export function useConnectionHealthCheck(args: {
   const [checkedAt, setCheckedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const checkSeqRef = useRef(0);
+  // The connection lost authority: retire the obsolete ping now.
+  const lifetime = useRuntimeLifetime(runtimeConnectionId);
+  useEffect(() => {
+    checkSeqRef.current += 1;
+    setChecking(false);
+  }, [lifetime]);
 
   const runCheck = useCallback(async () => {
     if (!runtimeConnectionId) {

@@ -1,3 +1,4 @@
+import { assertCurrent } from "../helpers";
 import { formatBytesSize } from "src/utils/convert";
 import {
   mongoCollectionOverview,
@@ -129,6 +130,8 @@ export async function loadMongoRowCount(params: {
 }
 
 export async function loadMongoRows(params: {
+  /** False once this load may no longer publish (R5). */
+  isCurrent?: () => boolean;
   key: string;
   connId: string;
   schema: string;
@@ -186,6 +189,8 @@ export async function loadMongoRows(params: {
     exactCount: !!exactCount || Object.keys(filter).length > 0,
   });
 
+  // A late answer for a tab that moved on writes nothing (R5).
+  assertCurrent(params.isCurrent);
   const store = useConnectionStore.getState();
   const opId = `mongo:${key}:${offset}:${limit}`;
   const cap = Math.max(1000, limit * 4);

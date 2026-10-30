@@ -69,6 +69,16 @@ pub fn tunnel_key_from_input(ssh: &SshTunnelInput) -> TunnelKey {
 /* -------------------------------------------------- */
 /* acquire */
 
+/// A short, nonsensitive tag correlating the traces of one shared tunnel.
+/// The key itself holds the SSH host, user and private-key path, which are
+/// never logged.
+fn tunnel_tag(key: &TunnelKey) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    key.hash(&mut hasher);
+    format!("{:08x}", hasher.finish() as u32)
+}
+
 pub async fn acquire_shared_tunnel(
     state: &AppState,
     ssh: &SshTunnelInput,
@@ -85,11 +95,11 @@ pub async fn acquire_shared_tunnel(
         let shared = existing.clone();
         drop(existing);
 
-        tracing::info!(ssh_key=?key, refs=prev+1, "ssh_tunnel: reuse");
+        tracing::info!(tunnel=%tunnel_tag(&key), refs=prev+1, "ssh_tunnel: reuse");
         return Ok((key, shared));
     }
 
-    tracing::info!(ssh_key=?key, "ssh_tunnel: create");
+    tracing::info!(tunnel=%tunnel_tag(&key), "ssh_tunnel: create");
 
     // slow path: create new tunnel
     let handle = ssh_tunnel::open_tunnel(ssh).await?;
@@ -108,7 +118,7 @@ pub async fn acquire_shared_tunnel(
             let theirs = e.get().clone();
             theirs.refs.fetch_add(1, Ordering::SeqCst);
 
-            tracing::info!(ssh_key=?key, "ssh_tunnel: race lost, closing ours");
+            tracing::info!(tunnel=%tunnel_tag(&key), "ssh_tunnel: race lost, closing ours");
 
             let ours = shared.clone();
             tokio::spawn(async move {
@@ -123,7 +133,7 @@ pub async fn acquire_shared_tunnel(
         }
         dashmap::mapref::entry::Entry::Vacant(v) => {
             v.insert(shared.clone());
-            tracing::info!(ssh_key=?key, local_bind=%shared.local_addr, "ssh_tunnel: inserted");
+            tracing::info!(tunnel=%tunnel_tag(&key), local_bind=%shared.local_addr, "ssh_tunnel: inserted");
             Ok((key, shared))
         }
     }
@@ -146,7 +156,7 @@ pub async fn release_shared_tunnel_by_key(state: &AppState, key: &TunnelKey) {
             // Now refs is effectively 0 (from the perspective of the pool),
             // and we own the responsibility to close it.
 
-            tracing::info!(ssh_key=?key, local_bind=%shared.local_addr, "ssh_tunnel: closing (refs reached 0)");
+            tracing::info!(tunnel=%tunnel_tag(key), local_bind=%shared.local_addr, "ssh_tunnel: closing (refs reached 0)");
 
             let mut g = shared.handle.lock().await;
             if let Some(h) = g.take() {
@@ -158,7 +168,7 @@ pub async fn release_shared_tunnel_by_key(state: &AppState, key: &TunnelKey) {
             // Just decrement ref count.
             if let Some(entry) = state.ssh_tunnel_pool.get(key) {
                 let prev = entry.refs.fetch_sub(1, Ordering::SeqCst);
-                tracing::info!(ssh_key=?key, refs=prev-1, "ssh_tunnel: release (decrement)");
+                tracing::info!(tunnel=%tunnel_tag(key), refs=prev-1, "ssh_tunnel: release (decrement)");
             }
         }
     }
@@ -169,4 +179,27 @@ pub async fn release_shared_tunnel_by_conn(state: &AppState, conn_id: uuid::Uuid
         return;
     };
     release_shared_tunnel_by_key(state, &key).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tunnel_traces_never_carry_the_key() {
+        let key = TunnelKey {
+            ssh_host: "bastion.secret-host".into(),
+            ssh_port: 22,
+            ssh_user: "secret-user".into(),
+            strict: "no".into(),
+            auth_fp: "key:/Users/me/.ssh/secret_id_rsa".into(),
+            remote_host: "db.secret-host".into(),
+            remote_port: 5432,
+        };
+        let tag = tunnel_tag(&key);
+        assert_eq!(tag.len(), 8);
+        assert!(tag.chars().all(|c| c.is_ascii_hexdigit()));
+        // Stable for the same tunnel, so its traces still correlate.
+        assert_eq!(tag, tunnel_tag(&key));
+    }
 }

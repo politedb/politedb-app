@@ -150,7 +150,7 @@ mod tests {
         serde_json::from_value(v).expect("valid input")
     }
 
-    fn pg() -> ConnectionCreateInput {
+    fn pg_with_ssh(auth: serde_json::Value) -> ConnectionCreateInput {
         let mut i = input(
             "postgres",
             json!({
@@ -159,26 +159,49 @@ mod tests {
                 "ssl_mode": "require"
             }),
         );
-        i.ssh = serde_json::from_value(json!({
-            "host": "bastion", "port": 22, "user": "s", "auth": "password",
-            "password": { "kind": "keychain", "value": "k_ssh" }
-        }))
-        .ok();
+        i.ssh = Some(
+            serde_json::from_value(json!({
+                "ssh_host": "bastion", "ssh_port": 22, "ssh_user": "s",
+                "auth": auth,
+                "remote_host": "db.internal", "remote_port": 5432,
+                "strict_host_key_checking": "accept-new",
+                "connect_timeout_ms": 5000
+            }))
+            .expect("valid SSH fixture"),
+        );
         i
+    }
+
+    fn pg() -> ConnectionCreateInput {
+        pg_with_ssh(json!({ "kind": "password", "password": "k_ssh" }))
     }
 
     #[test]
     fn sets_only_the_target_field() {
-        let base = pg();
-        let out = apply_override(&base, " other ").unwrap();
-        assert_eq!(out.postgres.as_ref().unwrap().database, "other");
-        // Everything else, secret references included, is untouched.
-        let mut back = out.clone();
-        back.postgres.as_mut().unwrap().database = "app".into();
-        assert_eq!(
-            serde_json::to_value(&back).unwrap(),
-            serde_json::to_value(&base).unwrap()
-        );
+        for auth in [
+            json!({ "kind": "password", "password": "k_ssh" }),
+            json!({
+                "kind": "private_key",
+                "identity_file": "/keys/id_ed25519",
+                "passphrase": "k_pass"
+            }),
+        ] {
+            let base = pg_with_ssh(auth);
+            assert!(base.ssh.is_some(), "the fixture has SSH");
+            let out = apply_override(&base, " other ").unwrap();
+            assert_eq!(out.postgres.as_ref().unwrap().database, "other");
+            // Everything else (SSH, TLS, secret references) is untouched.
+            assert_eq!(
+                serde_json::to_value(&out.ssh).unwrap(),
+                serde_json::to_value(&base.ssh).unwrap()
+            );
+            let mut back = out.clone();
+            back.postgres.as_mut().unwrap().database = "app".into();
+            assert_eq!(
+                serde_json::to_value(&back).unwrap(),
+                serde_json::to_value(&base).unwrap()
+            );
+        }
     }
 
     #[test]

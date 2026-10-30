@@ -49,6 +49,7 @@ export async function executeRedisLoad(
       const rowsRes = await loadRedisRows({
         key,
         connId: ctx.connId,
+        isCurrent: ctx.isCurrent,
         tableName: ctx.tableName,
         limit: ctx.limit,
         offset: ctx.offset,

@@ -87,3 +87,20 @@ describe("observed profile changes (R16)", () => {
     expect(epoch("x1")).toBe(x + 1);
   });
 });
+
+describe("publishing a list a mutation returned (R16)", () => {
+  it("invalidates the changed profiles' tabs at once, before any later list", async () => {
+    const x = epoch("x1");
+    useProfileStore
+      .getState()
+      .publishProfiles([profile("x", "imported"), profile("y", "a")]);
+    expect(epoch("x1")).toBe(x + 1);
+    expect(useProfileStore.getState().getProfileById("x")?.revision).toBe(
+      "imported"
+    );
+    // The refresh afterwards carries the same revision: nothing more.
+    m.list.mockResolvedValue([profile("x", "imported"), profile("y", "a")]);
+    await useProfileStore.getState().loadProfiles();
+    expect(epoch("x1")).toBe(x + 1);
+  });
+});

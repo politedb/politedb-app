@@ -28,6 +28,13 @@ type ProfileState = {
   /** Fetch profiles from backend */
   loadProfiles: () => Promise<void>;
 
+  /**
+   * Publishes a complete list a backend mutation returned (an import), so
+   * the tabs of changed profiles are invalidated at once, before any later
+   * list request (R16).
+   */
+  publishProfiles: (list: ConnectionProfile[]) => void;
+
   /** Remove profile from backend, then from local list */
   removeProfile: (profileId: string) => Promise<void>;
 
@@ -137,6 +144,12 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     } catch (e) {
       set({ busy: false, error: toErrorMessage(e) });
     }
+  },
+
+  publishProfiles: (list) => {
+    invalidateTabsOf(observe(list, true));
+    usePinnedConnectionsStore.getState().pruneMissing(list.map((p) => p.id));
+    set({ profiles: list });
   },
 
   removeProfile: async (profileId) => {

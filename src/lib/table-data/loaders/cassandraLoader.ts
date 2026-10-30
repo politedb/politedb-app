@@ -1,3 +1,4 @@
+import { assertCurrent } from "../helpers";
 import { useProfileStore } from "src/stores/profile";
 import {
   cassandraFetchRows,
@@ -68,6 +69,8 @@ export async function loadCassandraOverview(params: {
 }
 
 export async function loadCassandraRows(params: {
+  /** False once this load may no longer publish (R5). */
+  isCurrent?: () => boolean;
   key: string;
   connId: string;
   schema: string;
@@ -96,6 +99,8 @@ export async function loadCassandraRows(params: {
     offset,
   });
 
+  // A late answer for a tab that moved on writes nothing (R5).
+  assertCurrent(params.isCurrent);
   const store = useConnectionStore.getState();
   const opId = `cassandra:${key}:${offset}:${limit}`;
   const cap = Math.max(1000, limit * 4);

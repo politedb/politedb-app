@@ -219,6 +219,7 @@ export function useLoadTableData() {
             supportsMeta: supportsTableMeta(activeTab.engine),
             columnsCache,
             sizeInfoCache,
+            isCurrent,
             setMeta: guardedSetMeta,
             setColumnsCache: guardedColumnsCache,
             setSizeInfoCache: guardedSizeInfoCache,

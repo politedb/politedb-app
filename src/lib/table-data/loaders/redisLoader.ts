@@ -1,3 +1,4 @@
+import { assertCurrent } from "../helpers";
 import { cellToString } from "src/utils/convert";
 import { runRedisCommand, type TableChunk } from "src/lib/tauri";
 import { DEFAULT_ROWS_CAP, useConnectionStore } from "src/stores/connection";
@@ -55,6 +56,8 @@ export async function loadRedisOverview(params: {
 }
 
 export async function loadRedisRows(params: {
+  /** False once this load may no longer publish (R5). */
+  isCurrent?: () => boolean;
   key: string;
   connId: string;
   tableName: string;
@@ -126,6 +129,8 @@ export async function loadRedisRows(params: {
     columns.length === 1 && row.length > 1 ? [row[row.length - 1]] : row
   );
 
+  // A late answer for a tab that moved on writes nothing (R5).
+  assertCurrent(params.isCurrent);
   const store = useConnectionStore.getState();
   const opId = `redis:${key}:${offset}:${limit}`;
   const cap = Math.max(1000, limit * 4);

@@ -1,4 +1,5 @@
 import { invoke } from "./runtimeInvoke";
+import { noteRuntimeError } from "./runtimeAdmission";
 import { CMD } from "./commands";
 
 export type SessionActionKind = "cancel" | "terminate";
@@ -61,7 +62,7 @@ export async function signalHealthInspectorBackend(
     return "invalid";
   }
   try {
-    const result = await invokeFn<{ outcome?: unknown }>(
+    const result = await invokeFn<{ outcome?: unknown; reason?: unknown }>(
       CMD.healthInspectorSignalBackend,
       {
         runtimeConnectionId: target.runtimeConnectionId,
@@ -70,6 +71,10 @@ export async function signalHealthInspectorBackend(
         kind: target.kind,
       }
     );
+    // The connection itself was refused (stale): the tab says so (R20).
+    if (typeof result?.reason === "string") {
+      noteRuntimeError(target.runtimeConnectionId, result.reason);
+    }
     return isSessionActionOutcome(result?.outcome) ? result.outcome : "unknown";
   } catch {
     return "unknown";

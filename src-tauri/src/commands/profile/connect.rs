@@ -213,6 +213,19 @@ pub async fn profile_save(
     Ok(profile)
 }
 
+/// The agent profile binding of a connection: given for the profile's own
+/// target only. A connection opened on another database (even one named
+/// like the profile's own) stays unbound, so consent for one database never
+/// covers another (D2).
+fn binding_for(
+    profile: &ConnectionProfile,
+    database: &Option<String>,
+) -> Option<crate::ai::agent::consent::ProfileBinding> {
+    database
+        .is_none()
+        .then(|| crate::ai::agent::consent::ProfileBinding::of(profile))
+}
+
 #[tauri::command]
 pub async fn profile_connect(
     app: AppHandle,
@@ -267,13 +280,8 @@ pub async fn profile_connect(
             format!("RUNTIME_CONNECT_FAILED: {e}")
         })?;
 
-    // Agent consent is given for the profile's own target only: a connection
-    // opened on another database stays unbound (no AI data access).
-    if database.is_none() {
-        state.connection_profiles.insert(
-            connection.id,
-            crate::ai::agent::consent::ProfileBinding::of(&profile),
-        );
+    if let Some(binding) = binding_for(&profile, &database) {
+        state.connection_profiles.insert(connection.id, binding);
     }
 
     tracing::info!(
@@ -377,4 +385,41 @@ pub async fn profile_connect_test(
     );
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn profile() -> ConnectionProfile {
+        let input: crate::types::ConnectionCreateInput =
+            serde_json::from_value(serde_json::json!({
+                "engine": "postgres", "label": "p",
+                "postgres": {
+                    "host": "h", "port": 5432, "database": "app", "user": "u",
+                    "password": { "kind": "keychain", "value": "k" }
+                }
+            }))
+            .unwrap();
+        ConnectionProfile {
+            id: Uuid::new_v4(),
+            engine: input.engine,
+            label: "p".into(),
+            input,
+            tags: vec![],
+            indicator_color: None,
+            created_at: 0,
+            updated_at: 0,
+            revision: "r".into(),
+        }
+    }
+
+    #[test]
+    fn only_the_profiles_own_target_is_bound() {
+        let p = profile();
+        assert!(binding_for(&p, &None).is_some());
+        assert!(binding_for(&p, &Some("other".into())).is_none());
+        // Named like the profile's own database: still an override, unbound.
+        assert!(binding_for(&p, &Some("app".into())).is_none());
+    }
 }

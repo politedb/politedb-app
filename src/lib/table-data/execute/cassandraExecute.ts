@@ -59,6 +59,7 @@ export async function executeCassandraLoad(
       const rowsRes = await loadCassandraRows({
         key,
         connId: ctx.connId,
+        isCurrent: ctx.isCurrent,
         schema: keyspace,
         tableName: ctx.tableName,
         limit: ctx.limit,

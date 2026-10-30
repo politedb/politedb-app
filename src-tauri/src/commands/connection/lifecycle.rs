@@ -537,3 +537,23 @@ mod registry_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod logging_tests {
+    use super::error_category;
+
+    /// Connect failures are logged by category only: the message can name
+    /// the database, a file path or the host.
+    #[test]
+    fn connect_errors_are_logged_by_category_only() {
+        let marker =
+            "SQLITE_CONNECT_FAILED: SQLITE_OPEN_FAILED: unable to open /Users/me/secret-db.sqlite";
+        assert_eq!(error_category(marker), "SQLITE_CONNECT_FAILED");
+        assert_eq!(
+            error_category("db error: FATAL: database \"secret_db\" does not exist"),
+            "OTHER"
+        );
+        assert_eq!(error_category("RUNTIME_STALE"), "RUNTIME_STALE");
+        assert_eq!(error_category(""), "OTHER");
+    }
+}

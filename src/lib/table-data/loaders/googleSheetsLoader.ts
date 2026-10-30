@@ -1,3 +1,4 @@
+import { assertCurrent } from "../helpers";
 import {
   googleSheetsFetchRows,
   googleSheetsSheetOverview,
@@ -37,6 +38,8 @@ export async function loadGoogleSheetsOverview(params: {
 }
 
 export async function loadGoogleSheetsRows(params: {
+  /** False once this load may no longer publish (R5). */
+  isCurrent?: () => boolean;
   key: string;
   connId: string;
   tableName: string;
@@ -51,6 +54,8 @@ export async function loadGoogleSheetsRows(params: {
     limit: params.limit,
     offset: params.offset,
   });
+  // A late answer for a tab that moved on writes nothing (R5).
+  assertCurrent(params.isCurrent);
   const store = useConnectionStore.getState();
   const opId = `google-sheets:${params.key}:${params.offset}:${params.limit}`;
   store.initRows(params.key, DEFAULT_ROWS_CAP);

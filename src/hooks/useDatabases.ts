@@ -6,6 +6,7 @@ import {
   useState,
 } from "preact/hooks";
 import { runtimeWorkIsCurrent } from "src/lib/runtimeConnection";
+import { useRuntimeLifetime } from "src/hooks/useRuntimeLifetime";
 import { runSqlQuery } from "src/lib/tauri/query";
 import type { DatabaseEngine } from "src/types";
 import {
@@ -83,6 +84,12 @@ export function useDatabases({
   }, [dbs, search]);
 
   const loadSeqRef = useRef(0);
+  // The connection lost authority: retire the obsolete list request now.
+  const lifetime = useRuntimeLifetime(runtimeConnectionId);
+  useEffect(() => {
+    loadSeqRef.current += 1;
+    setBusy(false);
+  }, [lifetime]);
   const loadDatabases = useCallback(async () => {
     if (!runtimeConnectionId || !canOpenDatabases(engine)) return;
     // Late results of an older list or connection never land (R5).
