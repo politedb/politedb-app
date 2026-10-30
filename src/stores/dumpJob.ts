@@ -90,6 +90,8 @@ export type DumpOutcome =
       counts?: DumpCounts;
       /** A failure that came after the cancel was asked. */
       failure?: string;
+      /** A catalog query could not be confirmed stopped (in `message`). */
+      catalogUnconfirmed?: true;
       message: string;
     }
   | {

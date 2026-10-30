@@ -10,13 +10,10 @@ import {
 } from "src/stores/dumpJob";
 import { useConnectionRuntimeCtx } from "../workspace/ConnectionRuntimeContext";
 import { canBackupDatabase } from "../lib/dump/backupSql";
-import {
-  BACKUP_CANCELLED_MESSAGE,
-  runDatabaseBackup,
-} from "../lib/dump/backupRun";
+import { runDatabaseBackup } from "../lib/dump/backupRun";
 import { runDumpImport, type DumpImportOptions } from "../lib/dump/restoreRun";
 import { startDumpJob } from "../lib/dump/dumpJobController";
-import { dumpJobTitle } from "../lib/dump/dumpOutcomeText";
+import { dumpJobTitle, quietCancelToast } from "../lib/dump/dumpOutcomeText";
 
 // The SQL and catalog helpers moved to lib/dump/backupSql.ts; re-exported
 // for existing importers.
@@ -27,7 +24,11 @@ export * from "../lib/dump/backupSql";
  * outcome to read stays as the job's retained result, which the progress
  * modal shows until Close (D15).
  */
-function present(outcome: DumpOutcome, successToast: string) {
+function present(
+  kind: DumpJobKind,
+  outcome: DumpOutcome,
+  successToast: string
+) {
   if (outcome.kind === "succeeded" && !outcome.warning) {
     if (outcome.skipped > 0) {
       showToast(
@@ -39,14 +40,9 @@ function present(outcome: DumpOutcome, successToast: string) {
     }
     return;
   }
-  if (
-    outcome.kind === "cancelled" &&
-    outcome.rollback === "n/a" &&
-    !outcome.failure
-  ) {
-    // A cancelled backup closes quietly (D12).
-    showToast(BACKUP_CANCELLED_MESSAGE, { tone: "info" });
-  }
+  // A cancel with nothing more to read closes quietly (D12).
+  const cancelled = quietCancelToast(kind, outcome);
+  if (cancelled) showToast(cancelled, { tone: "info" });
 }
 
 function tabTarget(tabId: string, database?: string): string {
@@ -118,7 +114,7 @@ export function useDatabaseBackup() {
       } finally {
         await job.finish(outcome);
       }
-      present(outcome, "Database backup completed.");
+      present("backup", outcome, "Database backup completed.");
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [rt.runtimeConnectionId, rt.metadata, rt.metaKey, rt.engine, rt.profileId]
@@ -170,7 +166,7 @@ export function useDatabaseBackup() {
     } finally {
       await job.finish(outcome);
     }
-    present(outcome, opts.successToast);
+    present(kind, outcome, opts.successToast);
   };
 
   const onRestoreDatabase = useCallback(

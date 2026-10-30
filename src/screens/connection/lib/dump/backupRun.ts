@@ -16,6 +16,7 @@ import type { DumpOutcome } from "src/stores/dumpJob";
 import type { useConnectionRuntimeCtx } from "../../workspace/ConnectionRuntimeContext";
 import { backupStepsTotal } from "../dumpProgress";
 import { holdJobQueries } from "./jobQueries";
+import { BACKUP_CANCELLED_TOAST } from "./dumpOutcomeText";
 import type { DumpJobHandle } from "./dumpJobController";
 import {
   backupQuery,
@@ -34,9 +35,6 @@ import {
 } from "./backupSql";
 
 type Runtime = ReturnType<typeof useConnectionRuntimeCtx>;
-
-export const BACKUP_CANCELLED_MESSAGE =
-  "Backup cancelled. No file was written.";
 
 /** Stops the run where it stands (a cancel asked meanwhile). */
 class Cancelled extends Error {}
@@ -457,7 +455,7 @@ export async function runDatabaseBackup(
       kind: "cancelled",
       rollback: cleanupUnconfirmed ? "cleanup-unconfirmed" : "n/a",
       failure,
-      message: `${BACKUP_CANCELLED_MESSAGE}${also}${cleanupUnconfirmed ? ` ${SESSION_NOTE}` : ""}`,
+      message: `${BACKUP_CANCELLED_TOAST}${also}${cleanupUnconfirmed ? ` ${SESSION_NOTE}` : ""}`,
     };
   }
 

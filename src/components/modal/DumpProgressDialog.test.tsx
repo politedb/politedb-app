@@ -214,12 +214,14 @@ describe("DumpProgressDialog", () => {
     await act(() =>
       job.finish({
         kind: "cancelled",
-        rollback: "rolled-back",
-        message: "Cancelled. The transaction was rolled back.",
+        rollback: "cleanup-unconfirmed",
+        message: "Cancelled. Closing its connection could not be confirmed.",
       })
     );
     expect(
-      screen.getByText("Cancelled. The transaction was rolled back.")
+      screen.getByText(
+        "Cancelled. Closing its connection could not be confirmed."
+      )
     ).toBeTruthy();
     expect(
       startDumpJob("backup", {
@@ -232,6 +234,50 @@ describe("DumpProgressDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(useDumpJobStore.getState().summary).toBeNull();
     expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
+  });
+
+  it("closes quietly after a restore cancel known not committed", async () => {
+    for (const rollback of ["rolled-back", "not-committed-closed"] as const) {
+      const job = start();
+      const { unmount } = render(<DumpProgressDialog />);
+      act(() => {
+        job.showProgress();
+        job.setPhase("running", true);
+      });
+      await act(() =>
+        job.finish({ kind: "cancelled", rollback, message: "Cancelled." })
+      );
+      expect(useDumpJobStore.getState().summary).toBeNull();
+      expect(screen.queryByRole("dialog")).toBeNull();
+      unmount();
+    }
+  });
+
+  it("keeps a restore cancel to read when more must be said", async () => {
+    const outcomes = [
+      // A failure that came after the cancel.
+      {
+        kind: "cancelled" as const,
+        rollback: "not-committed-closed" as const,
+        failure: "ERROR: boom",
+        message: "Cancelled. Also: ERROR: boom",
+      },
+      // A catalog query that could not be confirmed stopped.
+      {
+        kind: "cancelled" as const,
+        rollback: "rolled-back" as const,
+        catalogUnconfirmed: true as const,
+        message: "Cancelled. A check could not be confirmed stopped.",
+      },
+    ];
+    for (const outcome of outcomes) {
+      const job = start();
+      const { unmount } = render(<DumpProgressDialog />);
+      await act(() => job.finish(outcome));
+      expect(screen.getByText(outcome.message)).toBeTruthy();
+      useDumpJobStore.setState({ summary: null });
+      unmount();
+    }
   });
 
   it("closes quietly after a success", async () => {

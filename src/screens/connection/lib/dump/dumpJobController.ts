@@ -14,6 +14,7 @@ import {
 } from "src/stores/dumpJob";
 import { useScreenStore } from "src/stores/screen";
 import { mergeProgress } from "../dumpProgress";
+import { quietCancelToast } from "./dumpOutcomeText";
 
 /**
  * Owns the running dump job's control (cancel, its cleanup, the stop
@@ -163,13 +164,10 @@ function mustRead(kind: DumpJobKind, outcome: DumpOutcome): boolean {
     case "abandoned":
       return false;
     case "cancelled":
-      // A cancelled backup closes quietly with a toast (D12), unless
-      // something about it must be read.
-      return (
-        kind !== "backup" ||
-        !!outcome.failure ||
-        outcome.rollback === "cleanup-unconfirmed"
-      );
+      // A cancel with nothing more to read closes quietly with a toast
+      // (D12): a backup that wrote nothing, a restore or import known not
+      // committed.
+      return quietCancelToast(kind, outcome) === null;
     default:
       return true;
   }

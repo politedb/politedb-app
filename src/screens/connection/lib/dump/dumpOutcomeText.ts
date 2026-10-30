@@ -1,5 +1,31 @@
 import type { DumpJobKind, DumpOutcome } from "src/stores/dumpJob";
 
+export const BACKUP_CANCELLED_TOAST = "Backup cancelled. No file was written.";
+export const RESTORE_CANCELLED_TOAST =
+  "Cancelled. The transaction was not committed.";
+
+/**
+ * The toast of a cancel with nothing more to read, or null: a backup that
+ * wrote nothing, or a restore/import whose transaction is known not
+ * committed (rolled back, or its session closed). A failure after the
+ * cancel, an unconfirmed cleanup or an unconfirmed catalog query keeps the
+ * result in the modal (D15).
+ */
+export function quietCancelToast(
+  kind: DumpJobKind,
+  outcome: DumpOutcome
+): string | null {
+  if (outcome.kind !== "cancelled" || outcome.failure) return null;
+  if (kind === "backup") {
+    return outcome.rollback === "n/a" ? BACKUP_CANCELLED_TOAST : null;
+  }
+  if (outcome.catalogUnconfirmed) return null;
+  return outcome.rollback === "rolled-back" ||
+    outcome.rollback === "not-committed-closed"
+    ? RESTORE_CANCELLED_TOAST
+    : null;
+}
+
 /** The text of an outcome the user must read, and how it reads. */
 export function describeDumpOutcome(
   outcome: DumpOutcome

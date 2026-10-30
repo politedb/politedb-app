@@ -265,6 +265,11 @@ export function withCatalogWarning(outcome: DumpOutcome): DumpOutcome {
         message: `Nothing was run. ${note}`,
       };
     case "cancelled":
+      return {
+        ...outcome,
+        catalogUnconfirmed: true,
+        message: `${outcome.message}\n\n${note}`,
+      };
     case "stopped":
     case "failed":
     case "committed-refresh-failed":
