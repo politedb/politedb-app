@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "preact/hooks";
+import { runtimeWorkIsCurrent } from "src/lib/runtimeConnection";
 import { runSqlQuery } from "src/lib/tauri/query";
 import type { DatabaseEngine } from "src/types";
 import {
@@ -75,8 +82,13 @@ export function useDatabases({
     return dbs.filter((x) => x.toLowerCase().includes(q));
   }, [dbs, search]);
 
+  const loadSeqRef = useRef(0);
   const loadDatabases = useCallback(async () => {
     if (!runtimeConnectionId || !canOpenDatabases(engine)) return;
+    // Late results of an older list or connection never land (R5).
+    const seq = ++loadSeqRef.current;
+    const current = runtimeWorkIsCurrent(runtimeConnectionId);
+    const mine = () => loadSeqRef.current === seq && current();
     setBusy(true);
     setError("");
     try {
@@ -93,11 +105,13 @@ export function useDatabases({
           .filter(Boolean);
       }
 
-      setDbs(list);
+      if (mine()) setDbs(list);
     } catch (e) {
-      setError(String((e as any)?.message ?? e ?? "LOAD_DATABASES_FAILED"));
+      if (mine()) {
+        setError(String((e as any)?.message ?? e ?? "LOAD_DATABASES_FAILED"));
+      }
     } finally {
-      setBusy(false);
+      if (loadSeqRef.current === seq) setBusy(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runtimeConnectionId, engine, selectedDb]);

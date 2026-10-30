@@ -18,7 +18,11 @@ export async function executeCassandraLoad(
   const { key, plan, prev, flags, setMeta, setColumnsCache } = ctx;
 
   try {
-    const keyspace = resolveCassandraKeyspaceForLoad(ctx.schema, ctx.profileId);
+    const keyspace = resolveCassandraKeyspaceForLoad(
+      ctx.schema,
+      ctx.profileId,
+      ctx.databaseOverride
+    );
 
     let cassandraColumns = asColumnRows(prev);
     let cassandraStructure = prev.structure ?? [];

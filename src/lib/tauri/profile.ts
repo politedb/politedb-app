@@ -779,10 +779,18 @@ export async function duplicateProfile(
   });
 }
 
+/**
+ * Connects to a saved profile: its own target, or `opts.database` instead
+ * (a tab opened on another database). The backend applies the override to
+ * the stored profile, so secrets never pass through here.
+ */
 export async function profileConnect(
-  profileId: string
+  profileId: string,
+  opts?: { database?: string }
 ): Promise<ProfileConnectResult> {
   const payload: ProfileConnectInput = { profile_id: profileId };
+  const database = opts?.database?.trim();
+  if (database) payload.database = database;
   return invoke<ProfileConnectResult>(CMD.profileConnect, { payload });
 }
 

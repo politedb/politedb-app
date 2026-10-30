@@ -63,6 +63,7 @@ import {
 import { pickOpenFile, showMessage } from "src/lib/system-dialog";
 import { trackEvent } from "src/lib/analytics";
 import { seedSqliteTemplateDemo } from "src/lib/sqliteTemplateSeed";
+import { useRuntimeTargetsStore } from "src/stores/runtimeTargets";
 
 export function MainScreen() {
   const { addTab, setActiveProfileScreen } = useScreenStore();
@@ -423,8 +424,13 @@ export function MainScreen() {
         profileId: saved.profile.id,
         engine: saved.profile.engine,
         runtimeConnectionId: saved.connection.id,
+        target: { kind: "default" },
         profileTags: saved.profile.input?.tags ?? [],
       };
+      // This tab acquired the connection and alone may remove it (R4).
+      useRuntimeTargetsStore
+        .getState()
+        .register(saved.connection.id, saved.connection.target, newTab.id);
       addTab(newTab);
       setActiveProfileScreen(newTab.id);
       void import("src/stores/connectionLog").then(

@@ -1,8 +1,10 @@
 use tauri::{AppHandle, State};
 use uuid::Uuid;
 
-use crate::commands::connection::lifecycle::{connection_create, connection_test};
+use crate::commands::connection::lifecycle::{connection_test, create_runtime, error_category};
+use crate::engines::driver::ConnectPolicy;
 use crate::profiles::store as profile_store;
+use crate::profiles::target_override::{apply_override, normalize_override, target_identity};
 use crate::profiles::types::{
     ConnectionProfile, ProfileConnectInput, ProfileConnectResult, ProfileConnectTestInput,
 };
@@ -39,7 +41,6 @@ pub async fn profile_save_and_connect(
         profile_id = %profile_id,
         persist_secrets = persist_secrets,
         engine = ?input.engine,
-        label = %input.label,
         "start"
     );
 
@@ -91,22 +92,23 @@ pub async fn profile_save_and_connect(
         crate::commands::ai_agent_data::cancel_profile_runs(&state, profile_id);
     }
 
-    // 4) Runtime connect
-    let profiles = std::sync::Arc::clone(&state.connection_profiles);
-    let connection: AppConnectionInfo = connection_create(app.clone(), state, input)
-        .await
-        .map_err(|e| {
-            tracing::error!(
-                step = "runtime_connect",
-                mode,
-                profile_id = %profile_id,
-                error = %e,
-                "failed"
-            );
-            format!("RUNTIME_CONNECT_FAILED: {e}")
-        })?;
+    // 4) Runtime connect (the profile's own target)
+    let target = target_identity(Some(&profile), None, &input);
+    let connection: AppConnectionInfo =
+        create_runtime(&app, &state, input, ConnectPolicy::default(), target)
+            .await
+            .map_err(|e| {
+                tracing::error!(
+                    step = "runtime_connect",
+                    mode,
+                    profile_id = %profile_id,
+                    error = error_category(&e),
+                    "failed"
+                );
+                format!("RUNTIME_CONNECT_FAILED: {e}")
+            })?;
 
-    profiles.insert(
+    state.connection_profiles.insert(
         connection.id,
         crate::ai::agent::consent::ProfileBinding::of(&profile),
     );
@@ -151,7 +153,6 @@ pub async fn profile_save(
         profile_id = %profile_id,
         persist_secrets = persist_secrets,
         engine = ?input.engine,
-        label = %input.label,
         "start"
     );
 
@@ -237,27 +238,43 @@ pub async fn profile_connect(
         format!("PROFILE_NOT_FOUND: {e}")
     })?;
 
-    // 2) Clone input (profile input MUST already contain SecretRef::Keychain)
-    let input = profile.input.clone();
+    // 2) Clone input (profile input MUST already contain SecretRef::Keychain),
+    // opened on the requested database instead of its own when asked.
+    let database = normalize_override(payload.database.as_deref());
+    let (input, policy) = match &database {
+        Some(db) => (
+            apply_override(&profile.input, db)?,
+            // Reopening a database a tab was opened on: a missing SQLite file
+            // is an error, not a new empty database.
+            ConnectPolicy {
+                sqlite_create: false,
+            },
+        ),
+        None => (profile.input.clone(), ConnectPolicy::default()),
+    };
+    let target = target_identity(Some(&profile), database.clone(), &input);
 
     // 3) Runtime connect
-    let profiles = std::sync::Arc::clone(&state.connection_profiles);
-    let connection = connection_create(app.clone(), state, input)
+    let connection = create_runtime(&app, &state, input, policy, target)
         .await
         .map_err(|e| {
             tracing::error!(
                 step = "runtime_connect",
                 profile_id = %profile_id,
-                error = %e,
+                error = error_category(&e),
                 "failed"
             );
             format!("RUNTIME_CONNECT_FAILED: {e}")
         })?;
 
-    profiles.insert(
-        connection.id,
-        crate::ai::agent::consent::ProfileBinding::of(&profile),
-    );
+    // Agent consent is given for the profile's own target only: a connection
+    // opened on another database stays unbound (no AI data access).
+    if database.is_none() {
+        state.connection_profiles.insert(
+            connection.id,
+            crate::ai::agent::consent::ProfileBinding::of(&profile),
+        );
+    }
 
     tracing::info!(
         step = "profile_connect",

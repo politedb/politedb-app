@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef } from "preact/hooks";
-import { connectProfileOnce } from "src/lib/runtimeConnection";
+import { connectTabOnce, runtimeServesTab } from "src/lib/runtimeConnection";
 import { operationCancel } from "src/lib/tauri";
 import { useConnectionStore } from "src/stores/connection";
 import { useScreenStore } from "src/stores/screen";
@@ -61,10 +61,17 @@ export function useLoadTableData() {
   const ensureRuntimeConn = useCallback(
     async (key: string) => {
       if (!activeTab) throw new Error("NO_ACTIVE_TAB");
-      const meta = tableDataMap[key];
-      if (meta?.connectionId) return meta.connectionId;
+      // The tab's own connection wins; a table's is used only when the tab
+      // acquired it on the same target (R4).
       if (activeTab.runtimeConnectionId) return activeTab.runtimeConnectionId;
-      return await connectProfileOnce(activeTab.profileId);
+      const meta = tableDataMap[key];
+      if (
+        meta?.connectionId &&
+        runtimeServesTab(activeTab.id, meta.connectionId)
+      ) {
+        return meta.connectionId;
+      }
+      return await connectTabOnce(activeTab.id);
     },
     [activeTab, tableDataMap]
   );
@@ -148,15 +155,49 @@ export function useLoadTableData() {
             return;
           }
 
-          patchMeta(setMeta, key, prev, {
-            connectionId: prev.connectionId ?? connId,
-          });
+          // The table follows the tab's connection (never keeps an older one).
+          patchMeta(setMeta, key, prev, { connectionId: connId });
 
-          if (!activeTab.runtimeConnectionId) {
+          if (
+            !useScreenStore
+              .getState()
+              .profileTabs.find((t) => t.id === activeTab.id)
+              ?.runtimeConnectionId
+          ) {
             useScreenStore
               .getState()
               .updateTab(activeTab.id, { runtimeConnectionId: connId });
           }
+
+          // What this load may still publish (R5): nothing once the tab's
+          // connection changed or its epoch moved (profile saved again,
+          // connection refused). Its own pending flag is still retired,
+          // unless a newer load of the table owns it.
+          const tabId = activeTab.id;
+          const startEpoch = useScreenStore.getState().tabEpoch[tabId] ?? 0;
+          const isCurrent = () => {
+            const s = useScreenStore.getState();
+            return (
+              (s.tabEpoch[tabId] ?? 0) === startEpoch &&
+              s.profileTabs.find((t) => t.id === tabId)?.runtimeConnectionId ===
+                connId
+            );
+          };
+          const retire = (k: string) => {
+            if (latestLoadSignatureByKey.get(key) !== loadSignature) return;
+            const cur = useConnectionStore.getState().tableDataMap[k];
+            if (cur?.busy) setMeta(k, { ...cur, busy: false });
+          };
+          const guardedSetMeta: typeof setMeta = (k, data) => {
+            if (isCurrent()) setMeta(k, data);
+            else retire(k);
+          };
+          const guardedColumnsCache: typeof setColumnsCache = (k, cols) => {
+            if (isCurrent()) setColumnsCache(k, cols);
+          };
+          const guardedSizeInfoCache: typeof setSizeInfoCache = (k, info) => {
+            if (isCurrent()) setSizeInfoCache(k, info);
+          };
 
           await executeEngineLoad({
             key,
@@ -171,12 +212,16 @@ export function useLoadTableData() {
             offset,
             engine: activeTab.engine,
             profileId: activeTab.profileId,
+            databaseOverride:
+              activeTab.target?.kind === "override"
+                ? activeTab.target.database
+                : null,
             supportsMeta: supportsTableMeta(activeTab.engine),
             columnsCache,
             sizeInfoCache,
-            setMeta,
-            setColumnsCache,
-            setSizeInfoCache,
+            setMeta: guardedSetMeta,
+            setColumnsCache: guardedColumnsCache,
+            setSizeInfoCache: guardedSizeInfoCache,
             addLogQuery,
           });
         } finally {

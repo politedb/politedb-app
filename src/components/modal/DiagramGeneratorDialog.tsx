@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "preact/hooks";
+import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import { useScreenStore } from "src/stores/screen";
 import { DiagramCanvas } from "src/components/diagram/DiagramCanvas";
 import { loadDiagramState } from "src/components/diagram/diagramMetadata";
 import type { DiagramState } from "src/components/diagram/diagramTypes";
@@ -35,27 +36,47 @@ export function DiagramGeneratorDialog(props: DiagramGeneratorDialogProps) {
   const [diagram, setDiagram] = useState<DiagramState | null>(null);
   const disabled = !connectionId || !schema || engine === "redis";
 
+  const seqRef = useRef(0);
+  const connectionRef = useRef(connectionId);
+  connectionRef.current = connectionId;
+
   const loadDiagram = useCallback(async () => {
     if (disabled || !connectionId || !engine || !schema) return;
+    // What this load may still publish (R5): nothing once a newer load
+    // started, the connection changed, or its tab's epoch moved (profile
+    // saved again, connection refused); its own spinner is still retired.
+    const seq = ++seqRef.current;
+    const epochOf = () => {
+      const screen = useScreenStore.getState();
+      const tab = screen.profileTabs.find(
+        (t) => t.runtimeConnectionId === connectionId
+      );
+      return tab ? (screen.tabEpoch[tab.id] ?? 0) : -1;
+    };
+    const epoch = epochOf();
+    const current = () =>
+      seqRef.current === seq &&
+      connectionRef.current === connectionId &&
+      epochOf() === epoch;
     setLoading(true);
     setError(null);
     try {
-      setDiagram(
-        await loadDiagramState({
-          metadata,
-          metaKey,
-          connectionId,
-          engine,
-          schema,
-        })
-      );
+      const state = await loadDiagramState({
+        metadata,
+        metaKey,
+        connectionId,
+        engine,
+        schema,
+      });
+      if (current()) setDiagram(state);
     } catch (loadError) {
+      if (!current()) return;
       setError(
         loadError instanceof Error ? loadError.message : String(loadError)
       );
       setDiagram(null);
     } finally {
-      setLoading(false);
+      if (seqRef.current === seq) setLoading(false);
     }
   }, [connectionId, disabled, engine, metaKey, metadata, schema]);
 

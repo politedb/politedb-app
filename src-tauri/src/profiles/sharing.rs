@@ -411,6 +411,7 @@ mod tests {
             indicator_color: None,
             created_at: 0,
             updated_at: 0,
+            revision: String::new(),
         }
     }
 }

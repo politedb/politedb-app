@@ -1,4 +1,4 @@
-import { connectionRemove } from "src/lib/tauri";
+import { releaseRuntime } from "src/lib/runtimeConnection";
 import { operationCancel } from "src/lib/tauri/operation";
 import { tableKey } from "src/hooks/useLoadTableData";
 import { useConnectionStore } from "src/stores/connection";
@@ -46,13 +46,8 @@ export async function forceCloseConnectionTab(tabId: string) {
     );
   }
 
-  if (currentTab?.runtimeConnectionId) {
-    try {
-      await connectionRemove(currentTab.runtimeConnectionId);
-    } catch {
-      // ignore
-    }
-  }
+  // Only connections this tab owns (never another tab's, R4).
+  await releaseRuntime(currentTab?.runtimeConnectionId, tabId);
 
   const windows = openWindows[tabId] ?? [];
   if (windows.length === 0) return;
@@ -67,13 +62,7 @@ export async function forceCloseConnectionTab(tabId: string) {
 
       removeTableDataForTab(tabId, schema, name);
 
-      if (connId) {
-        try {
-          await connectionRemove(connId);
-        } catch {
-          // ignore
-        }
-      }
+      await releaseRuntime(connId, tabId);
     })
   );
 }

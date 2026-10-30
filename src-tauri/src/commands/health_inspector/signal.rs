@@ -37,8 +37,8 @@ pub async fn health_inspector_signal_backend(
     };
     // Borrow the runtime's own pool (SSH-rewritten endpoint); never open a
     // separate connection.
-    let pool = match state.connections.get(&connection_id).map(|c| c.clone()) {
-        Some(EngineConnection::Postgres(pg)) => pg.pool,
+    let pool = match crate::engines::runtime::admission::admit_runtime(&state, connection_id) {
+        Ok(EngineConnection::Postgres(pg)) => pg.pool,
         _ => return result(SignalOutcome::Unavailable),
     };
     let Ok(app_name) = postgres_app_name() else {

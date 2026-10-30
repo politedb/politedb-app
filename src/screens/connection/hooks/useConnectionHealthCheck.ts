@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "preact/hooks";
+import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import { runtimeWorkIsCurrent } from "src/lib/runtimeConnection";
 import { connectionVersion } from "src/lib/tauri";
 import { runSqlQuery } from "src/lib/tauri/query";
 import type { DatabaseEngine } from "src/types";
@@ -27,6 +28,7 @@ export function useConnectionHealthCheck(args: {
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
   const [checkedAt, setCheckedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const checkSeqRef = useRef(0);
 
   const runCheck = useCallback(async () => {
     if (!runtimeConnectionId) {
@@ -36,6 +38,10 @@ export function useConnectionHealthCheck(args: {
       return;
     }
 
+    // A ping of an older or refused connection never reports health (R5).
+    const seq = ++checkSeqRef.current;
+    const current = runtimeWorkIsCurrent(runtimeConnectionId);
+    const mine = () => checkSeqRef.current === seq && current();
     setChecking(true);
     setError(null);
     const started = performance.now();
@@ -46,17 +52,19 @@ export function useConnectionHealthCheck(args: {
       } else {
         await connectionVersion(runtimeConnectionId);
       }
+      if (!mine()) return;
       const elapsed = Math.max(1, Math.round(performance.now() - started));
       setLatencyMs(elapsed);
       setCheckedAt(Date.now());
       setStatus(elapsed > 1500 ? "degraded" : "healthy");
     } catch (err) {
+      if (!mine()) return;
       setLatencyMs(null);
       setCheckedAt(Date.now());
       setStatus("down");
       setError(err instanceof Error ? err.message : "Health check failed.");
     } finally {
-      setChecking(false);
+      if (checkSeqRef.current === seq) setChecking(false);
     }
   }, [runtimeConnectionId, engine]);
 

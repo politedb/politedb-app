@@ -50,11 +50,19 @@ export function useLoadDbObjectDefinition(args: {
     const generation = draft.generation;
     const revision = draft.revision;
 
-    if (!connectionId || !target.capability.canReadDefinition) {
+    if (!target.capability.canReadDefinition) {
       requestSeqRef.current += 1;
       setLoading(false);
       setLoadError(null);
       store.applyDefinition(tabId, draftKey, generation, "", target);
+      return;
+    }
+    // No (admitted) connection yet, e.g. a tab whose target is unknown: the
+    // draft stays as it is, never replaced by an empty definition (R5).
+    if (!connectionId) {
+      requestSeqRef.current += 1;
+      setLoading(false);
+      setLoadError(null);
       return;
     }
 

@@ -210,7 +210,8 @@ export async function loadSizeInfo(params: {
   addLogQuery: (sql: string, engine?: DatabaseEngine) => void;
   force?: boolean;
 }): Promise<{ totalSize: string; dataSize: string; indexSize: string }> {
-  const cacheKey = `${params.schema}.${params.tableName}:${params.engine ?? ""}`;
+  // Per runtime connection: tabs on different databases never share work.
+  const cacheKey = `${params.connId}:${params.schema}.${params.tableName}:${params.engine ?? ""}`;
   const inflight = params.force
     ? undefined
     : inflightSizeInfoByKey.get(cacheKey);
@@ -451,7 +452,8 @@ export async function loadForeignKeys(params: {
   addLogQuery: (sql: string, engine?: DatabaseEngine) => void;
   force?: boolean;
 }): Promise<any[]> {
-  const cacheKey = `${params.schema}.${params.tableName}:${params.engine ?? ""}`;
+  // Per runtime connection: tabs on different databases never share work.
+  const cacheKey = `${params.connId}:${params.schema}.${params.tableName}:${params.engine ?? ""}`;
   const inflight = params.force
     ? undefined
     : inflightForeignKeysByKey.get(cacheKey);

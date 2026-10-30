@@ -53,9 +53,17 @@ beforeEach(() => {
         id: "home",
         profileId: "p1",
         label: "Athena",
+        engine: "postgres",
+        target: { kind: "default" },
         runtimeConnectionId: "c1",
       },
-      { id: "t1", profileId: "p1", databaseOverride: "test1" },
+      {
+        id: "t1",
+        profileId: "p1",
+        engine: "postgres",
+        target: { kind: "override", database: "test1" },
+        databaseOverride: "test1",
+      },
     ] as never,
   });
 });

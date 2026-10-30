@@ -26,23 +26,17 @@ pub struct CassandraQueryResult {
     pub row_count: u64,
 }
 
-fn cassandra_conn<'a>(
-    state: &'a AppState,
-    connection_id: Uuid,
-) -> Result<dashmap::mapref::one::Ref<'a, Uuid, EngineConnection>, String> {
-    let conn = state
-        .connections
-        .get(&connection_id)
-        .ok_or("CONNECTION_NOT_FOUND")?;
+fn cassandra_conn(state: &AppState, connection_id: Uuid) -> Result<EngineConnection, String> {
+    let conn = crate::engines::runtime::admission::admit_runtime(state, connection_id)?;
 
-    match conn.value() {
+    match &conn {
         EngineConnection::Cassandra(_) => Ok(conn),
         _ => Err("ENGINE_NOT_SUPPORTED".into()),
     }
 }
 
 fn as_cassandra_session(
-    conn: &dashmap::mapref::one::Ref<'_, Uuid, EngineConnection>,
+    conn: &EngineConnection,
 ) -> Result<
     (
         std::sync::Arc<scylla::client::session::Session>,
@@ -50,7 +44,7 @@ fn as_cassandra_session(
     ),
     String,
 > {
-    match conn.value() {
+    match conn {
         EngineConnection::Cassandra(cassandra) => Ok((
             cassandra.session.clone(),
             cassandra.default_keyspace.clone(),

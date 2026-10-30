@@ -19,6 +19,7 @@ import type { SavedConnectionSummary } from "src/lib/ai-assistant/types";
 import { aiChatCancel } from "src/lib/tauri/ai";
 import { hasProAccessNow } from "src/stores/license";
 import { getAssistantMode } from "src/lib/ai-assistant/assistantMode";
+import { noteRuntimeError } from "src/lib/tauri/runtimeAdmission";
 import {
   AI_DATA_ACCESS_REQUIRED,
   aiAgentDataAccessStatus,
@@ -52,6 +53,17 @@ export function formatAssistantRequestError(args: {
   const raw =
     args.error instanceof Error ? args.error.message : String(args.error ?? "");
   const vi = args.lang.code === "vie";
+
+  // The connection's settings changed or it is unknown (plan
+  // tab-database-reconnect R20): nothing was read.
+  if (
+    raw.includes("RUNTIME_STALE") ||
+    raw.includes("RUNTIME_IDENTITY_MISSING")
+  ) {
+    return vi
+      ? "Cấu hình kết nối đã thay đổi. Hãy kết nối lại tab này rồi hỏi lại."
+      : "The connection settings changed. Reconnect this tab, then ask again.";
+  }
 
   // AI agent data queries (plan ai-agent R5).
   if (raw.includes("AI_DATA_APPROVAL_DENIED")) {
@@ -424,6 +436,9 @@ export function useAiAssistantSubmit(args: {
           );
           return;
         } catch (agentError) {
+          // A run ended because its connection went stale (its profile was
+          // saved again or removed): the tab shows the reconnect message.
+          noteRuntimeError(runtimeConnectionId, agentError);
           const code =
             agentError instanceof Error
               ? agentError.message

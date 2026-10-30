@@ -35,6 +35,17 @@ function schedulePersistentSave() {
  * - profileId: persistent identity from backend (stable across sessions)
  * - runtimeConnectionId: runtime identity (created when user connects)
  */
+/**
+ * What a tab was opened on (plan tab-database-reconnect R12), persisted:
+ * the profile's own target, another database of it ("Open database"), or
+ * unknown (saved before this was recorded, or invalid). An unknown tab never
+ * connects.
+ */
+export type TabTarget =
+  | { kind: "default" }
+  | { kind: "override"; database: string }
+  | { kind: "unknown" };
+
 export type ProfileTab = {
   id: string; // UI tab id (local)
   label: string; // Display name (e.g. "Local Postgres", "Prod DB")
@@ -42,6 +53,9 @@ export type ProfileTab = {
 
   profileId: string; // Persistent identity (backend uuid or legacy mapped id)
   runtimeConnectionId?: string; // Runtime connection handle (created on connect)
+  /** Authoritative; required on every tab created from now on. */
+  target?: TabTarget;
+  /** Display mirror of `target.database`; never read for provenance. */
   databaseOverride?: string;
   /** True when query safety is Lock (mutations blocked); does not block closing the tab. */
   isLocked?: boolean;
@@ -103,6 +117,11 @@ type ScreenState = {
   // Tabs lifecycle
   addTab: (tab: ProfileTab) => void;
   updateTab: (id: string, patch: Partial<ProfileTab>) => void;
+  /**
+   * Invalidates what work started in these tabs may still publish (their
+   * profile was saved again or removed, or their connection is stale).
+   */
+  bumpTabEpochs: (tabIds: string[]) => void;
   removeTab: (id: string) => void;
   resetTabs: (profileTabs: ProfileTab[]) => void;
 };
@@ -321,6 +340,12 @@ export const useScreenStore = create<ScreenState>((set) => ({
           (hasProductionTag(tab.profileTags) ? "production" : "default"));
       const merged: ProfileTab = {
         ...tab,
+        // A tab created now records what it is opened on (R12).
+        target:
+          tab.target ??
+          (tab.databaseOverride?.trim()
+            ? { kind: "override", database: tab.databaseOverride.trim() }
+            : { kind: "default" }),
         querySafetyMode: mode,
         isLocked: mode === "lock",
       };
@@ -380,6 +405,11 @@ export const useScreenStore = create<ScreenState>((set) => ({
         ...(reconnected ? { tabEpoch: bumpEpochs(s.tabEpoch, [id]) } : {}),
       };
     }),
+
+  bumpTabEpochs: (tabIds) =>
+    set((s) =>
+      tabIds.length ? { tabEpoch: bumpEpochs(s.tabEpoch, tabIds) } : s
+    ),
 
   removeTab: (id) =>
     set((s) => {

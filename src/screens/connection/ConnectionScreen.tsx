@@ -25,7 +25,11 @@ import { TruncateTableDialog } from "src/components/modal/TruncateTableDialog";
 import { useSchemaTablesPanel } from "./hooks/useSchemaTablesPanel";
 import { useDatabaseMetadata } from "src/hooks/useDatabaseMetadata";
 import { useEnsureRuntimeConnection } from "src/hooks/useEnsureRuntimeConnection";
-import { resolveTabRuntimeConnectionId } from "src/lib/runtimeConnection";
+import {
+  resolveTabRuntimeConnectionId,
+  tabLabelFor,
+} from "src/lib/runtimeConnection";
+import { resolveTabTarget } from "src/lib/tabs/tabTarget";
 import { resolveDefaultSchema } from "src/lib/engines";
 
 import { showMessage } from "src/lib/system-dialog";
@@ -57,11 +61,9 @@ import { useRefreshTrigger } from "./hooks/useRefreshTrigger";
 import { registerConnectionTabCloseBridge } from "./lib/connectionTabCloseBridge";
 import type { TableItem } from "src/types";
 import { ConnectingPanel } from "./workspace/ConnectingPanel";
+import { TabTargetBanner } from "./workspace/TabTargetBanner";
 import { useProfileStore } from "src/stores/profile";
-import {
-  currentDatabaseFromInput,
-  inferDatabaseOverrideFromTabLabel,
-} from "src/lib/connection/connection";
+import { currentDatabaseFromInput } from "src/lib/connection/connection";
 import type { PatchMap } from "src/lib/patches/generateSql";
 import { pickHostDbUser } from "src/lib/connection/connection";
 import { tableRowsStreamLoadPercent } from "src/utils/tableRowsProgress";
@@ -128,16 +130,12 @@ export function ConnectionScreen() {
 
   const engine = activeProfileTab?.engine;
 
-  const activeDatabaseOverride = useMemo(() => {
-    return (
-      activeProfileTab?.databaseOverride ??
-      inferDatabaseOverrideFromTabLabel(profile?.label, activeProfileTab?.label)
-    );
-  }, [
-    activeProfileTab?.databaseOverride,
-    activeProfileTab?.label,
-    profile?.label,
-  ]);
+  // What this tab is opened on (R2): its target only, never its label.
+  const activeTarget = useMemo(
+    () => resolveTabTarget(activeProfileTab, profile),
+    [activeProfileTab, profile]
+  );
+  const activeDatabaseOverride = activeTarget.intended?.override ?? "";
 
   const sqlScopeKey = useMemo(() => {
     if (!profile) return activeProfileScreen;
@@ -283,7 +281,9 @@ export function ConnectionScreen() {
       const runtimeConnectionId = currentTab.runtimeConnectionId;
 
       useScreenStore.getState().updateTab(activeTab.id, {
-        label: saved.label || activeTab.label,
+        label: saved.label
+          ? tabLabelFor(saved.label, currentTab.target)
+          : activeTab.label,
         engine: saved.engine,
         profileId: saved.id,
         runtimeConnectionId: runtimeConnectionId ?? undefined,
@@ -302,6 +302,24 @@ export function ConnectionScreen() {
     // databases do not share stale metadata cache.
     return metaKeyForTab({ id: activeTab.id, engine });
   }, [engine, activeTab?.id]);
+
+  // The tab's epoch moved (new connection, profile saved again, connection
+  // refused): metadata loaded or loading before is not this tab's any more
+  // (R5); it reloads on demand.
+  const activeTabEpoch = useScreenStore((s) =>
+    activeTab?.id ? (s.tabEpoch[activeTab.id] ?? 0) : 0
+  );
+  const seenEpochRef = useRef<Record<string, number>>({});
+  useEffect(() => {
+    const tabId = activeTab?.id;
+    if (!tabId || !metaKey) return;
+    const seen = seenEpochRef.current[tabId];
+    seenEpochRef.current[tabId] = activeTabEpoch;
+    if (seen !== undefined && seen !== activeTabEpoch) {
+      metadata.clear({ metaKey });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab?.id, activeTabEpoch, metaKey]);
 
   /* =============================================================================
    * Table loading (service) + active table meta snapshot
@@ -519,12 +537,8 @@ export function ConnectionScreen() {
         metaKey: metaKeyOfTab,
         engine: tab.engine,
         connectionId,
-        currentDatabase:
-          tab.databaseOverride ||
-          currentDatabaseFromInput(
-            tab.engine,
-            getProfileById(tab.profileId)?.input
-          ),
+        currentDatabase: resolveTabTarget(tab, getProfileById(tab.profileId))
+          .display,
       });
     },
     [metadata.refreshWithOutcome, getProfileById]
@@ -537,6 +551,7 @@ export function ConnectionScreen() {
     engine,
     metadata,
     profileId: activeProfileScreen,
+    currentDatabase,
   });
 
   // While the review dialog runs a save, errors go to that dialog (which
@@ -819,8 +834,8 @@ export function ConnectionScreen() {
 
   const diagramDatabase = useMemo(() => {
     if (!profile) return "";
-    return pickHostDbUser(profile).database || "";
-  }, [profile]);
+    return activeDatabaseOverride || pickHostDbUser(profile).database || "";
+  }, [profile, activeDatabaseOverride]);
 
   useEffect(() => {
     if (!activeTab || !engine) return;
@@ -971,6 +986,12 @@ export function ConnectionScreen() {
             onOpenAiAssistant={openAiAssistant}
             onOpenDiagram={openDiagram}
             onOpenHealthInspector={() => setHealthInspectorOpen(true)}
+          />
+
+          <TabTargetBanner
+            target={activeTarget}
+            runtimeId={runtimeConnectionId}
+            onReconnect={() => void reloadRuntime()}
           />
 
           <ConnectionWorkspaceLayout

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "preact/hooks";
 import { trackEvent } from "src/lib/analytics";
 import {
-  connectProfileOnce,
+  connectTabOnce,
   resolveTabRuntimeConnectionId,
+  runtimeServesTab,
+  TAB_CONNECT_SUPERSEDED,
 } from "src/lib/runtimeConnection";
 import { useConnectionStore } from "src/stores/connection";
 import {
@@ -10,6 +12,7 @@ import {
   recordConnectionSessionOpened,
 } from "src/stores/connectionLog";
 import { ProfileTab, useScreenStore } from "src/stores/screen";
+import { useRuntimeTargetsStore } from "src/stores/runtimeTargets";
 
 function readResolvedConnectionId(
   activeTab: ProfileTab,
@@ -47,6 +50,11 @@ export function useEnsureRuntimeConnection(activeTab?: ProfileTab | null) {
       }
       return;
     }
+    // An unknown tab never connects (R7); the screen says why.
+    if (activeTab.target?.kind === "unknown" || !activeTab.target) {
+      setConnecting(false);
+      return;
+    }
 
     let canceled = false;
     setConnecting(true);
@@ -54,18 +62,11 @@ export function useEnsureRuntimeConnection(activeTab?: ProfileTab | null) {
     void (async () => {
       const startedAt = Date.now();
       const tabId = activeTab.id;
-      const profileId = activeTab.profileId;
       try {
-        const connectionId = await connectProfileOnce(profileId);
+        // Installs it on the tab itself (or removes it if superseded).
+        await connectTabOnce(tabId);
         setError(null);
         if (canceled) return;
-
-        const latestTab = useScreenStore
-          .getState()
-          .profileTabs.find((t) => t.id === tabId);
-        if (latestTab?.runtimeConnectionId) return;
-
-        updateTab(tabId, { runtimeConnectionId: connectionId });
         void recordConnectionSessionOpened(activeTab);
         trackEvent("runtime_connection_opened", {
           engine: activeTab.engine,
@@ -74,6 +75,7 @@ export function useEnsureRuntimeConnection(activeTab?: ProfileTab | null) {
         });
       } catch (e: any) {
         const msg = e?.message ? String(e.message) : String(e);
+        if (msg === TAB_CONNECT_SUPERSEDED) return;
         setError(msg);
         if (!canceled) {
           void recordConnectionSessionFailed(activeTab, msg);
@@ -109,14 +111,21 @@ export function useEnsureRuntimeConnection(activeTab?: ProfileTab | null) {
       activeTab,
       activeProfileScreen
     );
-    if (resolvedConnectionId) return resolvedConnectionId;
+    // A refused (stale) connection, or one not opened on this tab's target
+    // by this tab, is replaced; a valid one is kept.
+    const replace =
+      !!resolvedConnectionId &&
+      (!!useRuntimeTargetsStore.getState().refused[resolvedConnectionId] ||
+        !runtimeServesTab(activeTab.id, resolvedConnectionId));
+    if (resolvedConnectionId && !replace) return resolvedConnectionId;
 
     setConnecting(true);
     const startedAt = Date.now();
     try {
-      const connectionId = await connectProfileOnce(activeTab.profileId);
+      const connectionId = await connectTabOnce(activeTab.id, {
+        force: replace,
+      });
       setError(null);
-      updateTab(activeTab.id, { runtimeConnectionId: connectionId });
       void recordConnectionSessionOpened(activeTab);
       trackEvent("runtime_connection_opened", {
         engine: activeTab.engine,

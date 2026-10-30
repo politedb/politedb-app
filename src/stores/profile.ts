@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { ConnectionProfile } from "src/lib/tauri";
 import { profileList, profileRemove } from "src/lib/tauri";
 import { usePinnedConnectionsStore } from "src/stores/pinnedConnections";
+import { useScreenStore } from "src/stores/screen";
 import { DatabaseEngine } from "../types";
 
 /**
@@ -64,6 +65,53 @@ type ProfileState = {
   setShowDatabaseForm: (v: DatabaseEngine | undefined) => void;
 };
 
+/*
+ * Conservative invalidation (plan tab-database-reconnect R16): before a
+ * profile whose revision changed (or that disappeared) is published, the
+ * tabs of that profile lose publication authority for work started earlier.
+ * Equality only: an out-of-order snapshot can only cause an extra
+ * invalidation, never authorize anything (the backend decides that).
+ */
+const observedRevisions = new Map<string, string | undefined>();
+
+function invalidateTabsOf(profileIds: Iterable<string>) {
+  const ids = new Set(profileIds);
+  if (!ids.size) return;
+  const screen = useScreenStore.getState();
+  screen.bumpTabEpochs(
+    screen.profileTabs.filter((t) => ids.has(t.profileId)).map((t) => t.id)
+  );
+}
+
+/** Profiles whose revision differs from the last observed, then records them. */
+function observe(profiles: ConnectionProfile[], complete: boolean): string[] {
+  const changed: string[] = [];
+  for (const p of profiles) {
+    if (
+      !observedRevisions.has(p.id) ||
+      observedRevisions.get(p.id) !== p.revision
+    ) {
+      changed.push(p.id);
+    }
+    observedRevisions.set(p.id, p.revision);
+  }
+  if (complete) {
+    const present = new Set(profiles.map((p) => p.id));
+    for (const id of [...observedRevisions.keys()]) {
+      if (!present.has(id)) {
+        changed.push(id);
+        observedRevisions.delete(id);
+      }
+    }
+  }
+  return changed;
+}
+
+function forget(profileId: string) {
+  observedRevisions.delete(profileId);
+  invalidateTabsOf([profileId]);
+}
+
 function toErrorMessage(e: unknown) {
   if (e && typeof e === "object" && "message" in e)
     return String((e as any).message);
@@ -83,6 +131,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     set({ busy: true, error: null });
     try {
       const list = await profileList();
+      invalidateTabsOf(observe(list, true));
       usePinnedConnectionsStore.getState().pruneMissing(list.map((p) => p.id));
       set({ profiles: list, busy: false });
     } catch (e) {
@@ -94,6 +143,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     set({ busy: true, error: null });
     try {
       await profileRemove(profileId);
+      forget(profileId);
       usePinnedConnectionsStore.getState().unpin(profileId);
       set((s) => ({
         profiles: s.profiles.filter((p) => p.id !== profileId),
@@ -112,6 +162,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
   saveProfile: async (profile) => {
     set({ busy: true, error: null });
     try {
+      invalidateTabsOf(observe([profile], false));
       // Local upsert: keep stable order if you want, or append to end
       set((s) => {
         const exists = s.profiles.some((p) => p.id === profile.id);

@@ -109,6 +109,7 @@ pub struct BoundConnection<'a> {
     pub connection: &'a EngineConnection,
     pub catalog: Arc<dyn CatalogExecutor>,
     pub alive: catalog::tools::Alive,
+    pub admission: catalog::tools::Admission,
 }
 
 /// Data tools for a run on `bound`, with the gate that guards the transcript, or
@@ -126,6 +127,7 @@ pub fn data_tools(
         connection,
         catalog,
         alive,
+        admission,
     } = bound;
     let executor = data::executor_for(connection)?;
     let binding = state.connection_profiles.get(&connection_id)?.clone();
@@ -147,6 +149,7 @@ pub fn data_tools(
         executor,
         catalog,
         alive,
+        admission,
         consent: consent.clone(),
         approval,
         label,
@@ -178,12 +181,22 @@ fn provider_config(
         .ok_or_else(|| "AI_PROVIDER_NOT_FOUND".to_string())
 }
 
-/// The saved profile behind a runtime connection that supports data tools.
-fn data_profile(state: &AppState, connection_id: &str) -> Option<ProfileBinding> {
-    let id = Uuid::parse_str(connection_id).ok()?;
-    let connection = state.connections.get(&id)?.clone();
-    data::executor_for(&connection)?;
-    state.connection_profiles.get(&id).map(|b| b.clone())
+/// The saved profile behind a runtime connection that supports data tools;
+/// `Err` when the connection may no longer take work (stale or unknown),
+/// carrying that code.
+fn data_profile(state: &AppState, connection_id: &str) -> Result<Option<ProfileBinding>, String> {
+    let Ok(id) = Uuid::parse_str(connection_id) else {
+        return Ok(None);
+    };
+    let connection = match crate::engines::runtime::admission::admit_runtime(state, id) {
+        Ok(connection) => connection,
+        Err(e) if e == "CONNECTION_NOT_FOUND" => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    if data::executor_for(&connection).is_none() {
+        return Ok(None);
+    }
+    Ok(state.connection_profiles.get(&id).map(|b| b.clone()))
 }
 
 #[derive(Debug, Serialize)]
@@ -193,6 +206,9 @@ pub struct DataAccessStatus {
     pub available: bool,
     pub granted: bool,
     pub label: Option<String>,
+    /// Why data access is unavailable when the connection itself is the
+    /// reason (`RUNTIME_STALE`, `RUNTIME_IDENTITY_MISSING`).
+    pub reason: Option<String>,
 }
 
 #[tauri::command]
@@ -202,12 +218,17 @@ pub fn ai_agent_data_access_status(
     connection_id: String,
     provider_id: String,
 ) -> Result<DataAccessStatus, String> {
-    let Some(binding) = data_profile(&state, &connection_id) else {
-        return Ok(DataAccessStatus {
-            available: false,
-            granted: false,
-            label: None,
-        });
+    let binding = match data_profile(&state, &connection_id) {
+        Ok(Some(binding)) => binding,
+        found => {
+            return Ok(DataAccessStatus {
+                available: false,
+                granted: false,
+                label: None,
+                // Unavailable because the connection is stale or unknown.
+                reason: found.err(),
+            });
+        }
     };
     let label = profile_store::profile_get(&app, binding.profile_id)
         .ok()
@@ -217,6 +238,7 @@ pub fn ai_agent_data_access_status(
         available: true,
         granted: bound_consent(&app, &state.ai_consent_lock, &binding, &config),
         label,
+        reason: None,
     })
 }
 
@@ -230,7 +252,7 @@ pub fn ai_agent_data_access_grant(
 ) -> Result<(), String> {
     // Data access belongs to agent mode, a Pro feature.
     license::require_pro(&app, super::ai_agent::AGENT_PRO_REQUIRED)?;
-    let binding = data_profile(&state, &connection_id)
+    let binding = data_profile(&state, &connection_id)?
         .ok_or_else(|| "AI_DATA_ACCESS_UNAVAILABLE".to_string())?;
     let profile = profile_store::profile_get(&app, binding.profile_id)
         .map_err(|_| "AI_DATA_ACCESS_UNAVAILABLE".to_string())?;

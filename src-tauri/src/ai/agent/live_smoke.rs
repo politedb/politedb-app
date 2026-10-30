@@ -172,6 +172,7 @@ async fn ask_with(
         executor: data::executor_for(connection).expect("data executor"),
         catalog: executor.clone(),
         alive: alive.clone(),
+        admission: Arc::new(|| Ok(())),
         consent: Arc::new(move || consent),
         approval: None,
         label: "Smoke".into(),
@@ -180,6 +181,7 @@ async fn ask_with(
     let tools = catalog::tools::registry(
         executor,
         alive,
+        Arc::new(|| Ok(())),
         MetadataPolicy {
             column_details: true,
         },

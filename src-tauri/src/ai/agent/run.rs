@@ -1070,6 +1070,7 @@ mod tests {
         let tools = catalog::tools::registry(
             Arc::new(ManyTables),
             Arc::new(|| true),
+            Arc::new(|| Ok(())),
             MetadataPolicy {
                 column_details: false,
             },

@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./runtimeInvoke";
 import type { ColumnMeta, OperationExecuteInput } from "./types";
 import { CMD } from "./commands";
 import type { DatabaseEngine } from "src/types";

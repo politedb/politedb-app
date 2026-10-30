@@ -66,6 +66,10 @@ pub struct AppState {
     /// Runtime connection → the saved profile it was opened from. Set only by
     /// `profile_connect`, so agent consent never relies on ids from the frontend.
     pub connection_profiles: Arc<DashMap<Uuid, crate::ai::agent::consent::ProfileBinding>>,
+    /// Runtime connection → what it was opened on. Inserted before the
+    /// connection itself and removed after it, so a listed connection always
+    /// has one.
+    pub runtime_targets: Arc<DashMap<Uuid, crate::profiles::target_override::RuntimeTarget>>,
     /// Serialises read-modify-write of the agent consent file.
     pub ai_consent_lock: Arc<std::sync::Mutex<()>>,
     /// PostgreSQL sessions held across calls (transactional restore,
@@ -99,6 +103,7 @@ impl AppState {
             ),
             ai_ollama_probes: Arc::new(crate::ai::ollama::OllamaProbeCache::new(generations)),
             connection_profiles: Arc::new(DashMap::new()),
+            runtime_targets: Arc::new(DashMap::new()),
             ai_consent_lock: Arc::new(std::sync::Mutex::new(())),
             sql_sessions: Arc::new(Default::default()),
         }

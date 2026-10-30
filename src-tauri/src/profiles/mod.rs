@@ -8,5 +8,6 @@ pub mod import_tableplus;
 pub mod sharing;
 pub mod store;
 pub mod tableplus_crypt;
+pub mod target_override;
 pub mod types;
 pub mod validate;

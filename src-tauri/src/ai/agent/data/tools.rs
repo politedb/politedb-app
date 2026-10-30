@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use serde_json::{json, Map, Value};
 
 use super::{DataExecutor, MAX_QUERY_ROWS, MAX_SAMPLE_ROWS};
-use crate::ai::agent::catalog::tools::Alive;
+use crate::ai::agent::catalog::tools::{ensure_admitted, Admission, Alive};
 use crate::ai::agent::catalog::CatalogExecutor;
 use crate::ai::agent::consent::DATA_ACCESS_REQUIRED;
 use crate::ai::agent::protocol::ToolSpec;
@@ -38,6 +38,9 @@ pub struct DataAccess {
     pub executor: Arc<dyn DataExecutor>,
     pub catalog: Arc<dyn CatalogExecutor>,
     pub alive: Alive,
+    /// Whether the connection may take new work (not stale): checked before
+    /// every tool touches it, and again after the approval wait.
+    pub admission: Admission,
     /// Whether the user's consent for this connection and provider holds right now.
     pub consent: Arc<dyn Fn() -> bool + Send + Sync>,
     /// `Some` in safe/production mode: every query needs approval.
@@ -104,6 +107,7 @@ impl DataAccess {
         if !(self.alive)() {
             return Err("the database connection was closed".into());
         }
+        ensure_admitted(&self.admission)?;
         if !(self.consent)() {
             return Err(ToolError::Stop(DATA_ACCESS_REQUIRED.into()));
         }
@@ -143,6 +147,7 @@ impl DataAccess {
         if !(self.alive)() {
             return Err("the database connection was closed".into());
         }
+        ensure_admitted(&self.admission)?;
         if !(self.consent)() {
             return Err(ToolError::Stop(DATA_ACCESS_REQUIRED.into()));
         }
@@ -208,6 +213,8 @@ impl AgentTool for SampleRows {
             Some(MAX_SAMPLE_ROWS),
         )?;
         let (schema, table) = (text(&args, "schema"), text(&args, "table"));
+        // Admitted before even the catalog read below touches the connection.
+        ensure_admitted(&self.0.admission)?;
         // Only a table the catalog knows; its name is then quoted, never interpolated.
         let described = self.0.catalog.describe_table(schema, table, ctx).await?;
         let sql = match self.0.executor.dialect() {
@@ -399,12 +406,22 @@ mod tests {
         builtin_only: bool,
         approval: Option<Arc<dyn ApprovalPort>>,
     ) -> Setup {
+        setup_admitted(consent, builtin_only, approval, Arc::new(|| Ok(())))
+    }
+
+    fn setup_admitted(
+        consent: Arc<AtomicBool>,
+        builtin_only: bool,
+        approval: Option<Arc<dyn ApprovalPort>>,
+        admission: Admission,
+    ) -> Setup {
         let data = Arc::new(FakeData::default());
         let provenance = Arc::new(AtomicBool::new(false));
         let access = Arc::new(DataAccess {
             executor: data.clone(),
             catalog: Arc::new(FakeCatalog { builtin_only }),
             alive: Arc::new(|| true),
+            admission,
             consent: Arc::new(move || consent.load(Ordering::SeqCst)),
             approval,
             label: "Prod DB".into(),
@@ -424,6 +441,75 @@ mod tests {
             tracker: TaskTracker::new(),
         };
         tool.run(args, &ctx).await
+    }
+
+    #[tokio::test]
+    async fn a_stale_connection_ends_the_run_before_any_read() {
+        let s = setup_admitted(
+            Arc::new(AtomicBool::new(true)),
+            true,
+            None,
+            Arc::new(|| Err("RUNTIME_STALE".to_string())),
+        );
+        for (tool, args) in [
+            ("run_readonly_query", json!({ "sql": "SELECT 1" })),
+            (
+                "sample_rows",
+                json!({ "schema": "public", "table": "my \"orders\"" }),
+            ),
+            ("explain_query", json!({ "sql": "SELECT 1" })),
+        ] {
+            assert_eq!(
+                call(&s, tool, args).await.unwrap_err(),
+                ToolError::Stop("RUNTIME_STALE".into()),
+                "{tool}"
+            );
+        }
+        assert!(s.data.ran.lock().unwrap().is_empty());
+        assert!(!s.provenance.load(Ordering::SeqCst));
+    }
+
+    /// The profile is saved again while the user is asked to approve.
+    struct StaleWhileAsked {
+        stale: Arc<AtomicBool>,
+    }
+
+    #[async_trait]
+    impl ApprovalPort for StaleWhileAsked {
+        async fn approve(&self, _: &str) -> Result<bool, String> {
+            self.stale.store(true, Ordering::SeqCst);
+            Ok(true)
+        }
+    }
+
+    #[tokio::test]
+    async fn a_connection_stale_after_approval_is_not_read() {
+        let stale = Arc::new(AtomicBool::new(false));
+        let s = setup_admitted(
+            Arc::new(AtomicBool::new(true)),
+            true,
+            Some(Arc::new(StaleWhileAsked {
+                stale: stale.clone(),
+            })),
+            {
+                let stale = stale.clone();
+                Arc::new(move || {
+                    if stale.load(Ordering::SeqCst) {
+                        Err("RUNTIME_STALE".to_string())
+                    } else {
+                        Ok(())
+                    }
+                })
+            },
+        );
+        assert_eq!(
+            call(&s, "run_readonly_query", json!({ "sql": "SELECT 1" }))
+                .await
+                .unwrap_err(),
+            ToolError::Stop("RUNTIME_STALE".into())
+        );
+        assert!(s.data.ran.lock().unwrap().is_empty());
+        assert!(!s.provenance.load(Ordering::SeqCst));
     }
 
     #[tokio::test]

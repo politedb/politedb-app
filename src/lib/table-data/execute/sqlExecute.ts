@@ -66,7 +66,8 @@ export async function executeSqlLoad(
 
       patchMeta(setMeta, key, curPrev, {
         columns,
-        connectionId: curPrev.connectionId ?? connId,
+        // The connection this load ran on, never an older one (R4).
+        connectionId: connId,
       });
 
       try {

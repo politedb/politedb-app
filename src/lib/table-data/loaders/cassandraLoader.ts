@@ -9,10 +9,15 @@ import type { ColumnRow } from "../types";
 
 export function resolveCassandraKeyspaceForLoad(
   schema: string,
-  profileId: string
+  profileId: string,
+  /** The keyspace the tab was opened on, before the profile's own (R2). */
+  tabKeyspace?: string | null
 ): string {
   const fromSchema = schema?.trim();
   if (fromSchema && fromSchema !== "default") return fromSchema;
+
+  const fromTab = tabKeyspace?.trim();
+  if (fromTab) return fromTab;
 
   const profile = useProfileStore.getState().getProfileById(profileId);
   const fromProfile = profile?.input?.cassandra?.keyspace?.trim();

@@ -15,6 +15,8 @@ export type LoadExecutionContext = {
   offset: number;
   engine: DatabaseEngine;
   profileId: string;
+  /** The database / keyspace the tab was opened on instead of the profile's own. */
+  databaseOverride?: string | null;
   supportsMeta: boolean;
   columnsCache: Record<string, ColumnMeta[] | undefined>;
   sizeInfoCache: Record<string, TableSizeInfo | undefined>;
@@ -30,9 +32,10 @@ export function patchWithConn(
   ctx: LoadExecutionContext,
   patch: Record<string, unknown>
 ) {
+  // The connection this load ran on, never an older one (R4).
   return {
     ...patch,
-    connectionId: ctx.prev.connectionId ?? ctx.connId,
+    connectionId: ctx.connId,
   };
 }
 

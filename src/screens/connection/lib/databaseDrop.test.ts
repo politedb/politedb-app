@@ -44,8 +44,17 @@ async function beforeDatabaseChange(
   return (await check.prepare()) ?? check.checkNow();
 }
 
+/** Tabs as created now: each records what it is opened on (R12). */
 function setTabs(tabs: Array<Record<string, unknown>>) {
-  useScreenStore.setState({ profileTabs: tabs as never });
+  useScreenStore.setState({
+    profileTabs: tabs.map((tab) => ({
+      engine: "postgres",
+      target: tab.databaseOverride
+        ? { kind: "override", database: tab.databaseOverride }
+        : { kind: "default" },
+      ...tab,
+    })) as never,
+  });
 }
 
 beforeEach(() => {
@@ -80,19 +89,26 @@ beforeEach(() => {
       label: "Athena · test1",
       databaseOverride: "test1",
     },
-    { id: "t1b", profileId: "p1", label: "Athena · test1" },
+    // Saved before targets were recorded: unknown, whatever its label says.
+    {
+      id: "t1b",
+      profileId: "p1",
+      label: "Athena · test1",
+      target: { kind: "unknown" },
+    },
     { id: "other", profileId: "p2", label: "Other" },
   ]);
 });
 
 describe("the database a tab uses", () => {
-  it("reads the override, the tab label, then the profile", () => {
+  it("reads the tab's target, then the profile, never the label", () => {
     expect(tabDatabase("home")).toBe("app");
     expect(tabDatabase("t1")).toBe("test1");
-    expect(tabDatabase("t1b")).toBe("test1");
+    // An unknown tab is on no database (it never connects).
+    expect(tabDatabase("t1b")).toBe("");
     expect(tabDatabase("gone")).toBe("");
     // Only tabs of the same saved connection.
-    expect(tabsOnDatabase("p1", "test1")).toEqual(["t1", "t1b"]);
+    expect(tabsOnDatabase("p1", "test1")).toEqual(["t1"]);
   });
 });
 
@@ -120,16 +136,17 @@ describe("dropping a database", () => {
         name: "test1",
       })
     ).toBeNull();
-    expect(m.close.mock.calls.map((call) => call[0])).toEqual(["t1", "t1b"]);
+    expect(m.close.mock.calls.map((call) => call[0])).toEqual(["t1"]);
     expect(useScreenStore.getState().profileTabs.map((t) => t.id)).toEqual([
       "home",
+      "t1b",
       "other",
     ]);
   });
 
   it("stops when a tab on that database stays open", async () => {
     m.close.mockResolvedValue(undefined);
-    m.dirty.mockImplementation((id: string) => id === "t1b");
+    m.dirty.mockImplementation((id: string) => id === "t1");
     expect(
       await beforeDatabaseChange("home", "p1", "postgres", {
         kind: "drop",
@@ -388,7 +405,13 @@ describe("changes queued between waits", () => {
     ["Production", { querySafetyMode: "production" }],
     ["Lock", { isLocked: true }],
     ["a reconnect", { runtimeConnectionId: "c2" }],
-    ["the dropped database", { databaseOverride: "test1" }],
+    [
+      "the dropped database",
+      {
+        target: { kind: "override", database: "test1" },
+        databaseOverride: "test1",
+      },
+    ],
   ];
 
   for (const depth of [0, 1, 2, 3, 4, 6]) {

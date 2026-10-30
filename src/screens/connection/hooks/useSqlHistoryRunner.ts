@@ -11,6 +11,8 @@ type Options = {
   profileId: string;
   engine?: DatabaseEngine;
   metadata?: MetadataApi;
+  /** The tab's database, for the metadata reload after DDL (R2). */
+  currentDatabase?: string;
 };
 
 /**
@@ -68,6 +70,7 @@ export function useSqlHistoryRunner(opts?: Options) {
             metaKey,
             engine: opts.engine,
             connectionId,
+            currentDatabase: opts.currentDatabase,
             force: true,
           });
         }
@@ -79,7 +82,14 @@ export function useSqlHistoryRunner(opts?: Options) {
         return { mode: "stream", opId };
       }
     },
-    [activeTab, addQueryHistory, opts?.metadata, opts?.engine, opts?.profileId]
+    [
+      activeTab,
+      addQueryHistory,
+      opts?.metadata,
+      opts?.engine,
+      opts?.profileId,
+      opts?.currentDatabase,
+    ]
   );
 
   const captureHistoryTarget = useCallback((): SqlHistoryTarget | null => {

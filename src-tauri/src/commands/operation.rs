@@ -27,11 +27,7 @@ pub async fn operation_execute_transaction(
     state: State<'_, AppState>,
     input: SqlTransactionExecuteInput,
 ) -> Result<(), String> {
-    let conn = state
-        .connections
-        .get(&input.connection_id)
-        .ok_or("CONNECTION_NOT_FOUND")?
-        .clone();
+    let conn = crate::engines::runtime::admission::admit_runtime(&state, input.connection_id)?;
 
     conn.execute_sql_transaction(input.statements).await
 }
@@ -41,11 +37,7 @@ pub async fn operation_import_csv_transaction(
     state: State<'_, AppState>,
     input: SqlImportCsvInput,
 ) -> Result<SqlImportCsvResult, String> {
-    let conn = state
-        .connections
-        .get(&input.connection_id)
-        .ok_or("CONNECTION_NOT_FOUND")?
-        .clone();
+    let conn = crate::engines::runtime::admission::admit_runtime(&state, input.connection_id)?;
 
     conn.import_csv_transaction(input).await
 }

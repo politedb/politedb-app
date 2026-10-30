@@ -6,7 +6,8 @@ import type {
   TableItem,
   TableWindow,
 } from "src/types";
-import { connectionRemove, operationExecuteTransaction } from "src/lib/tauri";
+import { operationExecuteTransaction } from "src/lib/tauri";
+import { releaseRuntime } from "src/lib/runtimeConnection";
 import {
   collectObjectChangeSummary,
   collectObjectSaveNotices,
@@ -920,11 +921,8 @@ export function useConnectionActions(
           );
         }
 
-        if (currentTab?.runtimeConnectionId) {
-          try {
-            await connectionRemove(currentTab.runtimeConnectionId);
-          } catch {}
-        }
+        // Only connections this tab owns (never another tab's, R4).
+        await releaseRuntime(currentTab?.runtimeConnectionId, tabId);
 
         const windows = openWindows[tabId] ?? [];
         if (!windows.length) return;
@@ -940,11 +938,7 @@ export function useConnectionActions(
 
             removeTableData(schema, name);
 
-            if (connId) {
-              try {
-                await connectionRemove(connId);
-              } catch {}
-            }
+            await releaseRuntime(connId, tabId);
           })
         );
       } finally {
