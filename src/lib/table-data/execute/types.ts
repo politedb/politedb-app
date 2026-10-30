@@ -17,6 +17,8 @@ export type LoadExecutionContext = {
   profileId: string;
   /** False once this load may no longer publish (R5); rows are not written. */
   isCurrent?: () => boolean;
+  /** The connection and tab epoch owning this load; streams never join another's. */
+  owner?: string;
   /** The database / keyspace the tab was opened on instead of the profile's own. */
   databaseOverride?: string | null;
   supportsMeta: boolean;

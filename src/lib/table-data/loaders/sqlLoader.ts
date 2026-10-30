@@ -529,6 +529,8 @@ export async function startRowsStream(params: {
   sortBy?: TableSort | null;
   /** False once this load may no longer publish (R5). */
   isCurrent?: () => boolean;
+  /** The connection and tab epoch owning this load. */
+  owner?: string;
 }): Promise<void> {
   const {
     isCurrent = () => true,
@@ -560,7 +562,7 @@ export async function startRowsStream(params: {
   );
   // One stream per connection and table window: the same SQL on another
   // database, or in another tab, is other work (R3/R5).
-  const streamKey = JSON.stringify([connId, key, q]);
+  const streamKey = JSON.stringify([connId, params.owner ?? "", key, q]);
 
   if (!forceRefresh) {
     const inflight = rowsInflightByQueryKey.get(streamKey);

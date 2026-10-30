@@ -39,6 +39,16 @@ pub(crate) fn error_category(err: &str) -> &str {
     }
 }
 
+/// The trace of a failed connect: its category only (R10).
+fn log_connect_failed(id: Uuid, engine: crate::types::EngineKind, err: &str) {
+    tracing::error!(
+        conn_id = %id,
+        engine = ?engine,
+        error = error_category(err),
+        "connection_create: connect failed"
+    );
+}
+
 /// Opens and publishes a runtime connection opened on `target`. The target
 /// is published before the connection (and removed after it), so every
 /// listed connection has one.
@@ -83,12 +93,7 @@ pub(crate) async fn create_runtime(
     {
         Ok(c) => c,
         Err(e) => {
-            tracing::error!(
-                conn_id = %id,
-                engine = ?engine,
-                error = error_category(&e),
-                "connection_create: connect failed"
-            );
+            log_connect_failed(id, engine, &e);
 
             // rollback tunnel ref if acquired
             if let Some(key) = acquired_key {
@@ -540,7 +545,54 @@ mod registry_tests {
 
 #[cfg(test)]
 mod logging_tests {
-    use super::error_category;
+    use super::{error_category, log_connect_failed};
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
+    use tracing_subscriber::fmt::MakeWriter;
+
+    #[derive(Clone, Default)]
+    struct Buffer(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Buffer {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> MakeWriter<'a> for Buffer {
+        type Writer = Buffer;
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    /// The captured trace of a failed connect carries no database name,
+    /// path, host or label from the error.
+    #[test]
+    fn a_failed_connect_trace_names_nothing() {
+        let buffer = Buffer::default();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(buffer.clone())
+            .with_ansi(false)
+            .finish();
+        tracing::subscriber::with_default(subscriber, || {
+            log_connect_failed(
+                uuid::Uuid::new_v4(),
+                crate::types::EngineKind::Postgres,
+                "RUNTIME_CONNECT_FAILED: database \"secret_db\" on secret-host for /Users/me/secret.key (Secret Label)",
+            );
+        });
+        let out = String::from_utf8(buffer.0.lock().unwrap().clone()).unwrap();
+        assert!(out.contains("connect failed"), "{out}");
+        assert!(out.contains("RUNTIME_CONNECT_FAILED"), "{out}");
+        for marker in ["secret_db", "secret-host", "secret.key", "Secret Label"] {
+            assert!(!out.contains(marker), "{marker} in {out}");
+        }
+    }
 
     /// Connect failures are logged by category only: the message can name
     /// the database, a file path or the host.

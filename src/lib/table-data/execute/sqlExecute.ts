@@ -87,6 +87,7 @@ export async function executeSqlLoad(
     const shouldReset = !!flags.force || !!flags.forceRows;
     rowsPromise = startRowsStream({
       isCurrent: ctx.isCurrent,
+      owner: ctx.owner,
       key,
       connId,
       schema,

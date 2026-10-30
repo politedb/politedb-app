@@ -37,13 +37,11 @@ export function useLoadTableData() {
   const setSizeInfoCache = useConnectionStore((s) => s.setSizeInfoCache);
   const addQueryHistory = useConnectionStore((s) => s.addQueryHistory);
 
-  const columnsCache = useConnectionStore((s) => s.columnsCache);
-  const sizeInfoCache = useConnectionStore((s) => s.sizeInfoCache);
-
   const profileTabs = useScreenStore((s) => s.profileTabs);
   const activeProfileScreen = useScreenStore((s) => s.activeProfileScreen);
 
-  const loadingKeysRef = useRef<Set<string>>(new Set());
+  /** Table key → the owner of its running load (see `owner` below). */
+  const loadingKeysRef = useRef<Map<string, string>>(new Map());
 
   const activeTab = useMemo(() => {
     if (!activeProfileScreen || activeProfileScreen === "main") return null;
@@ -58,13 +56,17 @@ export function useLoadTableData() {
     [activeTab, addQueryHistory]
   );
 
+  /** The tab's connection, acquired on what it was opened on (R1, R4). */
   const ensureRuntimeConn = useCallback(
     async (key: string) => {
       if (!activeTab) throw new Error("NO_ACTIVE_TAB");
       // The tab's own connection wins; a table's is used only when the tab
-      // acquired it on the same target (R4).
-      if (activeTab.runtimeConnectionId) return activeTab.runtimeConnectionId;
-      const meta = tableDataMap[key];
+      // acquired it on the same target (R4). Read live, never a snapshot.
+      const live = useScreenStore
+        .getState()
+        .profileTabs.find((t) => t.id === activeTab.id);
+      if (live?.runtimeConnectionId) return live.runtimeConnectionId;
+      const meta = useConnectionStore.getState().tableDataMap[key];
       if (
         meta?.connectionId &&
         runtimeServesTab(activeTab.id, meta.connectionId)
@@ -73,7 +75,7 @@ export function useLoadTableData() {
       }
       return await connectTabOnce(activeTab.id);
     },
-    [activeTab, tableDataMap]
+    [activeTab]
   );
 
   const loadTableData = useCallback(
@@ -84,15 +86,27 @@ export function useLoadTableData() {
       flags: LoadFlags = {}
     ) => {
       if (!activeTab) throw new Error("NO_ACTIVE_TAB");
+      const tabId = activeTab.id;
 
       const key = tableKey(activeProfileScreen, schema, tableName);
+      // Loads are owned by the tab's connection and epoch at the time they
+      // start (R5): a load after a reconnect, a profile save or a refusal
+      // never joins (or waits for) one started before.
+      const screen = useScreenStore.getState();
+      const owner = JSON.stringify([
+        screen.profileTabs.find((t) => t.id === tabId)?.runtimeConnectionId ??
+          null,
+        screen.tabEpoch[tabId] ?? 0,
+      ]);
       const loadSignature = buildLoadSignature({ key, pagination, flags });
-      const existingLoad = inflightLoadBySignature.get(loadSignature);
+      const signatureSlot = `${loadSignature}\u0000${owner}`;
+      const tableSlot = `${key}\u0000${owner}`;
+      const existingLoad = inflightLoadBySignature.get(signatureSlot);
       if (existingLoad) {
         return existingLoad;
       }
 
-      const existingTableLoad = inflightLoadByTableKey.get(key);
+      const existingTableLoad = inflightLoadByTableKey.get(tableSlot);
       // Do not coalesce meta/stats/force refreshes into an in-flight rows-only load —
       // that left Save Changes without constraints and forced Virtual-key WHERE.
       // forceRefresh must be included here AND in the loadingKeysRef guard below;
@@ -113,67 +127,45 @@ export function useLoadTableData() {
       const task = (async () => {
         latestLoadSignatureByKey.set(key, loadSignature);
 
-        if (loadingKeysRef.current.has(key) && !bypassInflightGuard) {
+        if (loadingKeysRef.current.get(key) === owner && !bypassInflightGuard) {
           return;
         }
-        loadingKeysRef.current.add(key);
+        loadingKeysRef.current.set(key, owner);
 
         try {
-          const prev = tableDataMap[key] ?? EMPTY_META;
-          const plan = computeLoadPlan({
-            key,
-            prev,
-            engine: activeTab.engine,
-            flags,
-            pagination,
-          });
-
-          if (!shouldDoAnything(plan)) return;
-
-          const limit = pagination?.limit ?? DEFAULT_LIMIT;
-          const offset = pagination?.offset ?? DEFAULT_OFFSET;
-
-          if (flags.metaOnly) {
-            // Keep the data query's error: this load does not rerun it.
-            patchMeta(setMeta, key, prev, { busy: true });
-          } else if (plan.needAnyMetaWork) {
-            patchMeta(setMeta, key, prev, { busy: true, error: null });
-          } else if (!prev.error) {
-            patchMeta(setMeta, key, prev, { error: null });
-          }
-
+          // 1) The connection first: what was loaded before it is decided
+          //    must not shape this load (R4).
           let connId: string;
           try {
-            connId = activeTab.runtimeConnectionId
-              ? activeTab.runtimeConnectionId
-              : await ensureRuntimeConn(key);
+            connId = await ensureRuntimeConn(key);
           } catch (e) {
-            patchMeta(setMeta, key, prev, {
-              busy: false,
-              error: getErrorMessage(e),
-            });
+            if (
+              useScreenStore.getState().profileTabs.some((t) => t.id === tabId)
+            ) {
+              patchMeta(setMeta, key, EMPTY_META, {
+                busy: false,
+                error: getErrorMessage(e),
+              });
+            }
             return;
           }
-
-          // The table follows the tab's connection (never keeps an older one).
-          patchMeta(setMeta, key, prev, { connectionId: connId });
-
-          if (
-            !useScreenStore
-              .getState()
-              .profileTabs.find((t) => t.id === activeTab.id)
-              ?.runtimeConnectionId
-          ) {
+          const liveTab = useScreenStore
+            .getState()
+            .profileTabs.find((t) => t.id === tabId);
+          // Closed, or moved to another connection, meanwhile: nothing to do.
+          if (!liveTab) return;
+          if (!liveTab.runtimeConnectionId) {
             useScreenStore
               .getState()
-              .updateTab(activeTab.id, { runtimeConnectionId: connId });
+              .updateTab(tabId, { runtimeConnectionId: connId });
+          } else if (liveTab.runtimeConnectionId !== connId) {
+            return;
           }
 
           // What this load may still publish (R5): nothing once the tab's
           // connection changed or its epoch moved (profile saved again,
           // connection refused). Its own pending flag is still retired,
           // unless a newer load of the table owns it.
-          const tabId = activeTab.id;
           const startEpoch = useScreenStore.getState().tabEpoch[tabId] ?? 0;
           const isCurrent = () => {
             const s = useScreenStore.getState();
@@ -199,6 +191,35 @@ export function useLoadTableData() {
             if (isCurrent()) setSizeInfoCache(k, info);
           };
 
+          // 2) The table's state as it is now (after any invalidation the
+          //    connection brought), never a snapshot from before.
+          const live = useConnectionStore.getState();
+          const prev = live.tableDataMap[key] ?? EMPTY_META;
+          const plan = computeLoadPlan({
+            key,
+            prev,
+            engine: activeTab.engine,
+            flags,
+            pagination,
+          });
+
+          if (!shouldDoAnything(plan)) return;
+
+          const limit = pagination?.limit ?? DEFAULT_LIMIT;
+          const offset = pagination?.offset ?? DEFAULT_OFFSET;
+
+          if (flags.metaOnly) {
+            // Keep the data query's error: this load does not rerun it.
+            patchMeta(guardedSetMeta, key, prev, { busy: true });
+          } else if (plan.needAnyMetaWork) {
+            patchMeta(guardedSetMeta, key, prev, { busy: true, error: null });
+          } else if (!prev.error) {
+            patchMeta(guardedSetMeta, key, prev, { error: null });
+          }
+
+          // The table follows the tab's connection (never keeps an older one).
+          patchMeta(guardedSetMeta, key, prev, { connectionId: connId });
+
           await executeEngineLoad({
             key,
             loadSignature,
@@ -217,39 +238,39 @@ export function useLoadTableData() {
                 ? activeTab.target.database
                 : null,
             supportsMeta: supportsTableMeta(activeTab.engine),
-            columnsCache,
-            sizeInfoCache,
+            columnsCache: live.columnsCache,
+            sizeInfoCache: live.sizeInfoCache,
             isCurrent,
+            owner,
             setMeta: guardedSetMeta,
             setColumnsCache: guardedColumnsCache,
             setSizeInfoCache: guardedSizeInfoCache,
             addLogQuery,
           });
         } finally {
-          loadingKeysRef.current.delete(key);
+          // Never clears the slot of a newer owner.
+          if (loadingKeysRef.current.get(key) === owner) {
+            loadingKeysRef.current.delete(key);
+          }
         }
       })();
 
-      inflightLoadBySignature.set(loadSignature, task);
-      inflightLoadByTableKey.set(key, task);
+      inflightLoadBySignature.set(signatureSlot, task);
+      inflightLoadByTableKey.set(tableSlot, task);
       try {
         await task;
       } finally {
-        const current = inflightLoadBySignature.get(loadSignature);
-        if (current === task) {
-          inflightLoadBySignature.delete(loadSignature);
+        if (inflightLoadBySignature.get(signatureSlot) === task) {
+          inflightLoadBySignature.delete(signatureSlot);
         }
-        if (inflightLoadByTableKey.get(key) === task) {
-          inflightLoadByTableKey.delete(key);
+        if (inflightLoadByTableKey.get(tableSlot) === task) {
+          inflightLoadByTableKey.delete(tableSlot);
         }
       }
     },
     [
       activeTab,
       activeProfileScreen,
-      tableDataMap,
-      columnsCache,
-      sizeInfoCache,
       setMeta,
       ensureRuntimeConn,
       addLogQuery,

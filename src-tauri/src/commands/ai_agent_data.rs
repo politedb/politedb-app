@@ -184,7 +184,10 @@ fn provider_config(
 /// The saved profile behind a runtime connection that supports data tools;
 /// `Err` when the connection may no longer take work (stale or unknown),
 /// carrying that code.
-fn data_profile(state: &AppState, connection_id: &str) -> Result<Option<ProfileBinding>, String> {
+pub(crate) fn data_profile(
+    state: &AppState,
+    connection_id: &str,
+) -> Result<Option<ProfileBinding>, String> {
     let Ok(id) = Uuid::parse_str(connection_id) else {
         return Ok(None);
     };

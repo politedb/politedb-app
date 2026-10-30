@@ -226,6 +226,18 @@ fn binding_for(
         .then(|| crate::ai::agent::consent::ProfileBinding::of(profile))
 }
 
+/// Publishes the agent binding of a new connection, if it gets one.
+fn bind_runtime(
+    state: &AppState,
+    connection_id: Uuid,
+    profile: &ConnectionProfile,
+    database: &Option<String>,
+) {
+    if let Some(binding) = binding_for(profile, database) {
+        state.connection_profiles.insert(connection_id, binding);
+    }
+}
+
 #[tauri::command]
 pub async fn profile_connect(
     app: AppHandle,
@@ -280,9 +292,7 @@ pub async fn profile_connect(
             format!("RUNTIME_CONNECT_FAILED: {e}")
         })?;
 
-    if let Some(binding) = binding_for(&profile, &database) {
-        state.connection_profiles.insert(connection.id, binding);
-    }
+    bind_runtime(&state, connection.id, &profile, &database);
 
     tracing::info!(
         step = "profile_connect",
@@ -412,6 +422,47 @@ mod tests {
             updated_at: 0,
             revision: "r".into(),
         }
+    }
+
+    /// Through the published state: a connection opened on another database
+    /// has no binding, so agent data access is unavailable on it (D2).
+    #[tokio::test]
+    async fn an_override_connection_has_no_agent_data_access() {
+        use crate::engines::registry::EngineRegistry;
+        let state = AppState::new(EngineRegistry::new(vec![]));
+        let p = profile();
+        let path = std::env::temp_dir().join(format!("pdb-bind-{}.db", Uuid::new_v4()));
+        for database in [None, Some("other".to_string()), Some("app".to_string())] {
+            let id = Uuid::new_v4();
+            let conn = crate::engines::sqlite::driver::connect_sqlite(
+                id,
+                "t".into(),
+                crate::types::SqliteConnectInput {
+                    path: path.to_string_lossy().into_owned(),
+                    statement_timeout_ms: None,
+                },
+            )
+            .await
+            .unwrap();
+            crate::commands::connection::lifecycle::publish_runtime(
+                &state,
+                id,
+                crate::engines::EngineConnection::Sqlite(conn),
+                crate::profiles::target_override::RuntimeTarget {
+                    profile_id: None,
+                    profile_revision: None,
+                    database_override: database.clone(),
+                    engine: crate::types::EngineKind::Sqlite,
+                    display: "x".into(),
+                },
+            );
+            bind_runtime(&state, id, &p, &database);
+            let bound = crate::commands::ai_agent_data::data_profile(&state, &id.to_string())
+                .unwrap()
+                .is_some();
+            assert_eq!(bound, database.is_none(), "{database:?}");
+        }
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
