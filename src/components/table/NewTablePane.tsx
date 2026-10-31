@@ -39,6 +39,7 @@ interface Props {
 }
 
 export function NewTablePane({
+  table,
   activeSchema,
   engine,
   activeProfileScreen,
@@ -71,6 +72,9 @@ export function NewTablePane({
       tableName: tableState.tableName,
       primaryKey: tableState.primaryKey,
       columns: tableState.columns,
+      // The draft's identity, kept while its window is closed.
+      schema: table.schema,
+      windowName: table.name,
     });
   }, [
     activeProfileScreen,
@@ -78,6 +82,8 @@ export function NewTablePane({
     tableState.tableName,
     tableState.primaryKey,
     tableState.columns,
+    table.schema,
+    table.name,
     setNewTableData,
   ]);
 

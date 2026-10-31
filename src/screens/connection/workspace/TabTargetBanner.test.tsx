@@ -86,6 +86,65 @@ describe("a tab whose connection must be reconnected", () => {
     expect(onReconnect).not.toHaveBeenCalled();
   });
 
+  it("drops an answer given after the screen was left, and may ask again", async () => {
+    let answer!: (ok: boolean) => void;
+    m.confirm.mockImplementation(
+      () => new Promise<boolean>((r) => (answer = r))
+    );
+    const onReconnect = vi.fn();
+    const runtimeId = staleRuntime();
+    const first = render(
+      <TabTargetBanner
+        target={ok}
+        runtimeId={runtimeId}
+        onReconnect={onReconnect}
+      />
+    );
+    await waitFor(() => expect(m.confirm).toHaveBeenCalledTimes(1));
+    first.unmount();
+    answer(true);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(onReconnect).not.toHaveBeenCalled();
+
+    // Back on the screen with the same problem: asked again.
+    m.confirm.mockResolvedValue(true);
+    const again = vi.fn();
+    render(
+      <TabTargetBanner target={ok} runtimeId={runtimeId} onReconnect={again} />
+    );
+    await waitFor(() => expect(again).toHaveBeenCalledTimes(1));
+    expect(m.confirm).toHaveBeenCalledTimes(2);
+  });
+
+  it("drops an answer once the tab moved to another connection", async () => {
+    let answer!: (ok: boolean) => void;
+    m.confirm.mockImplementation(
+      () => new Promise<boolean>((r) => (answer = r))
+    );
+    const onReconnect = vi.fn();
+    const runtimeId = staleRuntime();
+    const view = render(
+      <TabTargetBanner
+        target={ok}
+        runtimeId={runtimeId}
+        onReconnect={onReconnect}
+      />
+    );
+    await waitFor(() => expect(m.confirm).toHaveBeenCalledTimes(1));
+    view.rerender(
+      <TabTargetBanner
+        target={ok}
+        runtimeId="rt-new"
+        onReconnect={onReconnect}
+      />
+    );
+    answer(true);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(onReconnect).not.toHaveBeenCalled();
+  });
+
   it("keeps the banner, without asking, for a tab whose target is unknown", () => {
     render(
       <TabTargetBanner

@@ -51,6 +51,8 @@ export type TableItem = {
   schema: string;
   name: string;
   new?: boolean;
+  /** A new-table draft listed while its window is closed: that window's id. */
+  draftWindowId?: string;
   kind?: "table" | "view";
   owner?: string;
   estimatedRow?: number | string;

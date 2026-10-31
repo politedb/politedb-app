@@ -1,4 +1,5 @@
 import { rememberAiChatOwner } from "src/components/ai-assistant/hooks/useAiChatSession";
+import { newTableDraftWindow } from "./lib/newTableDrafts";
 import {
   useMemo,
   useEffect,
@@ -95,7 +96,7 @@ const EMPTY_TABLE_META = {
 };
 const EMPTY_NEW_TABLE_DRAFTS = Object.freeze({}) as Record<
   string,
-  { tableName?: string }
+  { tableName?: string; schema?: string; windowName?: string }
 >;
 
 export function ConnectionScreen() {
@@ -445,23 +446,21 @@ export function ConnectionScreen() {
         )
       );
 
+    // Drafts whose window is closed: listed under the name being typed, and
+    // reopened in their own window (never as a second draft).
+    const openWindowIds = new Set(activeWindows.map((w) => w.id));
     const persistedDraftTables = Object.entries(newTableDrafts)
       .map(([windowId, data]) => {
+        if (openWindowIds.has(windowId)) return null;
         const rawName = data?.tableName?.trim() ?? "";
         if (!rawName) return null;
-
-        // Window id format is usually "table:<schema>.<name>"
-        const key = windowId.startsWith("table:")
-          ? windowId.slice(6)
-          : windowId;
-        const dotIdx = key.indexOf(".");
-        const schemaFromWindow =
-          dotIdx > 0 ? key.slice(0, dotIdx).trim() : activeSchema;
-
+        const window = newTableDraftWindow(windowId, data);
+        if (!window) return null;
         return {
-          schema: schemaFromWindow || activeSchema,
+          schema: window.table.schema,
           name: rawName,
           new: true,
+          draftWindowId: windowId,
         } as TableItem;
       })
       .filter((t): t is TableItem => !!t)

@@ -1,4 +1,5 @@
 import { useCallback, useMemo } from "preact/hooks";
+import { newTableDraftWindow } from "../lib/newTableDrafts";
 import type {
   DatabaseCatalogKind,
   DatabaseCatalogWindow,
@@ -189,6 +190,25 @@ export function useConnectionWindows(
 
   const openTable = useCallback(
     async (table: TableItem) => {
+      // A draft listed while its window is closed reopens that window, with
+      // its own draft (its id keys the draft).
+      if (table.new && table.draftWindowId) {
+        const draftWindowId = table.draftWindowId;
+        const liveNow =
+          useScreenStore.getState().openWindows[activeProfileScreen] ?? [];
+        if (!liveNow.some((w) => w.id === draftWindowId)) {
+          const draft =
+            useConnectionStore.getState().newTableData[activeProfileScreen]?.[
+              draftWindowId
+            ];
+          const win = newTableDraftWindow(draftWindowId, draft);
+          if (!win) return draftWindowId;
+          addWindow(activeProfileScreen, win);
+        }
+        setActiveWindowId(activeProfileScreen, draftWindowId);
+        return draftWindowId;
+      }
+
       // The live windows, not this render's: a window closed just before
       // (a new table's draft, once created) is not reused.
       const live =

@@ -67,19 +67,107 @@ describe("opening the table a draft just created", () => {
   });
 });
 
+const collect = () =>
+  getNewTableDraftEntries({
+    tabId: TAB,
+    openWindows: useScreenStore.getState().openWindows,
+    engine: "postgres",
+  });
+
+const setDraft = (windowId: string, data: object) =>
+  useConnectionStore.getState().setNewTableData(TAB, windowId, data as never);
+
 describe("saving new-table drafts", () => {
-  it("includes a draft whose window was closed, with its schema", () => {
-    useConnectionStore
-      .getState()
-      .setNewTableData(TAB, DRAFT_ID, draft("orders") as never);
-    const entries = getNewTableDraftEntries({
-      tabId: TAB,
-      openWindows: useScreenStore.getState().openWindows,
-      engine: "postgres",
+  it("saves a draft whose window was closed, in the schema it records", () => {
+    setDraft(DRAFT_ID, {
+      ...draft("orders"),
+      schema: "public",
+      windowName: "untitled_table_1",
     });
+    const entries = collect();
     expect(entries.error).toBeNull();
     expect(entries.data).toHaveLength(1);
     expect(entries.data[0]!.window.id).toBe(DRAFT_ID);
     expect(entries.data[0]!.sql).toMatch(/CREATE TABLE "public"\."orders"/);
+  });
+
+  it.each([
+    ["a dotted schema", "tenant.eu", "untitled"],
+    ["a dotted table name", "public", "untitled.v2"],
+    ["both dotted", "tenant.eu", "untitled.v2"],
+  ])(
+    "keeps the destination of %s once its window closes",
+    (_, schema, name) => {
+      const windowId = `table:${schema}.${name}`;
+      const open = {
+        id: windowId,
+        type: "table",
+        table: { schema, name, new: true },
+      } as OpenWindow;
+      setDraft(windowId, { ...draft("orders"), schema, windowName: name });
+
+      useScreenStore.setState({ openWindows: { [TAB]: [open] } });
+      const whileOpen = collect().data[0]!.sql;
+      useScreenStore.setState({ openWindows: { [TAB]: [] } });
+      const onceClosed = collect().data[0]!.sql;
+
+      expect(onceClosed).toBe(whileOpen);
+      expect(onceClosed).toContain(`"${schema}"."orders"`);
+    }
+  );
+
+  it("never guesses the schema of an older draft with an ambiguous window id", () => {
+    setDraft("table:tenant.eu.untitled", draft("orders"));
+    expect(collect()).toEqual({ data: [], error: null });
+  });
+
+  it("still saves an older draft whose window id is unambiguous", () => {
+    setDraft(DRAFT_ID, draft("orders"));
+    expect(collect().data[0]!.sql).toMatch(/CREATE TABLE "public"\."orders"/);
+  });
+
+  it("runs neither of two drafts creating the same table, and says so", () => {
+    setDraft(DRAFT_ID, {
+      ...draft("orders"),
+      schema: "public",
+      windowName: "untitled_table_1",
+    });
+    setDraft("table:public.untitled_table_2", {
+      ...draft("orders"),
+      schema: "public",
+      windowName: "untitled_table_2",
+    });
+    const entries = collect();
+    expect(entries.data).toEqual([]);
+    expect(entries.error).toMatch(/both named "orders"/);
+  });
+});
+
+describe("reopening a closed draft from the sidebar", () => {
+  it("reopens its own window and draft, never a second draft", async () => {
+    setDraft(DRAFT_ID, {
+      ...draft("orders"),
+      schema: "public",
+      windowName: "untitled_table_1",
+    });
+    const { result } = renderHook(() => useConnectionWindows(TAB));
+    // The sidebar lists it under the name being typed.
+    await act(async () => {
+      await result.current.openTable({
+        schema: "public",
+        name: "orders",
+        new: true,
+        draftWindowId: DRAFT_ID,
+      });
+    });
+    const s = useScreenStore.getState();
+    expect(s.openWindows[TAB]!.map((w) => w.id)).toEqual([DRAFT_ID]);
+    expect(s.activeWindowId[TAB]).toBe(DRAFT_ID);
+    expect(
+      Object.keys(useConnectionStore.getState().newTableData[TAB] ?? {})
+    ).toEqual([DRAFT_ID]);
+    const entries = collect();
+    expect(entries.data).toHaveLength(1);
+    expect(entries.data[0]!.sql).toMatch(/"public"\."orders"/);
   });
 });

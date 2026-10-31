@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useRef } from "preact/hooks";
+import { runtimeRefusalOf } from "src/stores/runtimeTargets";
 import { assertTabTarget } from "src/lib/tabs/assertTabTarget";
 import { isTabTargetError } from "src/lib/tabs/assertTabTarget";
 import type { Dispatch, StateUpdater } from "preact/hooks";
@@ -62,10 +63,7 @@ export function formatAssistantRequestError(args: {
 
   // The connection's settings changed or it is unknown (plan
   // tab-database-reconnect R20): nothing was read.
-  if (
-    raw.includes("RUNTIME_STALE") ||
-    raw.includes("RUNTIME_IDENTITY_MISSING")
-  ) {
+  if (runtimeRefusalOf(raw)) {
     return vi
       ? "Cấu hình kết nối đã thay đổi. Hãy kết nối lại tab này rồi hỏi lại."
       : "The connection settings changed. Reconnect this tab, then ask again.";

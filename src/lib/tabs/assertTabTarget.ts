@@ -1,7 +1,10 @@
 import { resolveTabTarget, targetMatches } from "src/lib/tabs/tabTarget";
 import { useConnectionStore } from "src/stores/connection";
 import { useProfileStore } from "src/stores/profile";
-import { useRuntimeTargetsStore } from "src/stores/runtimeTargets";
+import {
+  runtimeRefusalOf,
+  useRuntimeTargetsStore,
+} from "src/stores/runtimeTargets";
 import { useScreenStore } from "src/stores/screen";
 
 /*
@@ -61,8 +64,7 @@ export function isReconnectMessage(text: string | null | undefined): boolean {
     text === RUNTIME_NOT_THE_TABS ||
     (text.startsWith("This tab shows ") &&
       text.endsWith(" Reconnect the tab.")) ||
-    text.includes("RUNTIME_STALE") ||
-    text.includes("RUNTIME_IDENTITY_MISSING")
+    runtimeRefusalOf(text) !== null
   );
 }
 

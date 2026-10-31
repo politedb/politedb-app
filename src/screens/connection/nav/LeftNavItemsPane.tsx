@@ -41,8 +41,11 @@ const VIEW_LIST_PAGE_SIZE = 20;
 // Tables render a page at a time: a schema can hold thousands.
 const TABLE_LIST_PAGE_SIZE = 100;
 
-function tableWindowId(table: Pick<TableItem, "schema" | "name">) {
-  return `table:${table.schema}.${table.name}`;
+function tableWindowId(
+  table: Pick<TableItem, "schema" | "name" | "draftWindowId">
+) {
+  // A closed draft keeps its own window id, whatever its name now.
+  return table.draftWindowId ?? `table:${table.schema}.${table.name}`;
 }
 
 function TableName({ className, name }: { className?: string; name: string }) {
@@ -651,6 +654,8 @@ export function LeftNavItemsPane({
             useConnectionStore
               .getState()
               .setNewTableData(profileId, nextWindowId, {
+                schema: nextTable.schema,
+                windowName: nextTable.name,
                 tableName: newTableName,
                 primaryKey: sourceDraft?.primaryKey ?? "",
                 columns: structuredClone(sourceDraft?.columns ?? []),

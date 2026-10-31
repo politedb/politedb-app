@@ -68,18 +68,28 @@ export function TabTargetBanner(props: {
     const key = `${runtimeId ?? ""}\0${problem}`;
     if (askedReconnect.has(key)) return;
     askedReconnect.add(key);
+    // An answer counts only while this tab still shows this problem: once
+    // it is gone (screen left, tab changed, problem replaced) the answer is
+    // dropped, and the problem may be asked about again later.
+    let live = true;
     void confirmDialog(problem, {
-      title: "Reconnect connection",
+      title: "Reconnect tab",
       kind: "warning",
       okLabel: "Reconnect",
       cancelLabel: "Not now",
     }).then((ok) => {
-      // Only for the problem asked about: the tab may have moved on.
+      if (!live) {
+        askedReconnect.delete(key);
+        return;
+      }
       const now = currentRef.current;
       if (ok && now.problem === problem && now.runtimeId === runtimeId) {
         reconnectRef.current();
       }
     });
+    return () => {
+      live = false;
+    };
   }, [problem, canReconnect, props.runtimeId]);
 
   if (!problem || canReconnect) return null;

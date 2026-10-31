@@ -72,8 +72,10 @@ export function runtimeRefusalOf(err: unknown): RuntimeRefusal | null {
       : err instanceof Error
         ? err.message
         : String(err ?? "");
-  if (text.includes("RUNTIME_STALE")) return "RUNTIME_STALE";
-  if (text.includes("RUNTIME_IDENTITY_MISSING"))
-    return "RUNTIME_IDENTITY_MISSING";
-  return null;
+  // The backend answers with the bare code (an `Error:` prefix may be added
+  // on the way); text that merely contains it, such as a database error
+  // naming an object "RUNTIME_STALE", is not a refusal.
+  const match =
+    /^\s*(?:Error:\s*)?(RUNTIME_STALE|RUNTIME_IDENTITY_MISSING)\s*$/.exec(text);
+  return (match?.[1] as RuntimeRefusal | undefined) ?? null;
 }

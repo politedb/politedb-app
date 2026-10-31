@@ -1,5 +1,6 @@
 import { useCallback, useRef } from "preact/hooks";
 
+import { newTableDraftWindow } from "../lib/newTableDrafts";
 import { assertTabTarget } from "src/lib/tabs/assertTabTarget";
 import type {
   DatabaseEngine,
@@ -241,19 +242,6 @@ function isValidNewTable(v: unknown): v is NewTableLike {
   return obj.tableName.trim().length > 0 && hasAnyCol;
 }
 
-/** The window of a new-table draft whose window is closed (`table:<schema>.<name>`). */
-function closedNewTableWindow(windowId: string): OpenWindow | null {
-  if (!windowId.startsWith("table:")) return null;
-  const key = windowId.slice("table:".length);
-  const dot = key.indexOf(".");
-  if (dot <= 0) return null;
-  return {
-    id: windowId,
-    type: "table",
-    table: { schema: key.slice(0, dot), name: key.slice(dot + 1), new: true },
-  } as OpenWindow;
-}
-
 export function getNewTableDraftEntries(args: {
   tabId: string;
   openWindows: Record<string, OpenWindow[]>;
@@ -266,9 +254,15 @@ export function getNewTableDraftEntries(args: {
 
   const result: NewTableDraftEntry[] = [];
 
+  // Two drafts creating the same table: neither runs (no duplicate CREATE,
+  // and no edits silently dropped); the user renames or discards one.
+  const targets = new Set<string>();
+
   for (const [windowId, draft] of Object.entries(drafts)) {
-    // A draft whose window was closed is still listed and still saved.
-    const window = windowsById.get(windowId) ?? closedNewTableWindow(windowId);
+    // A draft whose window was closed is still listed and still saved, in
+    // the schema it records; one whose identity cannot be told is not run.
+    const window =
+      windowsById.get(windowId) ?? newTableDraftWindow(windowId, draft);
     if (!window || window.type !== "table" || !window.table.new) continue;
 
     if (!isValidNewTable(draft)) {
@@ -277,6 +271,14 @@ export function getNewTableDraftEntries(args: {
 
     const validColumns = draft.columns.filter((col) => col.column_name?.trim());
     const tableName = draft.tableName.trim();
+    const target = JSON.stringify([window.table.schema, tableName]);
+    if (targets.has(target)) {
+      return {
+        data: [],
+        error: `Two unsaved new tables are both named "${tableName}". Rename or discard one of them, then save.`,
+      };
+    }
+    targets.add(target);
 
     result.push({
       window,

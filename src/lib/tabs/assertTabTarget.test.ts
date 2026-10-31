@@ -19,7 +19,10 @@ import { runQuery } from "src/lib/tauri/operation";
 import { connectionRemove } from "src/lib/tauri/connection";
 import { signalHealthInspectorBackend } from "src/lib/tauri/health-inspector-actions";
 import { useConnectionStore } from "src/stores/connection";
-import { useRuntimeTargetsStore } from "src/stores/runtimeTargets";
+import {
+  runtimeRefusalOf,
+  useRuntimeTargetsStore,
+} from "src/stores/runtimeTargets";
 import { useScreenStore } from "src/stores/screen";
 import { resetTabRuntimes, seedTabRuntime } from "src/test/fixtures/tabRuntime";
 
@@ -194,6 +197,16 @@ describe("isReconnectMessage", () => {
       expect(isReconnectMessage(refusal?.message)).toBe(true);
     }
     expect(isReconnectMessage("RUNTIME_STALE")).toBe(true);
+    expect(isReconnectMessage("Error: RUNTIME_IDENTITY_MISSING")).toBe(true);
+    // Database or network text that merely mentions a code is not one.
+    for (const text of [
+      'relation "RUNTIME_STALE" does not exist',
+      'column "RUNTIME_IDENTITY_MISSING" of relation "t" does not exist',
+      "RUNTIME_STALE: connection reset by peer",
+    ]) {
+      expect(isReconnectMessage(text)).toBe(false);
+      expect(runtimeRefusalOf(text)).toBeNull();
+    }
     expect(isReconnectMessage('relation "users" does not exist')).toBe(false);
     expect(isReconnectMessage(null)).toBe(false);
   });
