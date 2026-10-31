@@ -1167,3 +1167,46 @@ Reviewed by Codex, 2026-11-01, branch `fix/tab-database-reconnect`, HEAD `9c897b
 - Only this review append retained; pre-existing untracked `.claude/launch.json` preserved. `git diff --check` run after append.
 
 **Verdict at `9c897b37`: CHANGES REQUIRED.** Reconnect lifecycle is repaired for the reviewed handoff model; finish actual unresolved-draft save feedback and collision-safe discard access before verification.
+
+
+## tab-database-reconnect — manual-feedback follow-ups re-review round 4 (PR #89)
+
+### Status
+
+VERIFIED WITH LIMITATIONS
+
+Reviewed by Codex, 2026-11-01, branch `fix/tab-database-reconnect`, HEAD `0db7ad1a`. Exact fix range: `git diff HEAD~1..HEAD` (`9c897b37..0db7ad1a`). Read workflow, round 3 report, complete fix diff, affected consumers and tests. No application source or tests modified.
+
+### Findings
+
+**P0:** None established.
+
+**P1:** None established.
+
+**P2:** No new finding established. Both round 3 findings resolved for their reported cases. No required source fix identified.
+
+### Round 3 disposition
+
+| Finding | Round 4 result |
+| --- | --- |
+| FU-R3-P2-1 — notices absent from rendered review | **Resolved.** `src/screens/connection/hooks/useObjectSaveReview.ts:28-29,42-51` subscribes to tab-scoped table drafts and open windows and includes the shared unresolved notices alongside live object notices. `ConnectionScreen.tsx:786-791,1023-1026` feeds that hook into the actual dialog. Shared `unresolvedNewTableDrafts` / `unresolvedNewTableNotices` (`lib/newTableDrafts.ts:48-73`) also supply the action/collector path, eliminating the prior discrepancy. Rendered tests cover unresolved-only disabled Confirm and mixed SQL with reactive notice addition/removal. |
+| FU-R3-P2-2 — unresolved sidebar items disappear | **Resolved.** `src/screens/connection/lib/newTableDrafts.ts:115-122,142-147` gives unresolved drafts an explicit cannot-be-saved label, blank-name fallback and original draft identity, and bypasses name deduplication only for those items. `nav/LeftNavItemsPane.tsx:529,544` keys rows by draft id. Real-table collision, two same-name unresolved drafts and blank name are covered in helper tests; mounted collision test confirms local discard leaves the other draft intact without SQL or database Drop. |
+
+### Compatibility and test quality
+
+- **Sidebar list/dedup/search:** `ConnectionScreen.tsx:431-446` passes the same schema, search, windows and draft dependencies to the extracted helper. `newTableDrafts.ts:89-103,124-145` preserves base-table ordering, normal open/closed draft filtering and schema/name deduplication. Unresolved drafts remain independently searchable by their displayed names and receive the selected schema only as display context; this schema never supplies executable identity. Search can intentionally hide an item until cleared. No new normal-table or resolved-draft list regression established.
+- **Active highlight:** `LeftNavItemsPane.tsx:530-558` retains the prior schema/name active check and shared style functions; open draft rows retain their structured window names, while unresolved closed drafts cannot become active windows. Original-id lookup for scroll visibility remains at `:169-170`. No changed active-highlight behavior established. This is source comparison plus existing style/search tests, not a new mounted full-screen selection matrix.
+- **Save review / Confirm:** object SQL, summary, conflicts and skips still use the existing object collectors (`useObjectSaveReview.ts:38-45`). Existing rendered tests cover late conflict, disappearing/returning objects and an empty create receiving SQL. New tests cover unresolved-only and mixed valid SQL notices while open. `SaveChangesDialog.tsx:407-408` enables Confirm only for executable SQL without summary error and while not saving; notices alone do not enable it. Collector tests verify unresolved entries produce no CREATE, mixed work includes only valid entries and open structured identity recovers legacy drafts. Actual save still iterates collected valid entries only; unresolved notices do not authorize SQL.
+- **Drop:** `LeftNavItemsPane.tsx:45-48,209-214,360-370` uses the original draft id for local clear/close after confirmation when `new` is true; real tables continue to `actions.dropTable`. Unresolved Clone remains disabled. Mounted test uses the real sidebar/store with mocked confirmation, action context and native SQL; it proves one colliding draft is cleared and the other remains. No database DDL executed.
+- **Test strengths/limits:** the new tests catch both reported integration defects. Sidebar helper tests include blank names and collisions; rendered save tests verify visible reason/name and Confirm state. However, the mounted sidebar test identifies rows by empty measured text and position (`LeftNavItemsPane.drafts.test.tsx:90-99`), so it does not verify visible fallback labels, reactive row removal, real-table Drop, cancellation, search or highlight. Mixed review injects a valid SQL prop instead of mounting ConnectionScreen/real collection, and no rendered window-identity-change case was added. Those are coverage improvements, not independently established source defects. No full close/reopen/edit/save/native-DDL test performed.
+- **QueryAnalyzer anomaly:** reported earlier full-suite single failure passed alone, per handoff. This review's full suite passed, including QueryAnalyzer; an additional isolated run passed all 28 tests. HEAD changes neither QueryAnalyzer nor its plan, license, export or focus implementation; analyzer tests mock their native wrappers and reset their own relevant stores. No affected caller path found. Judge unrelated intermittent test/environment behavior, not evidence of this fix regressing QueryAnalyzer. Exact cause remains unconfirmed because the earlier failing assertion/log was not supplied; a passing rerun does not establish its cause.
+
+### Verification
+
+- `npm run build`: **passed**, exit 0 (TypeScript + Vite); existing externalization/dynamic-import/chunk warnings. Log `/tmp/pdb-fu-r4-build.log`.
+- `npm run test:run -- --exclude '**/.claude/**'`: **293 files passed / 1 skipped; 2509 tests passed / 1 skipped**, exit 0. Log `/tmp/pdb-fu-r4-tests.log`. jsdom canvas-not-implemented diagnostics did not fail the run.
+- `npm run test:run -- src/components/editor/query-analyzer/QueryAnalyzer.test.tsx --exclude '**/.claude/**'`: **1 file / 28 tests passed**, exit 0. Log `/tmp/pdb-fu-r4-analyzer.log`.
+- Rust unchanged; not rerun. No native desktop, live database, full-screen visual QA or engine-matrix verification. No Docker/container commands, secret retrieval, commit, push or merge.
+- Only this review append retained; pre-existing untracked `.claude/launch.json` preserved. `git diff --check` run after append.
+
+**Verdict at `0db7ad1a`: VERIFIED WITH LIMITATIONS.** FU-R3-P2-1 and FU-R3-P2-2 closed; no new P0/P1/P2 source finding established. Limitations are mounted full-screen/native coverage and the unconfirmed cause of the historical QueryAnalyzer flake.
