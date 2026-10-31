@@ -1119,3 +1119,51 @@ Reviewed by Codex, 2026-11-01, branch `fix/tab-database-reconnect`, HEAD `c8e204
 - Only this report append retained; pre-existing `.claude/launch.json` preserved. `git diff --check` passed after append.
 
 **Verdict at `c8e20458`: CHANGES REQUIRED.** Wrong-schema SQL and reopened-draft alias findings are fixed for their reported modern-draft cases; resolve legacy draft accessibility and remaining reconnect lifecycle cases before verification.
+
+
+## tab-database-reconnect — manual-feedback follow-ups re-review round 3 (PR #89)
+
+### Status
+
+CHANGES REQUIRED
+
+Reviewed by Codex, 2026-11-01, branch `fix/tab-database-reconnect`, HEAD `9c897b37`. Fix range: `git diff HEAD~1..HEAD` (`c8e20458..9c897b37`). Read workflow, round 2 findings, complete fix diff, affected production consumers and committed tests. No application source or tests changed.
+
+### Findings
+
+**P0:** None established.
+
+**P1:** None established.
+
+**FU-R3-P2-1 — Unresolved-table notices never reach the save-review dialog.** `src/screens/connection/hooks/useConnectionActions.ts:556-573` adds skipped-table notices to the action getter, and `:795-816` uses it to open review, but the rendered dialog gets `objectSaveNotices` from `useObjectSaveReview` (`src/screens/connection/ConnectionScreen.tsx:832-837,1072`). That hook still collects only object-editor notices (`src/screens/connection/hooks/useObjectSaveReview.ts:23-40`), with no new-table subscription or collector. With only an unresolved legacy table, Cmd+S opens an empty review without the promised explanation; with a valid table plus an unresolved table, review shows the valid SQL and can save it without identifying the omitted draft. The new collector tests assert `unresolved` metadata, not what this consumer renders.
+
+**Required fix:** Feed unresolved-table notices into the actual rendered review through a shared authoritative collection path, reactive to table drafts and open-window identity. Keep existing live object SQL/conflict/skip behavior. Add rendered save-review regressions for unresolved-only and mixed valid/unresolved drafts, including changes while review is open; assert the omitted draft name/reason is visible and no unresolved CREATE is dispatched.
+
+**FU-R3-P2-2 — Unresolved drafts can still lose their only discard path through sidebar filtering/deduplication.** `src/screens/connection/ConnectionScreen.tsx:455-456` omits closed drafts with a blank edited name, even though the collector reports them unresolved using their window id. For named drafts, `:461` assigns the currently selected schema, then `:478-483` deduplicates against database tables and other drafts solely by schema/name. Example: closed legacy `table:tenant.eu.untitled`, edited name `orders`, while `public.orders` is listed: the unresolved item is discarded from the sidebar model. Likewise two unresolved drafts called `orders` expose only one. The notice directs the user to sidebar Drop, but that item is absent; the visible real table's Drop operates on the real table, not the hidden draft. No destructive action was run. This is incomplete resolution of FU-R2-P2-1, not a claim that name deduplication was introduced in this commit.
+
+**Required fix:** Preserve separate sidebar identities for unresolved draft window ids regardless of duplicate/blank display names; provide a fallback label and an explicit unresolved indication. Keep their local discard action available without routing through a real table item. Add mounted sidebar controls for collisions with a database table, another draft, and blank names; verify Drop clears only the chosen draft and never dispatches database DDL.
+
+### Round 2 disposition
+
+| Finding | Round 3 result |
+| --- | --- |
+| FU-R2-P2-1 — legacy unresolved drafts | **Partially resolved, still open.** Collector reports unresolved work; ordinary named noncolliding closed drafts now appear, opening warns, cloning is disabled, and local Drop uses the original draft key. Structured open windows remain authoritative and dotted legacy SQL is withheld when closed. Actual save-review wiring and sidebar edge cases remain the two findings above. |
+| FU-R2-P2-2 — reconnect prompt lifecycle | **Resolved for the reviewed same-situation handoff model, with native limitations below.** A single module-level pending dialog serializes questions; its key includes tab/profile/override/runtime/problem. Cleanup removes an obsolete asker; settlement wakes mounted waiters. Same-key remount takes ownership of the existing question and receives its answer through its live callback; different tab/target/runtime cannot take that answer and may ask after settlement. This deliberately transfers the pending question for the identical situation rather than opening a fresh native dialog. An answer with no eligible mounted owner authorizes nothing. |
+
+### Compatibility and test quality
+
+- **Sidebar list/open/clone/drop:** modern recorded drafts retain original keys and recorded schemas; open-window recovery and same-key reopen tests pass. Unresolved open is refused with an explanatory warning; unresolved Clone is disabled. Local Drop retains confirmation and clears the original draft, while modern Clone still copies columns into its independent identity. These menu actions were source-traced, not exercised in a mounted sidebar; collisions/blank names above remain untested. No full close/reopen/edit/save/native-DDL UI test was added.
+- **Mixed work/save:** collector tests now cover valid plus unresolved drafts and authoritative open legacy identity; duplicate destination refusal and dotted-schema coverage remain. Valid SQL stays separate from unresolved work and save cleanup iterates collected valid entries only. Collector metadata alone does not prove save-review feedback, as FU-R3-P2-1 demonstrates. Existing object-review tests exercise the unchanged object-only path and therefore miss the new integration gap.
+- **Reconnect:** eight component tests pass using the real banner and runtime store with mocked native confirmation. Deferred cases cover same-key unmount/remount before answer (one dialog, replacement callback only), answer while unmounted followed by a later prompt, same-message target change followed by a serialized new prompt, runtime replacement, and a different tab waiting for the original dialog to settle. Live Not now stays quiet across rerender/remount; unknown target retains its banner without asking. Matching questions are keyed by identity rather than display text alone.
+- **Reconnect coverage limits:** no native desktop/navigation interaction, actual reload callback integration, or target-change-away-and-back test. Tab switching is represented by unmount/remount with a different tab id, not a full layout test. Runtime replacement test uses a fresh healthy id rather than a second refused runtime. Rejection is handled as cancellation in source but lacks a committed rejection test. Global coordinator state is not reset between tests; unique runtime ids and fully settled promises isolate the current cases, but future deferred tests must settle pending dialogs. No additional production defect established from these coverage limits.
+- Runtime admission, target resolution, SQL execution wrappers, backend and destructive-database confirmation behavior were not changed by this fix. Prior D3 verification remains historical evidence; no new bypass established in reviewed paths.
+
+### Verification
+
+- `npm run build`: **passed**, exit 0; TypeScript + Vite. Existing externalization/dynamic-import/chunk-size warnings. Log `/tmp/pdb-fu-r3-build.log`.
+- `npm run test:run -- --exclude '**/.claude/**'`: **291 files passed / 1 skipped; 2503 tests passed / 1 skipped**, exit 0. Log `/tmp/pdb-fu-r3-tests.log`.
+- Findings established by production caller/data-flow inspection; no additional scratch probes run. Passing suite does not exercise the missing save-review wiring or mounted sidebar edge cases.
+- Rust unchanged; not rerun. No native desktop, live database, restart, SSH, Touch ID or engine-matrix verification. No Docker/container access, secret retrieval, commit, push or merge.
+- Only this review append retained; pre-existing untracked `.claude/launch.json` preserved. `git diff --check` run after append.
+
+**Verdict at `9c897b37`: CHANGES REQUIRED.** Reconnect lifecycle is repaired for the reviewed handoff model; finish actual unresolved-draft save feedback and collision-safe discard access before verification.
