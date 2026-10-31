@@ -1,6 +1,9 @@
 import { useCallback, useRef } from "preact/hooks";
 
-import { newTableDraftWindow } from "../lib/newTableDrafts";
+import {
+  newTableDraftWindow,
+  UNRESOLVED_DRAFT_REASON,
+} from "../lib/newTableDrafts";
 import { assertTabTarget } from "src/lib/tabs/assertTabTarget";
 import type {
   DatabaseEngine,
@@ -246,13 +249,19 @@ export function getNewTableDraftEntries(args: {
   tabId: string;
   openWindows: Record<string, OpenWindow[]>;
   engine: DatabaseEngine | undefined;
-}): { data: NewTableDraftEntry[]; error: string | null } {
+}): {
+  data: NewTableDraftEntry[];
+  error: string | null;
+  /** Drafts not run because their identity cannot be told (window ids). */
+  unresolved: { windowId: string; name: string }[];
+} {
   const s = useConnectionStore.getState();
   const drafts = s.newTableData[args.tabId] ?? {};
   const windows = args.openWindows[args.tabId] ?? [];
   const windowsById = new Map(windows.map((w) => [w.id, w]));
 
   const result: NewTableDraftEntry[] = [];
+  const unresolved: { windowId: string; name: string }[] = [];
 
   // Two drafts creating the same table: neither runs (no duplicate CREATE,
   // and no edits silently dropped); the user renames or discards one.
@@ -263,10 +272,17 @@ export function getNewTableDraftEntries(args: {
     // the schema it records; one whose identity cannot be told is not run.
     const window =
       windowsById.get(windowId) ?? newTableDraftWindow(windowId, draft);
-    if (!window || window.type !== "table" || !window.table.new) continue;
+    if (!window) {
+      unresolved.push({
+        windowId,
+        name: draft?.tableName?.trim() || windowId,
+      });
+      continue;
+    }
+    if (window.type !== "table" || !window.table.new) continue;
 
     if (!isValidNewTable(draft)) {
-      return { data: [], error: "Invalid new table data" };
+      return { data: [], error: "Invalid new table data", unresolved };
     }
 
     const validColumns = draft.columns.filter((col) => col.column_name?.trim());
@@ -276,6 +292,7 @@ export function getNewTableDraftEntries(args: {
       return {
         data: [],
         error: `Two unsaved new tables are both named "${tableName}". Rename or discard one of them, then save.`,
+        unresolved,
       };
     }
     targets.add(target);
@@ -293,7 +310,7 @@ export function getNewTableDraftEntries(args: {
     });
   }
 
-  return { data: result, error: null };
+  return { data: result, error: null, unresolved };
 }
 
 function patchMapHasAnyChanges(patchMap: PatchMap | undefined): boolean {
@@ -538,8 +555,22 @@ export function useConnectionActions(
 
   const getObjectSaveNotices = useCallback((): ObjectSaveNotice[] => {
     if (!engine) return [];
-    return collectObjectSaveNotices({ tabId: activeProfileScreen, engine });
-  }, [engine, activeProfileScreen]);
+    // New-table drafts this save cannot run are reported with the objects'.
+    const unresolvedTables: ObjectSaveNotice[] = getNewTableDraftEntries({
+      tabId: activeProfileScreen,
+      openWindows,
+      engine,
+    }).unresolved.map((draft) => ({
+      kind: "skipped",
+      key: draft.windowId,
+      name: draft.name,
+      reason: UNRESOLVED_DRAFT_REASON,
+    }));
+    return [
+      ...collectObjectSaveNotices({ tabId: activeProfileScreen, engine }),
+      ...unresolvedTables,
+    ];
+  }, [engine, activeProfileScreen, openWindows]);
 
   const getObjectChangeSummary = useCallback((): ObjectChangeSummary => {
     if (!engine) return emptyObjectChangeSummary();

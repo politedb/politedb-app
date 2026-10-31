@@ -455,12 +455,14 @@ export function ConnectionScreen() {
         const rawName = data?.tableName?.trim() ?? "";
         if (!rawName) return null;
         const window = newTableDraftWindow(windowId, data);
-        if (!window) return null;
+        // One whose schema cannot be told is still listed (so it can be
+        // discarded), under the schema being shown.
         return {
-          schema: window.table.schema,
+          schema: window?.table.schema ?? activeSchema,
           name: rawName,
           new: true,
           draftWindowId: windowId,
+          ...(window ? {} : { unresolvedDraft: true }),
         } as TableItem;
       })
       .filter((t): t is TableItem => !!t)
@@ -998,6 +1000,7 @@ export function ConnectionScreen() {
           />
 
           <TabTargetBanner
+            tabId={activeProfileScreen}
             target={activeTarget}
             runtimeId={runtimeConnectionId}
             onReconnect={() => void reloadRuntime()}

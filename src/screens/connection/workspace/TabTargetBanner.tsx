@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { confirmDialog } from "src/lib/system-dialog";
 import {
   RUNTIME_STALE_MESSAGE,
@@ -35,8 +35,45 @@ export function tabTargetProblem(
   return null;
 }
 
-/** Problems already asked about, so a remount or re-render asks once. */
-const askedReconnect = new Set<string>();
+/*
+ * The reconnect question (one native dialog at a time). A question is about
+ * one situation: a tab, what it is opened on, its connection and the
+ * problem. Its answer goes to the screen that shows that same situation
+ * when it comes, if any; a screen that replaced the one that asked (left and
+ * back) inherits the open question instead of asking twice. An answer with
+ * nobody to take it authorizes nothing, and the question may be asked again.
+ */
+type Asker = { key: string; reconnect: () => void };
+
+/** Situations answered while shown: not asked again. */
+const answered = new Set<string>();
+let open: { key: string; asker: Asker | null } | null = null;
+const settledListeners = new Set<() => void>();
+
+function ask(asker: Asker, question: string) {
+  open = { key: asker.key, asker };
+  void confirmDialog(question, {
+    title: "Reconnect tab",
+    kind: "warning",
+    okLabel: "Reconnect",
+    cancelLabel: "Not now",
+  }).then(
+    (ok) => settle(ok),
+    () => settle(false)
+  );
+}
+
+function settle(ok: boolean) {
+  const question = open;
+  open = null;
+  const taker = question?.asker;
+  if (question && taker && taker.key === question.key) {
+    answered.add(question.key);
+    if (ok) taker.reconnect();
+  }
+  // Screens waiting for the dialog (or left unanswered) may ask now.
+  settledListeners.forEach((listener) => listener());
+}
 
 /**
  * A tab that cannot be used as it is: a connection it can reconnect (its
@@ -45,6 +82,7 @@ const askedReconnect = new Set<string>();
  * reopening the tab fixes, stays a banner.
  */
 export function TabTargetBanner(props: {
+  tabId: string;
   target: ResolvedTabTarget;
   runtimeId: string | undefined;
   onReconnect: () => void;
@@ -56,41 +94,39 @@ export function TabTargetBanner(props: {
     [props.target, props.runtimeId, targets, refused]
   );
   const canReconnect = props.target.state === "ok";
+  const intended = props.target.intended;
+  const key =
+    problem && canReconnect
+      ? JSON.stringify([
+          props.tabId,
+          intended?.profileId ?? null,
+          intended?.override ?? null,
+          props.runtimeId ?? null,
+          problem,
+        ])
+      : null;
 
   const reconnectRef = useRef(props.onReconnect);
   reconnectRef.current = props.onReconnect;
-  const currentRef = useRef({ problem, runtimeId: props.runtimeId });
-  currentRef.current = { problem, runtimeId: props.runtimeId };
+  const [settledTick, setSettledTick] = useState(0);
+  useEffect(() => {
+    const listener = () => setSettledTick((n) => n + 1);
+    settledListeners.add(listener);
+    return () => {
+      settledListeners.delete(listener);
+    };
+  }, []);
 
   useEffect(() => {
-    if (!problem || !canReconnect) return;
-    const runtimeId = props.runtimeId;
-    const key = `${runtimeId ?? ""}\0${problem}`;
-    if (askedReconnect.has(key)) return;
-    askedReconnect.add(key);
-    // An answer counts only while this tab still shows this problem: once
-    // it is gone (screen left, tab changed, problem replaced) the answer is
-    // dropped, and the problem may be asked about again later.
-    let live = true;
-    void confirmDialog(problem, {
-      title: "Reconnect tab",
-      kind: "warning",
-      okLabel: "Reconnect",
-      cancelLabel: "Not now",
-    }).then((ok) => {
-      if (!live) {
-        askedReconnect.delete(key);
-        return;
-      }
-      const now = currentRef.current;
-      if (ok && now.problem === problem && now.runtimeId === runtimeId) {
-        reconnectRef.current();
-      }
-    });
+    if (!key || !problem || answered.has(key)) return;
+    const asker: Asker = { key, reconnect: () => reconnectRef.current() };
+    if (!open) ask(asker, problem);
+    else if (open.key === key) open.asker = asker;
+    // Another question is open: this one is asked once it settles.
     return () => {
-      live = false;
+      if (open?.asker === asker) open.asker = null;
     };
-  }, [problem, canReconnect, props.runtimeId]);
+  }, [key, problem, settledTick]);
 
   if (!problem || canReconnect) return null;
   return (

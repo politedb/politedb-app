@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/preact";
+import { act, render, screen, waitFor } from "@testing-library/preact";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const m = vi.hoisted(() => ({ confirm: vi.fn() }));
@@ -12,6 +12,11 @@ const ok: ResolvedTabTarget = {
   state: "ok",
   intended: { profileId: "p1", override: null },
   display: "app",
+};
+const other: ResolvedTabTarget = {
+  state: "ok",
+  intended: { profileId: "p1", override: "other" },
+  display: "other",
 };
 const unknown: ResolvedTabTarget = {
   state: "unknown",
@@ -37,23 +42,48 @@ function staleRuntime() {
   return id;
 }
 
+/** The native dialog, answered when the test says so. */
+function deferredDialogs() {
+  const answers: Array<(ok: boolean) => void> = [];
+  m.confirm.mockImplementation(
+    () => new Promise<boolean>((r) => answers.push(r))
+  );
+  return {
+    count: () => answers.length,
+    answer: async (index: number, value: boolean) => {
+      await act(async () => {
+        answers[index]!(value);
+        await Promise.resolve();
+      });
+    },
+  };
+}
+
+function banner(
+  props: Partial<Parameters<typeof TabTargetBanner>[0]> & {
+    runtimeId: string;
+  }
+) {
+  return (
+    <TabTargetBanner
+      tabId="tab-1"
+      target={ok}
+      onReconnect={vi.fn()}
+      {...props}
+    />
+  );
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   useRuntimeTargetsStore.setState({ targets: {}, owners: {}, refused: {} });
 });
 
-describe("a tab whose connection must be reconnected", () => {
+describe("the reconnect question", () => {
   it("asks natively and reconnects on Reconnect, with no banner", async () => {
     m.confirm.mockResolvedValue(true);
     const onReconnect = vi.fn();
-    const runtimeId = staleRuntime();
-    render(
-      <TabTargetBanner
-        target={ok}
-        runtimeId={runtimeId}
-        onReconnect={onReconnect}
-      />
-    );
+    render(banner({ runtimeId: staleRuntime(), onReconnect }));
     await waitFor(() => expect(onReconnect).toHaveBeenCalledTimes(1));
     expect(m.confirm).toHaveBeenCalledWith(
       "The connection settings changed. Reconnect this tab.",
@@ -66,88 +96,95 @@ describe("a tab whose connection must be reconnected", () => {
     m.confirm.mockResolvedValue(false);
     const onReconnect = vi.fn();
     const runtimeId = staleRuntime();
-    const view = render(
-      <TabTargetBanner
-        target={ok}
-        runtimeId={runtimeId}
-        onReconnect={onReconnect}
-      />
-    );
+    const view = render(banner({ runtimeId, onReconnect }));
     await waitFor(() => expect(m.confirm).toHaveBeenCalledTimes(1));
-    view.rerender(
-      <TabTargetBanner
-        target={{ ...ok }}
-        runtimeId={runtimeId}
-        onReconnect={onReconnect}
-      />
-    );
-    await Promise.resolve();
+    view.rerender(banner({ runtimeId, onReconnect, target: { ...ok } }));
+    view.unmount();
+    render(banner({ runtimeId, onReconnect }));
+    await act(async () => {});
     expect(m.confirm).toHaveBeenCalledTimes(1);
     expect(onReconnect).not.toHaveBeenCalled();
   });
 
-  it("drops an answer given after the screen was left, and may ask again", async () => {
-    let answer!: (ok: boolean) => void;
-    m.confirm.mockImplementation(
-      () => new Promise<boolean>((r) => (answer = r))
-    );
-    const onReconnect = vi.fn();
+  it("gives the answer to the screen shown when it comes (left and back before answering)", async () => {
+    const dialogs = deferredDialogs();
     const runtimeId = staleRuntime();
-    const first = render(
-      <TabTargetBanner
-        target={ok}
-        runtimeId={runtimeId}
-        onReconnect={onReconnect}
-      />
-    );
-    await waitFor(() => expect(m.confirm).toHaveBeenCalledTimes(1));
-    first.unmount();
-    answer(true);
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(onReconnect).not.toHaveBeenCalled();
-
-    // Back on the screen with the same problem: asked again.
-    m.confirm.mockResolvedValue(true);
-    const again = vi.fn();
-    render(
-      <TabTargetBanner target={ok} runtimeId={runtimeId} onReconnect={again} />
-    );
-    await waitFor(() => expect(again).toHaveBeenCalledTimes(1));
-    expect(m.confirm).toHaveBeenCalledTimes(2);
+    const first = vi.fn();
+    const second = vi.fn();
+    const before = render(banner({ runtimeId, onReconnect: first }));
+    await waitFor(() => expect(dialogs.count()).toBe(1));
+    before.unmount();
+    render(banner({ runtimeId, onReconnect: second }));
+    await act(async () => {});
+    expect(dialogs.count()).toBe(1); // never two dialogs
+    await dialogs.answer(0, true);
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledTimes(1);
   });
 
-  it("drops an answer once the tab moved to another connection", async () => {
-    let answer!: (ok: boolean) => void;
-    m.confirm.mockImplementation(
-      () => new Promise<boolean>((r) => (answer = r))
-    );
-    const onReconnect = vi.fn();
+  it("authorizes nothing when answered with no screen showing it, and asks again later", async () => {
+    const dialogs = deferredDialogs();
     const runtimeId = staleRuntime();
-    const view = render(
-      <TabTargetBanner
-        target={ok}
-        runtimeId={runtimeId}
-        onReconnect={onReconnect}
-      />
-    );
-    await waitFor(() => expect(m.confirm).toHaveBeenCalledTimes(1));
-    view.rerender(
-      <TabTargetBanner
-        target={ok}
-        runtimeId="rt-new"
-        onReconnect={onReconnect}
-      />
-    );
-    answer(true);
-    await Promise.resolve();
-    await Promise.resolve();
+    const onReconnect = vi.fn();
+    const view = render(banner({ runtimeId, onReconnect }));
+    await waitFor(() => expect(dialogs.count()).toBe(1));
+    view.unmount();
+    await dialogs.answer(0, true);
     expect(onReconnect).not.toHaveBeenCalled();
+
+    const again = vi.fn();
+    render(banner({ runtimeId, onReconnect: again }));
+    await waitFor(() => expect(dialogs.count()).toBe(2));
+    await dialogs.answer(1, true);
+    expect(again).toHaveBeenCalledTimes(1);
+  });
+
+  it("never uses an answer for a tab whose target changed meanwhile (same message)", async () => {
+    const dialogs = deferredDialogs();
+    const runtimeId = staleRuntime();
+    const onReconnect = vi.fn();
+    const view = render(banner({ runtimeId, onReconnect }));
+    await waitFor(() => expect(dialogs.count()).toBe(1));
+    view.rerender(banner({ runtimeId, onReconnect, target: other }));
+    await dialogs.answer(0, true);
+    expect(onReconnect).not.toHaveBeenCalled();
+    // The new situation is asked about on its own.
+    await waitFor(() => expect(dialogs.count()).toBe(2));
+    await dialogs.answer(1, true);
+    expect(onReconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it("never uses an answer once the tab moved to another connection", async () => {
+    const dialogs = deferredDialogs();
+    const onReconnect = vi.fn();
+    const view = render(banner({ runtimeId: staleRuntime(), onReconnect }));
+    await waitFor(() => expect(dialogs.count()).toBe(1));
+    view.rerender(banner({ runtimeId: "rt-fresh", onReconnect }));
+    await dialogs.answer(0, true);
+    expect(onReconnect).not.toHaveBeenCalled();
+  });
+
+  it("never uses an answer for another tab", async () => {
+    const dialogs = deferredDialogs();
+    const runtimeId = staleRuntime();
+    const first = vi.fn();
+    const view = render(banner({ runtimeId, onReconnect: first }));
+    await waitFor(() => expect(dialogs.count()).toBe(1));
+    view.unmount();
+    const otherTab = vi.fn();
+    render(banner({ runtimeId, onReconnect: otherTab, tabId: "tab-2" }));
+    await dialogs.answer(0, true);
+    expect(first).not.toHaveBeenCalled();
+    expect(otherTab).not.toHaveBeenCalled();
+    // tab-2 is asked about itself once the first dialog is gone.
+    await waitFor(() => expect(dialogs.count()).toBe(2));
+    await dialogs.answer(1, false);
   });
 
   it("keeps the banner, without asking, for a tab whose target is unknown", () => {
     render(
       <TabTargetBanner
+        tabId="tab-1"
         target={unknown}
         runtimeId={undefined}
         onReconnect={vi.fn()}

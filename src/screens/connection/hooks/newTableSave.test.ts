@@ -1,6 +1,8 @@
 import { act, renderHook } from "@testing-library/preact";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const m = vi.hoisted(() => ({ showMessage: vi.fn(async () => {}) }));
+vi.mock("src/lib/system-dialog", () => ({ showMessage: m.showMessage }));
 vi.mock("src/stores/persistentStore", () => ({
   usePersistentStore: { getState: () => ({ scheduleSave: () => {} }) },
 }));
@@ -116,9 +118,44 @@ describe("saving new-table drafts", () => {
     }
   );
 
-  it("never guesses the schema of an older draft with an ambiguous window id", () => {
+  it("never guesses the schema of an older draft with an ambiguous window id, and says so", () => {
     setDraft("table:tenant.eu.untitled", draft("orders"));
-    expect(collect()).toEqual({ data: [], error: null });
+    expect(collect()).toEqual({
+      data: [],
+      error: null,
+      unresolved: [{ windowId: "table:tenant.eu.untitled", name: "orders" }],
+    });
+  });
+
+  it("still saves the other drafts next to an unresolved one", () => {
+    setDraft("table:tenant.eu.untitled", draft("orders"));
+    setDraft(DRAFT_ID, {
+      ...draft("invoices"),
+      schema: "public",
+      windowName: "untitled_table_1",
+    });
+    const entries = collect();
+    expect(entries.data.map((e) => e.window.id)).toEqual([DRAFT_ID]);
+    expect(entries.unresolved.map((u) => u.name)).toEqual(["orders"]);
+  });
+
+  it("takes an older draft's schema from its open window", () => {
+    const windowId = "table:tenant.eu.untitled";
+    setDraft(windowId, draft("orders"));
+    useScreenStore.setState({
+      openWindows: {
+        [TAB]: [
+          {
+            id: windowId,
+            type: "table",
+            table: { schema: "tenant.eu", name: "untitled", new: true },
+          } as OpenWindow,
+        ],
+      },
+    });
+    const entries = collect();
+    expect(entries.unresolved).toEqual([]);
+    expect(entries.data[0]!.sql).toContain('"tenant.eu"."orders"');
   });
 
   it("still saves an older draft whose window id is unambiguous", () => {
@@ -144,6 +181,26 @@ describe("saving new-table drafts", () => {
 });
 
 describe("reopening a closed draft from the sidebar", () => {
+  it("does not open an older draft whose schema cannot be told, and says why", async () => {
+    const windowId = "table:tenant.eu.untitled";
+    setDraft(windowId, draft("orders"));
+    const { result } = renderHook(() => useConnectionWindows(TAB));
+    await act(async () => {
+      await result.current.openTable({
+        schema: "public",
+        name: "orders",
+        new: true,
+        draftWindowId: windowId,
+        unresolvedDraft: true,
+      });
+    });
+    expect(useScreenStore.getState().openWindows[TAB]).toEqual([]);
+    expect(m.showMessage).toHaveBeenCalledWith(
+      expect.stringContaining("schema cannot be determined"),
+      expect.objectContaining({ kind: "warning" })
+    );
+  });
+
   it("reopens its own window and draft, never a second draft", async () => {
     setDraft(DRAFT_ID, {
       ...draft("orders"),

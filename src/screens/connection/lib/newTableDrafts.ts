@@ -8,6 +8,9 @@ import type { TableWindow } from "src/types";
  * splitting the window id, which is ambiguous once a name contains a dot.
  */
 
+export const UNRESOLVED_DRAFT_REASON =
+  "it was drafted in an earlier version and its schema cannot be determined; discard it from the sidebar (Drop...) and create it again";
+
 /**
  * The window of the draft stored under `windowId` (open or not), or null
  * when its identity cannot be told: a draft saved before identities were

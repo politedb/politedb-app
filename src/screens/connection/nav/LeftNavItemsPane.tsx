@@ -334,7 +334,10 @@ export function LeftNavItemsPane({
           {
             type: "item",
             label: "Clone...",
-            disabled: isProfileLocked || !supportsTableMutations,
+            disabled:
+              isProfileLocked ||
+              !supportsTableMutations ||
+              !!tableMenu.table.unresolvedDraft,
             onClick: () => {
               if (tableMenu.table.new) {
                 setCloneNewTableTarget(tableMenu.table);

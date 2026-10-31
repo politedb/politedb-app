@@ -1,5 +1,9 @@
 import { useCallback, useMemo } from "preact/hooks";
-import { newTableDraftWindow } from "../lib/newTableDrafts";
+import { showMessage } from "src/lib/system-dialog";
+import {
+  newTableDraftWindow,
+  UNRESOLVED_DRAFT_REASON,
+} from "../lib/newTableDrafts";
 import type {
   DatabaseCatalogKind,
   DatabaseCatalogWindow,
@@ -202,7 +206,13 @@ export function useConnectionWindows(
               draftWindowId
             ];
           const win = newTableDraftWindow(draftWindowId, draft);
-          if (!win) return draftWindowId;
+          if (!win) {
+            void showMessage(
+              `This unsaved table cannot be opened: ${UNRESOLVED_DRAFT_REASON}.`,
+              { title: "Unsaved table", kind: "warning" }
+            );
+            return draftWindowId;
+          }
           addWindow(activeProfileScreen, win);
         }
         setActiveWindowId(activeProfileScreen, draftWindowId);
