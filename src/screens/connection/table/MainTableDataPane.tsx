@@ -971,6 +971,7 @@ export function MainTableDataPane(props: {
       const { schema, name } = activeTableWindow.table;
       runImport({
         connectionId: meta.connectionId,
+        tabId: rt.profileId,
         schema,
         tableName: name,
         columns: meta.columns ?? [],
@@ -1250,6 +1251,7 @@ export function MainTableDataPane(props: {
       />
 
       <MainTableDialogs
+        tabId={rt.profileId}
         sqlDialogOpen={sqlDialogOpen}
         setSqlDialogOpen={setSqlDialogOpen}
         sqlPreview={sqlPreview}

@@ -26,17 +26,29 @@ type RuntimeTargetsState = {
   forget: (runtimeId: string) => void;
 };
 
+function withOwner(
+  owners: Record<string, string>,
+  runtimeId: string,
+  ownerTabId: string | undefined
+): Record<string, string> {
+  if (!ownerTabId || owners[runtimeId]) return owners;
+  return { ...owners, [runtimeId]: ownerTabId };
+}
+
 export const useRuntimeTargetsStore = create<RuntimeTargetsState>((set) => ({
   targets: {},
   owners: {},
   refused: {},
+  // An owner, once recorded, never changes until the connection is
+  // forgotten: a tab that passed the guard for a connection stays the one
+  // the dispatch guard checks it against (D3).
   register: (runtimeId, target, ownerTabId) =>
     set((s) => ({
       targets: { ...s.targets, [runtimeId]: target ?? null },
-      owners: ownerTabId ? { ...s.owners, [runtimeId]: ownerTabId } : s.owners,
+      owners: withOwner(s.owners, runtimeId, ownerTabId),
     })),
   setOwner: (runtimeId, ownerTabId) =>
-    set((s) => ({ owners: { ...s.owners, [runtimeId]: ownerTabId } })),
+    set((s) => ({ owners: withOwner(s.owners, runtimeId, ownerTabId) })),
   markRefused: (runtimeId, reason) =>
     set((s) =>
       s.refused[runtimeId] === reason

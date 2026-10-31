@@ -84,6 +84,7 @@ describe("dropTable", () => {
     expect(runSqlWithHistory).toHaveBeenCalledWith({
       connectionId: "conn-1",
       sql: expect.stringMatching(/DROP TABLE .*orders/i),
+      tabId: "tab-1",
     });
     expect(refreshSchemaAndTables).toHaveBeenCalledTimes(1);
     expect(closeWindow.mock.calls.map(([id]) => id)).toEqual([

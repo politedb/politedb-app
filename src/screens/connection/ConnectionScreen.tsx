@@ -553,6 +553,13 @@ export function ConnectionScreen() {
     profileId: activeProfileScreen,
     currentDatabase,
   });
+  // Work run from this screen's windows belongs to this tab, fixed when it
+  // starts, whichever tab is active later (D3).
+  const runSqlInTab = useCallback(
+    (args: { connectionId: string; sql: string; windowId?: string }) =>
+      runSqlWithHistory({ ...args, tabId: activeProfileScreen }),
+    [runSqlWithHistory, activeProfileScreen]
+  );
 
   // While the review dialog runs a save, errors go to that dialog (which
   // stays open and shows them) instead of a separate error message.
@@ -932,7 +939,7 @@ export function ConnectionScreen() {
       limit: currentLimit,
       offset: currentOffset,
       loadError,
-      runSqlWithHistory,
+      runSqlWithHistory: runSqlInTab,
       captureHistoryTarget,
       refreshSchemaAndTables,
       newTableSaveRef,
@@ -954,7 +961,7 @@ export function ConnectionScreen() {
       currentLimit,
       currentOffset,
       loadError,
-      runSqlWithHistory,
+      runSqlInTab,
       captureHistoryTarget,
       refreshSchemaAndTables,
       pendingTableAction,
@@ -1122,6 +1129,7 @@ export function ConnectionScreen() {
           engine={engine}
           runtimeConnectionId={runtimeConnectionId}
           profileId={connectionProfileId}
+          tabId={activeProfileScreen}
           databaseLabel={diagramDatabase}
         />
 

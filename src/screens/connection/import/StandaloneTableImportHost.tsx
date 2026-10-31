@@ -269,6 +269,7 @@ function ImportSession(
         void imp
           .runImport({
             connectionId: target.connectionId,
+            tabId: profileScreenId,
             schema: target.schema,
             tableName: target.tableName,
             columns: phase.columns,

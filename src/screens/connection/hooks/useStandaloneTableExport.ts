@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import { checkTabTarget } from "src/lib/tabs/assertTabTarget";
 import type { DatabaseEngine } from "src/types";
 import {
   loadStandaloneExportMetadata,
@@ -61,6 +62,12 @@ export function useStandaloneTableExport(args: UseStandaloneTableExportArgs) {
           target: next,
           message: "Connection is not available.",
         });
+        return;
+      }
+
+      const refusal = checkTabTarget(profileScreenId, next.connectionId);
+      if (refusal) {
+        setPhase({ status: "error", target: next, message: refusal.message });
         return;
       }
 

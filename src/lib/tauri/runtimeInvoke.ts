@@ -14,7 +14,11 @@ function runtimeIdOf(args?: InvokeArgs): string | undefined {
       : undefined;
   };
   const id =
-    a.connectionId ?? a.connection_id ?? nested("input") ?? nested("payload");
+    a.connectionId ??
+    a.connection_id ??
+    a.runtimeConnectionId ??
+    nested("input") ??
+    nested("payload");
   return typeof id === "string" ? id : undefined;
 }
 

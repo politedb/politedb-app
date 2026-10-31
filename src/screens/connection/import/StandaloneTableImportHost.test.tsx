@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/preact";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { StandaloneTableImportHost } from "./StandaloneTableImportHost";
 import { useScreenStore } from "src/stores/screen";
+import { resetTabRuntimes, seedTabRuntime } from "src/test/fixtures/tabRuntime";
 
 // jsdom has neither ResizeObserver nor a 2D canvas (the preview grid).
 class NoopResizeObserver {
@@ -66,6 +67,8 @@ beforeEach(() => {
   useScreenStore.setState({
     profileTabs: [{ id: "t1", isLocked: false } as never],
   });
+  resetTabRuntimes();
+  seedTabRuntime({ tabId: "t1", runtimeId: "c1" });
   mocks.readTextFile.mockReset().mockResolvedValue("id,name\n1,Ada\n");
   mocks.openDialog.mockReset().mockResolvedValue("/data/users.csv");
   mocks.loadMetadata.mockReset().mockResolvedValue({

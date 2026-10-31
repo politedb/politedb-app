@@ -16,6 +16,7 @@ import {
 import "src/lib/runtimeConnection";
 import { runQuery } from "src/lib/tauri/operation";
 import { connectionRemove } from "src/lib/tauri/connection";
+import { signalHealthInspectorBackend } from "src/lib/tauri/health-inspector-actions";
 import { useConnectionStore } from "src/stores/connection";
 import { useRuntimeTargetsStore } from "src/stores/runtimeTargets";
 import { useScreenStore } from "src/stores/screen";
@@ -72,6 +73,15 @@ describe("checkTabTarget (D3)", () => {
     });
     expect(codeOf("a", "rb")).toBe("RUNTIME_NOT_AUTHORITATIVE");
     expect(codeOf("b", "ra")).toBe("RUNTIME_NOT_AUTHORITATIVE");
+  });
+
+  it("never hands a connection to another tab once it has an owner", () => {
+    seedTabRuntime({ tabId: "b", runtimeId: "rb" });
+    useRuntimeTargetsStore.getState().setOwner("ra", "b");
+    useRuntimeTargetsStore.getState().register("ra", null, "b");
+    expect(useRuntimeTargetsStore.getState().owners.ra).toBe("a");
+    useScreenStore.getState().updateTab("b", { runtimeConnectionId: "ra" });
+    expect(codeOf("b", "ra")).not.toBeNull();
   });
 
   it("refuses a superseded connection of the same tab and target", () => {
@@ -149,6 +159,25 @@ describe("the dispatch guard", () => {
     await expect(runQuery("ra", "select 1")).rejects.toThrow(
       "could not be determined"
     );
+    expect(m.invoke).not.toHaveBeenCalled();
+  });
+
+  it("guards health inspector signals, sent with runtimeConnectionId", async () => {
+    const signal = (runtimeConnectionId: string) =>
+      signalHealthInspectorBackend({
+        runtimeConnectionId,
+        pid: 42,
+        backendToken: "t",
+        kind: "terminate",
+      });
+    m.invoke.mockResolvedValue({ outcome: "signalled" });
+    await expect(signal("ra")).resolves.toBe("signalled");
+    expect(m.invoke).toHaveBeenCalledTimes(1);
+
+    m.invoke.mockClear();
+    useScreenStore.getState().updateTab("a", { target: { kind: "unknown" } });
+    await expect(signal("ra")).resolves.toBe("refused");
+    await expect(signal("orphan")).resolves.toBe("refused");
     expect(m.invoke).not.toHaveBeenCalled();
   });
 });

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import { checkTabTarget } from "src/lib/tabs/assertTabTarget";
 import { collectHealthInspectorSnapshot } from "src/lib/tauri/health-inspector";
 import type { HealthInspectorSnapshot } from "src/lib/health-inspector/types";
 import type { DatabaseEngine } from "src/types";
@@ -15,6 +16,8 @@ export type HealthInspectorContext = {
   open: boolean;
   runtimeConnectionId?: string;
   profileId?: string | null;
+  /** The connection tab the Inspector belongs to (D3). */
+  tabId?: string | null;
   engine?: DatabaseEngine;
   /**
    * Re-collect this long after each finished snapshot (null = off). These
@@ -236,6 +239,14 @@ export function useDbHealthInspector(ctx: HealthInspectorContext) {
         return;
       }
       const runtimeConnectionId = start.runtimeConnectionId;
+      // D3: only through the Inspector tab's own connection, checked before
+      // the confirmation and again after it.
+      const refusedNow = () =>
+        !!checkTabTarget(start.tabId, runtimeConnectionId);
+      if (refusedNow()) {
+        setSessionActionResult({ ...request, outcome: "refused" });
+        return;
+      }
       const epoch = epochRef.current;
       const attempt = ++attemptRef.current;
       actionLockRef.current = attempt;
@@ -261,8 +272,14 @@ export function useDbHealthInspector(ctx: HealthInspectorContext) {
         !now.open ||
         now.engine !== "postgres" ||
         now.runtimeConnectionId !== runtimeConnectionId ||
+        now.tabId !== start.tabId ||
         !hasProAccessNow()
       ) {
+        release();
+        return;
+      }
+      if (refusedNow()) {
+        setSessionActionResult({ ...request, outcome: "refused" });
         release();
         return;
       }

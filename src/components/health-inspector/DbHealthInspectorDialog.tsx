@@ -94,6 +94,8 @@ type Props = {
   onClose: () => void;
   runtimeConnectionId?: string;
   profileId?: string | null;
+  /** The connection tab the Inspector belongs to (D3). */
+  tabId?: string | null;
   engine?: DatabaseEngine;
   databaseLabel?: string;
 };
@@ -1050,6 +1052,7 @@ export function DbHealthInspectorDialog(props: Props) {
     onClose,
     runtimeConnectionId,
     profileId,
+    tabId,
     engine,
     databaseLabel,
   } = props;
@@ -1077,6 +1080,7 @@ export function DbHealthInspectorDialog(props: Props) {
     open,
     runtimeConnectionId,
     profileId,
+    tabId,
     engine,
     autoRefreshMs,
   });

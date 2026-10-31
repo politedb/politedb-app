@@ -1,4 +1,5 @@
 import { useCallback, useMemo } from "preact/hooks";
+import { assertTabTarget } from "src/lib/tabs/assertTabTarget";
 import type { DatabaseEngine } from "src/types";
 import type { QueryResult } from "src/lib/tauri";
 import { runSqlQuery, startSqlQueryStream } from "src/lib/tauri/query";
@@ -48,12 +49,19 @@ export function useSqlHistoryRunner(opts?: Options) {
     async (args: {
       connectionId: string;
       sql: string;
+      /** The tab the work belongs to, fixed when it starts (D3). */
+      tabId: string;
+      windowId?: string;
     }): Promise<RunSqlReturn> => {
       const { connectionId, sql } = args;
 
-      if (activeTab) {
-        addQueryHistory(activeTab.id, sql);
-      }
+      // D3: the work's own tab, captured now (never whichever tab becomes
+      // active later), must own this connection on its target. Nothing is
+      // sent, or recorded, otherwise.
+      const origin = args.tabId;
+      assertTabTarget(origin, connectionId);
+
+      addQueryHistory(origin, sql);
 
       const isDDL = isDDLStatement(sql);
 
@@ -83,7 +91,6 @@ export function useSqlHistoryRunner(opts?: Options) {
       }
     },
     [
-      activeTab,
       addQueryHistory,
       opts?.metadata,
       opts?.engine,

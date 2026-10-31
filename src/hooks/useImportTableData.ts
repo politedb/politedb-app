@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "preact/hooks";
+import { checkTabTarget } from "src/lib/tabs/assertTabTarget";
 import { openDialog } from "src/lib/system-dialog";
 import { readTextFile } from "src/lib/system-fs";
 import { parseCsv } from "src/utils/csv";
@@ -37,6 +38,8 @@ export type ImportOutcome =
 
 export type ImportConfig = {
   connectionId: string | null;
+  /** The connection tab importing (D3: only through its own connection). */
+  tabId: string;
   schema: string;
   tableName: string;
   columns: ColumnMeta[];
@@ -304,6 +307,7 @@ export function useImportTableData() {
     async (config: ImportConfig): Promise<ImportOutcome> => {
       const {
         connectionId,
+        tabId,
         schema,
         tableName,
         columns,
@@ -360,6 +364,12 @@ export function useImportTableData() {
             .map(importIssueMessage)
             .join("; ")}`
         );
+        return { status: "not-started" };
+      }
+
+      const refusal = checkTabTarget(tabId, connectionId);
+      if (refusal) {
+        setError(refusal.message);
         return { status: "not-started" };
       }
 

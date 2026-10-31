@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useRef } from "preact/hooks";
+import { assertTabTarget } from "src/lib/tabs/assertTabTarget";
 import { isTabTargetError } from "src/lib/tabs/assertTabTarget";
 import type { Dispatch, StateUpdater } from "preact/hooks";
 import {
@@ -241,6 +242,8 @@ export function useAiAssistantSubmit(args: {
   model: string;
   engine: DatabaseEngine;
   runtimeConnectionId?: string;
+  /** The connection tab the assistant works in (D3). */
+  tabId?: string;
   /** The editor's safety mode: data queries need approval in safe/production. */
   querySafetyMode?: QuerySafetyMode;
   activeSchema?: string;
@@ -278,6 +281,7 @@ export function useAiAssistantSubmit(args: {
     model,
     engine,
     runtimeConnectionId,
+    tabId,
     querySafetyMode,
     activeSchema,
     tables,
@@ -408,6 +412,9 @@ export function useAiAssistantSubmit(args: {
       const agentAllowed = agentEligible && hasProAccessNow();
       if (agentEligible && !agentAllowed) onAgentProLocked?.();
       if (agentAllowed && runtimeConnectionId) {
+        // D3: the agent reads only through the tab's own connection, on its
+        // target; the refusal is the answer.
+        assertTabTarget(tabId, runtimeConnectionId);
         try {
           const result = await runAgentTurn({
             providerId,

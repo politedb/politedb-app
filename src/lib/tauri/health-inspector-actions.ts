@@ -1,4 +1,5 @@
 import { invoke } from "./runtimeInvoke";
+import { isTabTargetError } from "src/lib/tabs/assertTabTarget";
 import { noteRuntimeError } from "./runtimeAdmission";
 import { CMD } from "./commands";
 
@@ -10,6 +11,8 @@ export const PRE_DISPATCH_OUTCOMES = [
   "unavailable",
   "busy",
   "setup_failed",
+  // The tab may not use this connection (plan tab-database-reconnect D3).
+  "refused",
 ] as const;
 
 /** Signal sent, refused, or not matched — PostgreSQL answered. */
@@ -76,8 +79,9 @@ export async function signalHealthInspectorBackend(
       noteRuntimeError(target.runtimeConnectionId, result.reason);
     }
     return isSessionActionOutcome(result?.outcome) ? result.outcome : "unknown";
-  } catch {
-    return "unknown";
+  } catch (err) {
+    // Refused before it was sent: certainly not signalled.
+    return isTabTargetError(err) ? "refused" : "unknown";
   }
 }
 

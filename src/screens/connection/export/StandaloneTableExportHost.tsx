@@ -102,6 +102,7 @@ export function StandaloneTableExportHost(props: {
           open
           handleClose={close}
           connectionId={ready.target.connectionId}
+          tabId={props.profileScreenId}
           schema={ready.target.schema}
           tableName={ready.target.tableName}
           columns={ready.metadata.columns}

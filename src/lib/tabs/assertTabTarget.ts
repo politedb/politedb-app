@@ -99,6 +99,7 @@ export function resolveTabRuntimeConnectionId(args: {
 export function authoritativeRuntimeOf(tabId: string): string | undefined {
   const tab = tabOf(tabId);
   if (!tab) return undefined;
+  if (tab.runtimeConnectionId) return tab.runtimeConnectionId;
   return resolveTabRuntimeConnectionId({
     tabRuntimeConnectionId: tab.runtimeConnectionId,
     activeProfileScreen: tabId,

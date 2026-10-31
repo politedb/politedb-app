@@ -3,6 +3,8 @@ import { renderHook, act, waitFor } from "@testing-library/preact";
 import { useDbHealthInspector } from "./useDbHealthInspector";
 import { useLicenseStore } from "src/stores/license";
 import type { LicenseState } from "src/lib/tauri/license";
+import { resetTabRuntimes, seedTabRuntime } from "src/test/fixtures/tabRuntime";
+import { useScreenStore } from "src/stores/screen";
 
 const collectMock = vi.fn();
 
@@ -82,10 +84,13 @@ const pgCtx = {
   open: true,
   runtimeConnectionId: "c1",
   profileId: "p1",
+  tabId: "tab-1",
   engine: "postgres" as const,
 };
 
 beforeEach(() => {
+  resetTabRuntimes();
+  seedTabRuntime({ tabId: "tab-1", runtimeId: "c1" });
   setProAccess(true);
   collectMock.mockReset();
   collectMock.mockResolvedValue(snap());
@@ -453,6 +458,37 @@ describe("useDbHealthInspector Pro gating", () => {
       collectMock.mockClear();
       return hook;
     }
+
+    it("asks nothing and sends nothing through a connection the tab may not use (D3)", async () => {
+      const { result } = await opened();
+      seedTabRuntime({ tabId: "tab-1", runtimeId: "c2" });
+      const confirm = vi.fn(async () => true);
+      await act(async () => {
+        await result.current.runSessionAction(request, confirm);
+      });
+      expect(confirm).not.toHaveBeenCalled();
+      expect(signalMock).not.toHaveBeenCalled();
+      expect(result.current.sessionActionResult).toMatchObject({
+        outcome: "refused",
+      });
+    });
+
+    it("sends nothing when the tab's target changes during the confirmation (D3)", async () => {
+      const { result } = await opened();
+      await act(async () => {
+        await result.current.runSessionAction(request, async () => {
+          useScreenStore
+            .getState()
+            .updateTab("tab-1", { target: { kind: "unknown" } });
+          return true;
+        });
+      });
+      expect(signalMock).not.toHaveBeenCalled();
+      expect(result.current.sessionActionResult).toMatchObject({
+        outcome: "refused",
+      });
+      expect(result.current.sessionAction).toBeNull();
+    });
 
     it("confirms, sends once, reports, then refreshes", async () => {
       const { result } = await opened();

@@ -260,6 +260,7 @@ export function FloatingAssistantLauncher() {
               chatSessionKey={chatSessionKey}
               engine={context?.engine ?? "postgres"}
               runtimeConnectionId={context?.runtimeConnectionId}
+              tabId={context?.scopeKey}
               activeSchema={context?.activeSchema}
               activeTable={context?.activeTable}
               tables={context?.tables ?? []}

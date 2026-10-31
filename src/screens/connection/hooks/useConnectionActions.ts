@@ -78,6 +78,8 @@ export type RefreshSchemaAndTablesFn = () => Promise<void>;
 export type RunSqlWithHistoryFn = (args: {
   connectionId: string;
   sql: string;
+  /** The tab the work belongs to (D3). */
+  tabId: string;
 }) => Promise<RunSqlReturn>;
 
 export type UseConnectionActionsArgs = {
@@ -661,6 +663,7 @@ export function useConnectionActions(
           await runSqlWithHistory({
             connectionId,
             sql: stmt,
+            tabId: activeProfileScreen,
           });
         },
       });
@@ -804,6 +807,7 @@ export function useConnectionActions(
       await runSqlWithHistory({
         connectionId,
         sql: draft.sql,
+        tabId: activeProfileScreen,
       });
 
       s.clearNewTableData(activeProfileScreen, draft.window.id);

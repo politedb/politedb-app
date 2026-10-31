@@ -126,6 +126,8 @@ export function sessionActionOutcomeMessage(
       return `${verb} not sent: the connection is unavailable.`;
     case "setup_failed":
       return `${verb} not sent: could not prepare the request.`;
+    case "refused":
+      return `${verb} not sent: this tab no longer uses this connection. Reconnect the tab.`;
     case "invalid":
       return `${verb} not sent: the session details are not valid.`;
     case "unknown":

@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { useMainViewStore } from "src/stores/mainView";
 import { useScrollMemory } from "src/hooks/useScrollMemory";
 import { readTextFile } from "src/lib/system-fs";
-import { v4 as uuid } from "uuid";
 
 import { ConnectionModal } from "src/components/modal/ConnectionModal";
 import { ConnectionFormDialog } from "src/components/connection/ConnectionFormDialog";
@@ -15,7 +14,7 @@ import {
 import { OverlayModal } from "src/components/modal/OverlayModal";
 import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 
-import { ProfileTab, useScreenStore } from "src/stores/screen";
+import { useScreenStore } from "src/stores/screen";
 import { useProfileStore } from "src/stores/profile";
 import { useConnectionGroupsStore } from "src/stores/connectionGroups";
 import { usePinnedConnectionsStore } from "src/stores/pinnedConnections";
@@ -62,11 +61,10 @@ import {
 } from "src/lib/tauri";
 import { pickOpenFile, showMessage } from "src/lib/system-dialog";
 import { trackEvent } from "src/lib/analytics";
-import { seedSqliteTemplateDemo } from "src/lib/sqliteTemplateSeed";
-import { useRuntimeTargetsStore } from "src/stores/runtimeTargets";
+import { openSqliteTemplateTab } from "./sqliteTemplate";
 
 export function MainScreen() {
-  const { addTab, setActiveProfileScreen } = useScreenStore();
+  const { setActiveProfileScreen } = useScreenStore();
 
   const {
     loadProfiles,
@@ -412,11 +410,7 @@ export function MainScreen() {
         },
       } as SaveAndConnectInput & SaveAndConnectAction);
 
-      try {
-        await seedSqliteTemplateDemo(saved.connection.id);
-      } catch (seedErr) {
-        console.warn("[sqlite template] demo seed failed:", seedErr);
-      }
+      const newTab = await openSqliteTemplateTab(saved);
 
       if (selectedGroupId) {
         assignGroup(saved.profile.id, selectedGroupId);
@@ -424,20 +418,6 @@ export function MainScreen() {
 
       await loadProfiles();
 
-      const newTab: ProfileTab = {
-        id: `tab-${uuid()}`,
-        label: saved.profile.label || "Hello World",
-        profileId: saved.profile.id,
-        engine: saved.profile.engine,
-        runtimeConnectionId: saved.connection.id,
-        target: { kind: "default" },
-        profileTags: saved.profile.input?.tags ?? [],
-      };
-      // This tab acquired the connection and alone may remove it (R4).
-      useRuntimeTargetsStore
-        .getState()
-        .register(saved.connection.id, saved.connection.target, newTab.id);
-      addTab(newTab);
       setActiveProfileScreen(newTab.id);
       void import("src/stores/connectionLog").then(
         ({ recordConnectionSessionOpened }) =>

@@ -43,6 +43,7 @@ export function useTableDestructiveActions(opts: {
   runSqlWithHistory: (args: {
     connectionId: string;
     sql: string;
+    tabId: string;
   }) => Promise<unknown>;
   refreshSchemaAndTables: () => Promise<unknown>;
   closeWindow: (id: string, e: MouseEvent) => Promise<unknown> | unknown;
@@ -72,7 +73,7 @@ export function useTableDestructiveActions(opts: {
         if (!(await confirmDropTable(table.name))) return;
         assertTabTarget(tabId, connectionId);
         const sql = dropTableQuery(table.schema, table.name, engine);
-        await runSqlWithHistory({ connectionId, sql });
+        await runSqlWithHistory({ connectionId, sql, tabId });
         await refreshSchemaAndTables();
         const key = tableIdentity(table);
         for (const window of windows) {
@@ -126,7 +127,7 @@ export function useTableDestructiveActions(opts: {
       if (!connectionId) throw new Error("Not connected.");
       assertTabTarget(tabId, connectionId);
       const sql = truncateTableQuery(table.schema, table.name, options, engine);
-      await runSqlWithHistory({ connectionId, sql });
+      await runSqlWithHistory({ connectionId, sql, tabId });
       markTableStale(tableIdentity(table));
     },
     [

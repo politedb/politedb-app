@@ -2,6 +2,7 @@ import { act, render, screen, waitFor } from "@testing-library/preact";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { StandaloneExportTarget } from "../export/standalone-export/types";
 import { useStandaloneTableExport } from "./useStandaloneTableExport";
+import { resetTabRuntimes, seedTabRuntime } from "src/test/fixtures/tabRuntime";
 
 const loadStandaloneExportMetadata = vi.fn();
 const selectTable = vi.fn();
@@ -81,6 +82,9 @@ function Harness(props: HarnessProps) {
 describe("useStandaloneTableExport lifecycle", () => {
   beforeEach(() => {
     loadStandaloneExportMetadata.mockReset();
+    resetTabRuntimes();
+    seedTabRuntime({ tabId: "screen-1", runtimeId: "conn-1" });
+    seedTabRuntime({ tabId: "screen-1b", runtimeId: "conn-2" });
     selectTable.mockReset();
     addLogQuery.mockReset();
     getConnectionState.mockClear();
