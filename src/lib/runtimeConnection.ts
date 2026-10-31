@@ -5,7 +5,7 @@ import {
   setRuntimeDispatchGuard,
   setRuntimeRefusalHandler,
 } from "src/lib/tauri/runtimeAdmission";
-import { resolveTabTarget } from "src/lib/tabs/tabTarget";
+import { resolveTabTarget, tabLabelFor } from "src/lib/tabs/tabTarget";
 import {
   TAB_TARGET_UNKNOWN,
   TabTargetError,
@@ -26,7 +26,12 @@ import { connectionTabHasChanges } from "src/screens/connection/lib/tabDirty";
  * it.
  */
 
-export { TAB_TARGET_UNKNOWN, resolveTabRuntimeConnectionId, runtimeServesTab };
+export {
+  tabLabelFor,
+  TAB_TARGET_UNKNOWN,
+  resolveTabRuntimeConnectionId,
+  runtimeServesTab,
+};
 
 export const TAB_HAS_UNSAVED_CHANGES =
   "This tab has unsaved changes made against the previous settings. Copy or discard them, then reconnect.";
@@ -279,16 +284,6 @@ export function profileTabsWithChanges(profileId: string): string[] {
       (t) => t.profileId === profileId && connectionTabHasChanges(t.id)
     )
     .map((t) => t.id);
-}
-
-/** A tab's label: the profile's, plus the database it was opened on. */
-export function tabLabelFor(
-  profileLabel: string,
-  target: { kind: string; database?: string } | undefined
-): string {
-  return target?.kind === "override" && target.database
-    ? `${profileLabel} · ${target.database}`
-    : profileLabel;
 }
 
 /**

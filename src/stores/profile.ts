@@ -3,6 +3,7 @@ import type { ConnectionProfile } from "src/lib/tauri";
 import { profileList, profileRemove } from "src/lib/tauri";
 import { usePinnedConnectionsStore } from "src/stores/pinnedConnections";
 import { useScreenStore } from "src/stores/screen";
+import { tabLabelFor } from "src/lib/tabs/tabTarget";
 import { DatabaseEngine } from "../types";
 
 /**
@@ -90,6 +91,28 @@ function invalidateTabsOf(profileIds: Iterable<string>) {
   );
 }
 
+/**
+ * Open tabs show their profile's current name: after a rename, wherever it
+ * was saved, each tab of that profile is relabelled (keeping the database it
+ * was opened on). A tab whose target is unknown keeps its label, the only
+ * hint of what it was opened on.
+ */
+function relabelTabsOf(profiles: ConnectionProfile[], profileIds: string[]) {
+  if (!profileIds.length) return;
+  const ids = new Set(profileIds);
+  const screen = useScreenStore.getState();
+  for (const profile of profiles) {
+    if (!ids.has(profile.id) || !profile.label) continue;
+    for (const tab of screen.profileTabs) {
+      if (tab.profileId !== profile.id || tab.target?.kind === "unknown") {
+        continue;
+      }
+      const label = tabLabelFor(profile.label, tab.target);
+      if (tab.label !== label) screen.updateTab(tab.id, { label });
+    }
+  }
+}
+
 /** Profiles whose revision differs from the last observed, then records them. */
 function observe(profiles: ConnectionProfile[], complete: boolean): string[] {
   const changed: string[] = [];
@@ -138,7 +161,9 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     set({ busy: true, error: null });
     try {
       const list = await profileList();
-      invalidateTabsOf(observe(list, true));
+      const changed = observe(list, true);
+      invalidateTabsOf(changed);
+      relabelTabsOf(list, changed);
       usePinnedConnectionsStore.getState().pruneMissing(list.map((p) => p.id));
       set({ profiles: list, busy: false });
     } catch (e) {
@@ -147,7 +172,9 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
   },
 
   publishProfiles: (list) => {
-    invalidateTabsOf(observe(list, true));
+    const changed = observe(list, true);
+    invalidateTabsOf(changed);
+    relabelTabsOf(list, changed);
     usePinnedConnectionsStore.getState().pruneMissing(list.map((p) => p.id));
     set({ profiles: list });
   },
@@ -175,7 +202,9 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
   saveProfile: async (profile) => {
     set({ busy: true, error: null });
     try {
-      invalidateTabsOf(observe([profile], false));
+      const changed = observe([profile], false);
+      invalidateTabsOf(changed);
+      relabelTabsOf([profile], changed);
       // Local upsert: keep stable order if you want, or append to end
       set((s) => {
         const exists = s.profiles.some((p) => p.id === profile.id);

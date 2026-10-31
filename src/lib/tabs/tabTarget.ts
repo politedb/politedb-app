@@ -106,3 +106,13 @@ export function targetMatches(
     (runtime.database_override ?? null) === intended.override
   );
 }
+
+/** A tab's label: the profile's, plus the database it was opened on. */
+export function tabLabelFor(
+  profileLabel: string,
+  target: { kind: string; database?: string } | undefined
+): string {
+  return target?.kind === "override" && target.database
+    ? `${profileLabel} · ${target.database}`
+    : profileLabel;
+}

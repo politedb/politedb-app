@@ -104,3 +104,40 @@ describe("publishing a list a mutation returned (R16)", () => {
     expect(epoch("x1")).toBe(x + 1);
   });
 });
+
+describe("tab labels follow a renamed profile", () => {
+  const labelOf = (tabId: string) =>
+    useScreenStore.getState().profileTabs.find((t) => t.id === tabId)?.label;
+
+  it("relabels every tab of the profile, wherever it was saved", async () => {
+    useScreenStore.setState((s) => ({
+      profileTabs: [
+        ...s.profileTabs,
+        {
+          id: "x2",
+          profileId: "x",
+          engine: "postgres",
+          label: "Athenaa · demo_db",
+          target: { kind: "override", database: "demo_db" },
+        },
+        {
+          id: "x3",
+          profileId: "x",
+          engine: "postgres",
+          label: "Athenaa · old",
+          target: { kind: "unknown" },
+        },
+      ] as never,
+    }));
+    m.list.mockResolvedValue([
+      { ...(profile("x", "b") as object), label: "Athena" },
+      profile("y", "a"),
+    ]);
+    await useProfileStore.getState().loadProfiles();
+    expect(labelOf("x1")).toBe("Athena");
+    expect(labelOf("x2")).toBe("Athena · demo_db");
+    // An unknown tab keeps its label: the only hint of its database.
+    expect(labelOf("x3")).toBe("Athenaa · old");
+    expect(labelOf("y1")).not.toBe("Athena");
+  });
+});
