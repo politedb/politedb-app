@@ -189,7 +189,11 @@ export function useConnectionWindows(
 
   const openTable = useCallback(
     async (table: TableItem) => {
-      const existing = windows.find(
+      // The live windows, not this render's: a window closed just before
+      // (a new table's draft, once created) is not reused.
+      const live =
+        useScreenStore.getState().openWindows[activeProfileScreen] ?? [];
+      const existing = live.find(
         (w) =>
           w.type === "table" &&
           w.table.schema === table.schema &&
@@ -216,7 +220,7 @@ export function useConnectionWindows(
 
       return win.id;
     },
-    [activeProfileScreen, windows, addWindow, setActiveWindowId]
+    [activeProfileScreen, addWindow, setActiveWindowId]
   );
 
   const openDatabaseObjectsManager = useCallback(

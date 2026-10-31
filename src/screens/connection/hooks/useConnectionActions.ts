@@ -241,7 +241,20 @@ function isValidNewTable(v: unknown): v is NewTableLike {
   return obj.tableName.trim().length > 0 && hasAnyCol;
 }
 
-function getNewTableDraftEntries(args: {
+/** The window of a new-table draft whose window is closed (`table:<schema>.<name>`). */
+function closedNewTableWindow(windowId: string): OpenWindow | null {
+  if (!windowId.startsWith("table:")) return null;
+  const key = windowId.slice("table:".length);
+  const dot = key.indexOf(".");
+  if (dot <= 0) return null;
+  return {
+    id: windowId,
+    type: "table",
+    table: { schema: key.slice(0, dot), name: key.slice(dot + 1), new: true },
+  } as OpenWindow;
+}
+
+export function getNewTableDraftEntries(args: {
   tabId: string;
   openWindows: Record<string, OpenWindow[]>;
   engine: DatabaseEngine | undefined;
@@ -254,7 +267,8 @@ function getNewTableDraftEntries(args: {
   const result: NewTableDraftEntry[] = [];
 
   for (const [windowId, draft] of Object.entries(drafts)) {
-    const window = windowsById.get(windowId);
+    // A draft whose window was closed is still listed and still saved.
+    const window = windowsById.get(windowId) ?? closedNewTableWindow(windowId);
     if (!window || window.type !== "table" || !window.table.new) continue;
 
     if (!isValidNewTable(draft)) {
