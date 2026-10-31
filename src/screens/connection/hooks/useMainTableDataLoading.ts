@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo } from "preact/hooks";
+import { isReconnectMessage } from "src/lib/tabs/assertTabTarget";
 import type { Dispatch, StateUpdater } from "preact/hooks";
 import type { TableFilterCondition, TableSort } from "src/lib/queries/sql";
 import { tableRowsStreamLoadPercent } from "src/utils/tableRowsProgress";
@@ -245,6 +246,8 @@ export function useMainTableDataLoading(args: {
       return;
     }
     if (dismissedTableErrorByKey.get(activeKey) === errorText) return;
+    // The tab asks to reconnect itself; no second dialog says the same.
+    if (isReconnectMessage(errorText)) return;
     const key = activeKey;
     const message = errorText;
     void showMessage(message, { title: "Execution", kind: "error" }).then(

@@ -47,6 +47,25 @@ export function isTabTargetError(err: unknown): err is TabTargetError {
   return err instanceof TabTargetError;
 }
 
+/**
+ * Whether `text` only says the tab must be reconnected (or reopened): a
+ * refusal of this guard or of the backend (R20). The tab already asks about
+ * that once, so an automatic load's error dialog stays quiet about it.
+ */
+export function isReconnectMessage(text: string | null | undefined): boolean {
+  if (!text) return false;
+  return (
+    text === TAB_TARGET_UNKNOWN ||
+    text === RUNTIME_STALE_MESSAGE ||
+    text === RUNTIME_UNCONFIRMED_MESSAGE ||
+    text === RUNTIME_NOT_THE_TABS ||
+    (text.startsWith("This tab shows ") &&
+      text.endsWith(" Reconnect the tab.")) ||
+    text.includes("RUNTIME_STALE") ||
+    text.includes("RUNTIME_IDENTITY_MISSING")
+  );
+}
+
 function tabOf(tabId: string) {
   return useScreenStore.getState().profileTabs.find((t) => t.id === tabId);
 }

@@ -10,6 +10,7 @@ import {
   assertTabTarget,
   checkRuntimeDispatch,
   checkTabTarget,
+  isReconnectMessage,
   TabTargetError,
 } from "./assertTabTarget";
 // Registers the dispatch guard, as the app does.
@@ -179,5 +180,21 @@ describe("the dispatch guard", () => {
     await expect(signal("ra")).resolves.toBe("refused");
     await expect(signal("orphan")).resolves.toBe("refused");
     expect(m.invoke).not.toHaveBeenCalled();
+  });
+});
+
+describe("isReconnectMessage", () => {
+  it("recognizes every refusal the tab asks about itself, and nothing else", () => {
+    useScreenStore.getState().updateTab("a", { target: { kind: "default" } });
+    for (const refusal of [
+      checkTabTarget("a", "ra"),
+      checkTabTarget("a", "nope"),
+      checkTabTarget("gone", "ra"),
+    ]) {
+      expect(isReconnectMessage(refusal?.message)).toBe(true);
+    }
+    expect(isReconnectMessage("RUNTIME_STALE")).toBe(true);
+    expect(isReconnectMessage('relation "users" does not exist')).toBe(false);
+    expect(isReconnectMessage(null)).toBe(false);
   });
 });

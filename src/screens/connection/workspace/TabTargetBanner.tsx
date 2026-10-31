@@ -1,5 +1,5 @@
-import { useMemo } from "preact/hooks";
-import { Button } from "src/components/common/Button";
+import { useEffect, useMemo, useRef } from "preact/hooks";
+import { confirmDialog } from "src/lib/system-dialog";
 import {
   RUNTIME_STALE_MESSAGE,
   RUNTIME_UNCONFIRMED_MESSAGE,
@@ -35,6 +35,15 @@ export function tabTargetProblem(
   return null;
 }
 
+/** Problems already asked about, so a remount or re-render asks once. */
+const askedReconnect = new Set<string>();
+
+/**
+ * A tab that cannot be used as it is: a connection it can reconnect (its
+ * settings changed, or it is on another target) asks once, natively, and
+ * reconnects on "Reconnect"; an unknown target, which only closing and
+ * reopening the tab fixes, stays a banner.
+ */
 export function TabTargetBanner(props: {
   target: ResolvedTabTarget;
   runtimeId: string | undefined;
@@ -46,19 +55,40 @@ export function TabTargetBanner(props: {
     () => tabTargetProblem(props.target, props.runtimeId, targets, refused),
     [props.target, props.runtimeId, targets, refused]
   );
-  if (!problem) return null;
   const canReconnect = props.target.state === "ok";
+
+  const reconnectRef = useRef(props.onReconnect);
+  reconnectRef.current = props.onReconnect;
+  const currentRef = useRef({ problem, runtimeId: props.runtimeId });
+  currentRef.current = { problem, runtimeId: props.runtimeId };
+
+  useEffect(() => {
+    if (!problem || !canReconnect) return;
+    const runtimeId = props.runtimeId;
+    const key = `${runtimeId ?? ""}\0${problem}`;
+    if (askedReconnect.has(key)) return;
+    askedReconnect.add(key);
+    void confirmDialog(problem, {
+      title: "Reconnect connection",
+      kind: "warning",
+      okLabel: "Reconnect",
+      cancelLabel: "Not now",
+    }).then((ok) => {
+      // Only for the problem asked about: the tab may have moved on.
+      const now = currentRef.current;
+      if (ok && now.problem === problem && now.runtimeId === runtimeId) {
+        reconnectRef.current();
+      }
+    });
+  }, [problem, canReconnect, props.runtimeId]);
+
+  if (!problem || canReconnect) return null;
   return (
     <div
       role="alert"
       class="flex items-center gap-3 border-b border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
     >
       <span class="flex-1">{problem}</span>
-      {canReconnect ? (
-        <Button variant="outline" onClick={props.onReconnect}>
-          Reconnect
-        </Button>
-      ) : null}
     </div>
   );
 }

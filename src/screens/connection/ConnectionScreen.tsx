@@ -62,6 +62,7 @@ import { registerConnectionTabCloseBridge } from "./lib/connectionTabCloseBridge
 import type { TableItem } from "src/types";
 import { ConnectingPanel } from "./workspace/ConnectingPanel";
 import { TabTargetBanner } from "./workspace/TabTargetBanner";
+import { isReconnectMessage } from "src/lib/tabs/assertTabTarget";
 import { useProfileStore } from "src/stores/profile";
 import { currentDatabaseFromInput } from "src/lib/connection/connection";
 import type { PatchMap } from "src/lib/patches/generateSql";
@@ -235,7 +236,8 @@ export function ConnectionScreen() {
   } = useEnsureRuntimeConnection(activeTab);
 
   useEffect(() => {
-    if (!errorRuntime) return;
+    // The tab itself asks to reconnect (or says it must be reopened).
+    if (!errorRuntime || isReconnectMessage(errorRuntime)) return;
     void showMessage(errorRuntime, {
       title: "Connection error",
       kind: "error",
