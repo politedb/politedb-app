@@ -923,3 +923,49 @@ Reviewed by Codex, 2026-10-31, commit `e48138a26b3248215241ba6732c4102658d879c9`
 - `git diff --check`: passed after report append. Only `.agent/REVIEW.md` changed; pre-existing untracked `.claude/launch.json` preserved. No commit/push/merge.
 
 **Verdict for Phase 2 at `e48138a2`: CHANGES REQUIRED.** Fix D3-P1-1/2 and D3-P2-1 with boundary/lifecycle regressions, then re-review. Both phases remain one release unit; the workflow's second security review remains required before shipping. D5 follow-ups remain separate.
+
+## tab-database-reconnect — Phase 2 review round 2
+
+### Status
+
+CHANGES REQUIRED
+
+Reviewed by Codex, 2026-10-31, HEAD `2f802d92` on `fix/tab-database-reconnect`, fix diff `2aa2fa99..HEAD`, original Phase 2 `e48138a2`. Read the workflow, approved D3 scope and preceding report; traced fixes and adjacent consumers. No application source changed.
+
+### Findings
+
+**P0:** None established.
+
+**D3-R2-P1-1 — Caller-origin coverage remains incomplete for independent reads and SQL preflight.** The immutable owner strengthens the last dispatch check only after a caller has checked its own tab. `src/hooks/useDbHealthInspector.ts:153-167` starts snapshot collection without checking `ctx.tabId`; only session actions gained that check. `src/lib/tabs/assertTabTarget.ts:185-194` still validates B against B when A supplies B's valid runtime. A real-hook/collector/operation-wrapper probe mounted Inspector context A with B's authoritative runtime on another target: `checkTabTarget(A, B)` returned `RUNTIME_NOT_AUTHORITATIVE`, but native `operation_execute` was called on B. This can read and display another tab's database information; backend freshness does not reject a fresh B. Mock native transport rejected the operation immediately, so the probe proves dispatch, not a successful database read.
+
+The same unguarded caller-boundary pattern remains in covered object-definition reads: `src/screens/connection/hooks/useLoadDbObjectDefinition.ts:99` calls `loadDatabaseObjectDefinition` without checking its explicit `tabId`; its `stillCurrent` check is applied to completion, after dispatch. SQL editor validation also precedes the newly bound history callback: `src/screens/connection/hooks/useSqlRunner.ts:471-488` calls `validateSqlQueryBE` before `onRunSql`, and `src/lib/tauri/queryValidate.ts:161-177` sends a database operation directly. Explain Analyze starts directly at `src/screens/connection/hooks/useSqlRunner.ts:940`, likewise outside the new history guard. These routes cannot rely on the new history boundary to establish originating-tab provenance.
+
+**Required fix:** Complete the approved operation audit with an originating-tab check before each independent read/preflight/Analyze dispatch, or carry captured origin through a shared dispatch context. Preserve valid background SQL scripts across active-tab switches and already-admitted session cleanup. Recheck after asynchronous approval and before subsequent dispatches; fence foreign results as well as sends. Add real-hook/native-spy regressions for foreign same-target and different-target runtimes, unknown/missing/mismatched identity, and valid-origin controls. Do not equate immutable runtime ownership with proof of caller origin. This is the remaining part of D3-P1-2, not a new scope requirement.
+
+**P2:** No additional actionable regression established in the fix diff.
+
+### Round 1 disposition
+
+| Finding | Round 2 result |
+| --- | --- |
+| D3-P1-1 — health signal bypass | **Resolved for cancel/terminate.** `runtimeInvoke.ts` now recognizes top-level `runtimeConnectionId`; the hook checks the captured tab before/after confirmation; `TabTargetError` becomes the definite pre-dispatch `refused` outcome with reconnect guidance. Existing entitlement/token/confirmation/busy gates remain. Additional real-wrapper probe confirms unknown-target signal returns `refused` with zero native calls. Snapshot reads remain the finding above. |
+| D3-P1-2 — caller versus owner | **Partially resolved; still open.** SQL history requires explicit origin and records history there; ConnectionScreen binds that origin in its callback. Import, export, standalone export metadata, AI agent submit/grant and health signals now check caller tab. Owners cannot be reassigned by `register`/`setOwner`, supporting subsequent transport checks after a successful origin check. Independent read/preflight boundaries above remain uncovered. |
+| D3-P2-1 — SQLite template | **Resolved for reported pre-registration failure.** `src/screens/main/sqliteTemplate.ts:15-35` registers ownership and adds the default tab before seeding. Committed real-operation-wrapper/native-spy test observes all five seed statements, including DDL and inserts; unowned seed remains refused. Seed failure retains the prior warning/empty-database behavior. Native file creation/close races are not demonstrated by this test. |
+
+### Compatibility and coverage
+
+- SQL scripts: the screen callback closes over the originating tab; `useSqlRunner` retains its invocation's callback while awaiting statements/streams. A later active-tab switch does not replace that running invocation's origin. Committed history-hook controls verify valid A work while B is active and refusal of foreign same/different-target runtimes. Full multi-statement editor/stream switching was traced, not exercised in a native UI; validation and Analyze require the fix above.
+- Health actions retain confirmation and entitlement checks and classify frontend refusal as not sent. Import checks after parsing/validation before its transaction; export checks before starting export, while subsequent runtime commands retain transport admission. Standalone metadata export checks its tab before loading. AI submit and grant check scope tab; backend tool admission remains unchanged. Tests for these consumers pass, but many mock query/agent wrappers rather than exercising native dispatch.
+- Backup/restore, database changes, row patch, object save, schema/table DDL and table/object drop retain existing explicit boundaries and asynchronous rechecks from Phase 2. SQL session execute/end/cancel remain admitted-session operations; no new guard was added that would trap rollback/cleanup. No new defect established in these unchanged paths.
+- Connect/reload: no configuration-based create/test/connect commands were newly admitted as runtime work; ordinary acquisition still registers ownership before installation. Immutable ownership is compatible with fresh runtime IDs and prevents foreign re-ownership. Existing acquisition, stale-result, dirty-draft and reload tests pass. No new connect/reload regression established.
+- Covered-operation completeness is **not verified**. Object-definition reads, Inspector snapshot reads and SQL preflight/Analyze demonstrate why owner-only interception is insufficient. Other metadata/diagram/table/health-ping readers must be included in the implementer's origin audit rather than inferred safe from the transport check alone.
+
+### Verification
+
+- `npm run build`: **passed**, exit 0; existing externalization/dynamic-import/chunk-size warnings remain. Log `/tmp/pdb-d3-r2-build.log`.
+- `npm run test:run -- --exclude '**/.claude/**'`: **288 files passed / 1 skipped; 2468 tests passed / 1 skipped**, exit 0. Log `/tmp/pdb-d3-r2-tests.log`. Completed before temporary probes were included.
+- Additional review probes: **2 passed**, exit 0. One reproduces foreign-runtime snapshot dispatch through the real hook/collector/registered guard/operation wrapper; one confirms the repaired health signal refusal through the real wrapper. Native invoke, event-bus initialization and persistence mocked. Passing defect assertion demonstrates the remaining bug. Scratch test retained at `/tmp/pdb-d3-r2-probe.test.ts`, log `/tmp/pdb-d3-r2-probe.log`; temporary repository test removed.
+- Rust unchanged; not rerun. No native desktop, live database, SSH, Touch ID, restart or engine matrix exercised. No Docker command/container access, database access, secret retrieval, commit, push or merge.
+- Only this review append retained; existing untracked `.claude/launch.json` preserved. `git diff --check` passed after append.
+
+**Verdict for Phase 2 at `2f802d92`: CHANGES REQUIRED.** Close remaining D3-P1-2 caller-origin gaps with boundary regressions, then re-review. D3-P1-1 and D3-P2-1 reported cases are closed. Both phases remain one release unit; the workflow's second security review remains required before shipping.
