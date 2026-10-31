@@ -430,4 +430,224 @@ mod tests {
         assert_eq!(current_revision(id), revision);
         let _ = std::fs::remove_dir_all(dir);
     }
+
+    /// Live checks of plan tab-database-reconnect against a disposable
+    /// PostgreSQL (never a customer database), through the same steps
+    /// `profile_connect` takes (stored profile → override → identity →
+    /// published runtime → admission), without a Tauri app handle:
+    /// `TAB_TARGET_PG_URL=postgres://user:pass@127.0.0.1:55440/postgres \
+    ///  cargo test tab_target_live -- --ignored`
+    /// Creates and drops the databases `zz_tab_a` and `zz_tab_b`.
+    #[cfg(feature = "engine-postgres")]
+    #[tokio::test]
+    #[ignore]
+    // The revision map is process-wide: held for the whole (single-task) run.
+    #[allow(clippy::await_holding_lock)]
+    async fn tab_target_live() {
+        use crate::commands::connection::lifecycle::publish_runtime;
+        use crate::engines::postgres::config::build_pg_config;
+        use crate::engines::postgres::connection::PgConn;
+        use crate::engines::runtime::admission::admit_runtime;
+        use crate::engines::{registry::EngineRegistry, EngineConnection};
+        use crate::profiles::target_override::{apply_override, target_identity};
+        use crate::state::app_state::AppState;
+        use deadpool_postgres::{Manager, ManagerConfig, Pool};
+        use tokio_postgres::NoTls;
+
+        let _guard = serial();
+        let admin: tokio_postgres::Config = std::env::var("TAB_TARGET_PG_URL")
+            .expect("set TAB_TARGET_PG_URL")
+            .parse()
+            .expect("valid TAB_TARGET_PG_URL");
+        let password = String::from_utf8(admin.get_password().unwrap().to_vec()).unwrap();
+        let (host, port) = match (&admin.get_hosts()[0], admin.get_ports()[0]) {
+            (tokio_postgres::config::Host::Tcp(h), p) => (h.clone(), p),
+            _ => panic!("TCP host expected"),
+        };
+        let user = admin.get_user().unwrap().to_string();
+
+        let pool_of = |cfg: tokio_postgres::Config| {
+            Pool::builder(Manager::from_config(cfg, NoTls, ManagerConfig::default()))
+                .max_size(2)
+                .build()
+                .unwrap()
+        };
+        let admin_pool = pool_of(admin.clone());
+        let sql = |stmt: &'static str| {
+            let pool = admin_pool.clone();
+            async move {
+                pool.get().await.unwrap().batch_execute(stmt).await.unwrap();
+            }
+        };
+        sql("DROP DATABASE IF EXISTS zz_tab_a WITH (FORCE)").await;
+        sql("DROP DATABASE IF EXISTS zz_tab_b WITH (FORCE)").await;
+        sql("CREATE DATABASE zz_tab_a").await;
+        sql("CREATE DATABASE zz_tab_b").await;
+        for db in ["zz_tab_a", "zz_tab_b"] {
+            let mut cfg = admin.clone();
+            cfg.dbname(db);
+            let client = pool_of(cfg).get().await.unwrap();
+            client
+                .batch_execute(&format!(
+                    "CREATE TABLE sentinel (db text, n int); INSERT INTO sentinel VALUES ('{db}', 0)"
+                ))
+                .await
+                .unwrap();
+        }
+
+        // A saved profile on zz_tab_a (its password is given to the driver
+        // directly: no keychain here).
+        let (path, dir) = temp_file();
+        let profile_input: ConnectionCreateInput = serde_json::from_value(json!({
+            "engine": "postgres",
+            "label": "live",
+            "postgres": {
+                "host": host, "port": port, "database": "zz_tab_a", "user": user,
+                "password": { "kind": "keychain", "value": "not-used" },
+                "ssl_mode": "disable"
+            }
+        }))
+        .unwrap();
+        let profile = create_at(&path, Uuid::new_v4(), profile_input).unwrap();
+
+        let state = AppState::new(EngineRegistry::new(vec![]));
+        let open = |database: Option<&str>, profile: &ConnectionProfile| {
+            let input = match database {
+                Some(db) => apply_override(&profile.input, db).unwrap(),
+                None => profile.input.clone(),
+            };
+            let target = target_identity(Some(profile), database.map(str::to_string), &input);
+            let cfg = build_pg_config(input.postgres.as_ref().unwrap(), &password).unwrap();
+            (cfg, target)
+        };
+        let publish = |cfg: tokio_postgres::Config, target| {
+            let id = Uuid::new_v4();
+            let conn = EngineConnection::Postgres(PgConn {
+                id,
+                label: "live".into(),
+                pool: pool_of(cfg.clone()),
+                config: cfg,
+            });
+            publish_runtime(&state, id, conn, target);
+            id
+        };
+        async fn query_one(state: &AppState, id: Uuid, stmt: &str) -> Result<String, String> {
+            let conn = admit_runtime(state, id)?;
+            let EngineConnection::Postgres(pg) = conn else {
+                panic!("postgres")
+            };
+            let client = pg.pool.get().await.map_err(|e| e.to_string())?;
+            let row = client
+                .query_one(stmt, &[])
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(row.get::<_, String>(0))
+        }
+
+        // Default and override runtimes each run on their own database.
+        let (cfg_a, target_a) = open(None, &profile);
+        let (cfg_b, target_b) = open(Some("zz_tab_b"), &profile);
+        assert_eq!(target_b.database_override.as_deref(), Some("zz_tab_b"));
+        let rt_a = publish(cfg_a, target_a);
+        let rt_b = publish(cfg_b, target_b);
+        assert_eq!(
+            query_one(&state, rt_a, "SELECT current_database()::text")
+                .await
+                .unwrap(),
+            "zz_tab_a"
+        );
+        assert_eq!(
+            query_one(&state, rt_b, "SELECT current_database()::text")
+                .await
+                .unwrap(),
+            "zz_tab_b"
+        );
+
+        // A harmless write through B lands in B only.
+        assert_eq!(
+            query_one(&state, rt_b, "UPDATE sentinel SET n = n + 1 RETURNING db")
+                .await
+                .unwrap(),
+            "zz_tab_b"
+        );
+        assert_eq!(
+            query_one(&state, rt_a, "SELECT n::text FROM sentinel")
+                .await
+                .unwrap(),
+            "0"
+        );
+        assert_eq!(
+            query_one(&state, rt_b, "SELECT n::text FROM sentinel")
+                .await
+                .unwrap(),
+            "1"
+        );
+
+        // The stored profile still names its own database.
+        let stored = list_at(&path).unwrap();
+        assert_eq!(
+            stored[0].input.postgres.as_ref().unwrap().database,
+            "zz_tab_a"
+        );
+
+        // Save-only: every runtime of the profile is refused; a new connect
+        // on the saved settings is admitted.
+        let saved = update_at(&path, profile.id, stored[0].input.clone()).unwrap();
+        for id in [rt_a, rt_b] {
+            assert_eq!(
+                query_one(&state, id, "SELECT 'x'").await.unwrap_err(),
+                "RUNTIME_STALE"
+            );
+        }
+        let (cfg_b2, target_b2) = open(Some("zz_tab_b"), &saved);
+        let rt_b2 = publish(cfg_b2, target_b2);
+        assert_eq!(
+            query_one(&state, rt_b2, "SELECT current_database()::text")
+                .await
+                .unwrap(),
+            "zz_tab_b"
+        );
+
+        // The override database is dropped: reopening it fails, and never
+        // falls back to the profile's own database.
+        drop(crate::commands::connection::lifecycle::unpublish_runtime(
+            &state, rt_b2,
+        ));
+        drop(crate::commands::connection::lifecycle::unpublish_runtime(
+            &state, rt_b,
+        ));
+        sql("DROP DATABASE zz_tab_b WITH (FORCE)").await;
+        let (cfg_gone, _) = open(Some("zz_tab_b"), &saved);
+        let Err(err) = pool_of(cfg_gone).get().await else {
+            panic!("connected to a dropped database");
+        };
+        let code = match &err {
+            deadpool_postgres::PoolError::Backend(e) => e.code().cloned(),
+            _ => None,
+        };
+        assert_eq!(
+            code,
+            Some(tokio_postgres::error::SqlState::INVALID_CATALOG_NAME),
+            "connect error: {err:?}"
+        );
+
+        // A removed profile's runtimes are refused.
+        let (cfg_a2, target_a2) = open(None, &saved);
+        let rt_a2 = publish(cfg_a2, target_a2);
+        assert!(query_one(&state, rt_a2, "SELECT 'x'").await.is_ok());
+        remove_at(&path, profile.id).unwrap();
+        assert_eq!(
+            query_one(&state, rt_a2, "SELECT 'x'").await.unwrap_err(),
+            "RUNTIME_STALE"
+        );
+
+        drop(crate::commands::connection::lifecycle::unpublish_runtime(
+            &state, rt_a2,
+        ));
+        drop(crate::commands::connection::lifecycle::unpublish_runtime(
+            &state, rt_a,
+        ));
+        sql("DROP DATABASE IF EXISTS zz_tab_a WITH (FORCE)").await;
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
