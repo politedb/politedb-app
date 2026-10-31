@@ -1,4 +1,7 @@
 import { useCallback, useMemo, useRef } from "preact/hooks";
+import { runtimeRefusalOf } from "src/stores/runtimeTargets";
+import { assertTabTarget } from "src/lib/tabs/assertTabTarget";
+import { isTabTargetError } from "src/lib/tabs/assertTabTarget";
 import type { Dispatch, StateUpdater } from "preact/hooks";
 import {
   chatReply,
@@ -19,6 +22,7 @@ import type { SavedConnectionSummary } from "src/lib/ai-assistant/types";
 import { aiChatCancel } from "src/lib/tauri/ai";
 import { hasProAccessNow } from "src/stores/license";
 import { getAssistantMode } from "src/lib/ai-assistant/assistantMode";
+import { noteRuntimeError } from "src/lib/tauri/runtimeAdmission";
 import {
   AI_DATA_ACCESS_REQUIRED,
   aiAgentDataAccessStatus,
@@ -52,6 +56,18 @@ export function formatAssistantRequestError(args: {
   const raw =
     args.error instanceof Error ? args.error.message : String(args.error ?? "");
   const vi = args.lang.code === "vie";
+
+  // The tab may not use this connection (plan tab-database-reconnect D3):
+  // nothing was sent.
+  if (isTabTargetError(args.error)) return args.error.message;
+
+  // The connection's settings changed or it is unknown (plan
+  // tab-database-reconnect R20): nothing was read.
+  if (runtimeRefusalOf(raw)) {
+    return vi
+      ? "Cấu hình kết nối đã thay đổi. Hãy kết nối lại tab này rồi hỏi lại."
+      : "The connection settings changed. Reconnect this tab, then ask again.";
+  }
 
   // AI agent data queries (plan ai-agent R5).
   if (raw.includes("AI_DATA_APPROVAL_DENIED")) {
@@ -224,6 +240,8 @@ export function useAiAssistantSubmit(args: {
   model: string;
   engine: DatabaseEngine;
   runtimeConnectionId?: string;
+  /** The connection tab the assistant works in (D3). */
+  tabId?: string;
   /** The editor's safety mode: data queries need approval in safe/production. */
   querySafetyMode?: QuerySafetyMode;
   activeSchema?: string;
@@ -261,6 +279,7 @@ export function useAiAssistantSubmit(args: {
     model,
     engine,
     runtimeConnectionId,
+    tabId,
     querySafetyMode,
     activeSchema,
     tables,
@@ -391,6 +410,9 @@ export function useAiAssistantSubmit(args: {
       const agentAllowed = agentEligible && hasProAccessNow();
       if (agentEligible && !agentAllowed) onAgentProLocked?.();
       if (agentAllowed && runtimeConnectionId) {
+        // D3: the agent reads only through the tab's own connection, on its
+        // target; the refusal is the answer.
+        assertTabTarget(tabId, runtimeConnectionId);
         try {
           const result = await runAgentTurn({
             providerId,
@@ -424,6 +446,9 @@ export function useAiAssistantSubmit(args: {
           );
           return;
         } catch (agentError) {
+          // A run ended because its connection went stale (its profile was
+          // saved again or removed): the tab shows the reconnect message.
+          noteRuntimeError(runtimeConnectionId, agentError);
           const code =
             agentError instanceof Error
               ? agentError.message

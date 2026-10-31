@@ -1,4 +1,5 @@
 import { useCallback, useMemo } from "preact/hooks";
+import { assertTabTarget } from "src/lib/tabs/assertTabTarget";
 import type { DatabaseEngine } from "src/types";
 import type { QueryResult } from "src/lib/tauri";
 import { runSqlQuery, startSqlQueryStream } from "src/lib/tauri/query";
@@ -11,6 +12,8 @@ type Options = {
   profileId: string;
   engine?: DatabaseEngine;
   metadata?: MetadataApi;
+  /** The tab's database, for the metadata reload after DDL (R2). */
+  currentDatabase?: string;
 };
 
 /**
@@ -46,12 +49,19 @@ export function useSqlHistoryRunner(opts?: Options) {
     async (args: {
       connectionId: string;
       sql: string;
+      /** The tab the work belongs to, fixed when it starts (D3). */
+      tabId: string;
+      windowId?: string;
     }): Promise<RunSqlReturn> => {
       const { connectionId, sql } = args;
 
-      if (activeTab) {
-        addQueryHistory(activeTab.id, sql);
-      }
+      // D3: the work's own tab, captured now (never whichever tab becomes
+      // active later), must own this connection on its target. Nothing is
+      // sent, or recorded, otherwise.
+      const origin = args.tabId;
+      assertTabTarget(origin, connectionId);
+
+      addQueryHistory(origin, sql);
 
       const isDDL = isDDLStatement(sql);
 
@@ -68,6 +78,7 @@ export function useSqlHistoryRunner(opts?: Options) {
             metaKey,
             engine: opts.engine,
             connectionId,
+            currentDatabase: opts.currentDatabase,
             force: true,
           });
         }
@@ -79,7 +90,13 @@ export function useSqlHistoryRunner(opts?: Options) {
         return { mode: "stream", opId };
       }
     },
-    [activeTab, addQueryHistory, opts?.metadata, opts?.engine, opts?.profileId]
+    [
+      addQueryHistory,
+      opts?.metadata,
+      opts?.engine,
+      opts?.profileId,
+      opts?.currentDatabase,
+    ]
   );
 
   const captureHistoryTarget = useCallback((): SqlHistoryTarget | null => {

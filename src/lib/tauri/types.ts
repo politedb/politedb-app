@@ -257,10 +257,27 @@ export type ConnectionCreateInput = {
   google_sheets?: GoogleSheetsConnectInput;
 };
 
+/**
+ * What a runtime connection was opened on, recorded by the backend when it
+ * was created (plan tab-database-reconnect D1). `profile_id` is null for a
+ * connection not opened from a saved profile.
+ */
+export type RuntimeTarget = {
+  profile_id: string | null;
+  profile_revision: string | null;
+  /** The database opened instead of the profile's own, if any. */
+  database_override: string | null;
+  engine: DatabaseEngine;
+  /** Database / keyspace / service / SQLite path, for display only. */
+  display: string;
+};
+
 export type ConnectionInfo = {
   id: string;
   engine: DatabaseEngine;
   label: string;
+  /** Missing only if the backend lost it: treated as unknown. */
+  target?: RuntimeTarget | null;
 };
 
 /* ============================================================================
@@ -292,6 +309,12 @@ export type ConnectionProfile = {
   indicator_color?: string | null;
   created_at: number;
   updated_at: number;
+  /**
+   * Issued by the backend on every save; compared for equality only. A
+   * change only invalidates what a tab shows: the backend alone decides
+   * whether a connection may still be used.
+   */
+  revision?: string;
 };
 
 export type ProfileImportResult = {
@@ -314,6 +337,8 @@ export type ExternalImportResult = ProfileImportResult & {
 
 export type ProfileConnectInput = {
   profile_id: string;
+  /** Open this database instead of the profile's own. */
+  database?: string;
 };
 
 export type ProfileConnectResult = {

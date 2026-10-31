@@ -1,4 +1,7 @@
 import { useCallback, useRef, useState } from "preact/hooks";
+import { metaKeyForTab } from "src/screens/connection/lib/objectWindows";
+import { checkTabTarget } from "src/lib/tabs/assertTabTarget";
+import { useScreenStore } from "src/stores/screen";
 import {
   objectListLoadStarted,
   objectListLoaded,
@@ -88,6 +91,8 @@ function emptyMeta(engine?: DatabaseEngine): DbMetadata {
 export function useDatabaseMetadata() {
   const cacheRef = useRef<Record<string, DbMetadata>>({});
   const inflightRef = useRef<Record<string, Promise<DbMetadata> | null>>({});
+  /** The current owner of each key's load; bumped by every load and clear(). */
+  const tokenRef = useRef<Record<string, number>>({});
   const [, bump] = useState(0);
   const touch = () => bump((v) => v + 1);
 
@@ -152,8 +157,33 @@ export function useDatabaseMetadata() {
       // Background schema refresh: keep sidebar + main pane visible while lists reload.
       const softForce = force && !!existing?.loaded && !columnsOnly;
 
+      // D3: a tab's metadata is read only through that tab's own
+      // connection, on its target (the key names the tab).
+      const originTab = useScreenStore
+        .getState()
+        .profileTabs.find((tab) => metaKeyForTab(tab) === metaKey);
+      const tabRefusal = checkTabTarget(originTab?.id, connectionId);
+      if (tabRefusal) {
+        const refused: DbMetadata = {
+          ...(existing ?? emptyMeta(engine)),
+          loading: false,
+          error: tabRefusal.message,
+        };
+        setCache(metaKey, { loading: false, error: tabRefusal.message });
+        return refused;
+      }
+
+      // This load owns the key until clear() or a newer load (R5): an older
+      // load's late results, errors and cleanup never land after that.
+      const token = (tokenRef.current[metaKey] ?? 0) + 1;
+      tokenRef.current[metaKey] = token;
+      const owns = () => tokenRef.current[metaKey] === token;
+      const setOwned = (patch: Partial<DbMetadata>) => {
+        if (owns()) setCache(metaKey, patch);
+      };
+
       // Start/restart load — keep loaded=true when only enriching columns (SQL editor)
-      setCache(metaKey, {
+      setOwned({
         engine,
         schemas: softForce
           ? (existing?.schemas ?? [])
@@ -228,13 +258,13 @@ export function useDatabaseMetadata() {
                   dataType: column.db_type,
                   nullable: "YES",
                 }));
-                setCache(metaKey, {
+                setOwned({
                   progress:
                     35 +
                     Math.floor(((i + 1) / Math.max(1, tables.length)) * 65),
                 });
               }
-              setCache(metaKey, {
+              setOwned({
                 columnsByTable,
                 columnDetailsByTable,
                 columnsLoaded: true,
@@ -266,10 +296,10 @@ export function useDatabaseMetadata() {
                 );
                 const prog =
                   35 + Math.floor(((i + 1) / Math.max(1, tables.length)) * 65);
-                setCache(metaKey, { progress: Math.min(99, prog) });
+                setOwned({ progress: Math.min(99, prog) });
               }
 
-              setCache(metaKey, {
+              setOwned({
                 columnsByTable,
                 columnsLoaded: true,
                 loading: false,
@@ -299,10 +329,10 @@ export function useDatabaseMetadata() {
                 ).map((c) => c.name);
                 const prog =
                   35 + Math.floor(((i + 1) / Math.max(1, tables.length)) * 65);
-                setCache(metaKey, { progress: Math.min(99, prog) });
+                setOwned({ progress: Math.min(99, prog) });
               }
 
-              setCache(metaKey, {
+              setOwned({
                 columnsByTable,
                 columnsLoaded: true,
                 loading: false,
@@ -345,11 +375,11 @@ export function useDatabaseMetadata() {
 
               if (i % 250 === 0) {
                 const prog = 35 + Math.floor((i / total) * 65);
-                setCache(metaKey, { progress: Math.min(99, prog) });
+                setOwned({ progress: Math.min(99, prog) });
               }
             }
 
-            setCache(metaKey, {
+            setOwned({
               columnsByTable,
               columnDetailsByTable,
               columnsLoaded: true,
@@ -395,7 +425,7 @@ export function useDatabaseMetadata() {
               }
             }
 
-            setCache(metaKey, {
+            setOwned({
               schemas: [schema],
               objects: [],
               tables,
@@ -414,7 +444,7 @@ export function useDatabaseMetadata() {
 
           if (engine === "mongo") {
             const schemas = await mongoListDatabases(connectionId);
-            setCache(metaKey, { schemas, progress: 20, stage: "tables" });
+            setOwned({ schemas, progress: 20, stage: "tables" });
 
             const tables: TableItem[] = [];
             const columnsByTable: Record<string, string[]> = {};
@@ -444,10 +474,10 @@ export function useDatabaseMetadata() {
 
               const prog =
                 20 + Math.floor(((i + 1) / Math.max(1, schemas.length)) * 70);
-              setCache(metaKey, { progress: Math.min(95, prog) });
+              setOwned({ progress: Math.min(95, prog) });
             }
 
-            setCache(metaKey, {
+            setOwned({
               objects: [],
               tables,
               columnsByTable,
@@ -474,7 +504,7 @@ export function useDatabaseMetadata() {
                 "";
             }
             if (!keyspace) {
-              setCache(metaKey, {
+              setOwned({
                 schemas: [],
                 objects: [],
                 tables: [],
@@ -492,7 +522,7 @@ export function useDatabaseMetadata() {
             }
 
             const schemas = [keyspace];
-            setCache(metaKey, { schemas, progress: 20, stage: "tables" });
+            setOwned({ schemas, progress: 20, stage: "tables" });
 
             const tables: TableItem[] = [];
             const columnsByTable: Record<string, string[]> = {};
@@ -520,10 +550,10 @@ export function useDatabaseMetadata() {
               const prog =
                 20 +
                 Math.floor(((i + 1) / Math.max(1, tableNames.length)) * 70);
-              setCache(metaKey, { progress: Math.min(95, prog) });
+              setOwned({ progress: Math.min(95, prog) });
             }
 
-            setCache(metaKey, {
+            setOwned({
               objects: [],
               tables,
               columnsByTable,
@@ -541,7 +571,7 @@ export function useDatabaseMetadata() {
 
           if (engine === "redis") {
             const schema = "db 0";
-            setCache(metaKey, {
+            setOwned({
               schemas: [schema],
               objects: [],
               progress: 20,
@@ -568,7 +598,7 @@ export function useDatabaseMetadata() {
               tables.map((item) => [`${item.schema}.${item.name}`, ["value"]])
             );
 
-            setCache(metaKey, {
+            setOwned({
               objects: [],
               tables,
               columnsByTable,
@@ -605,13 +635,13 @@ export function useDatabaseMetadata() {
           } else if (engine === "clickhouse" && schemas.length === 0) {
             schemas = ["default"];
           }
-          setCache(metaKey, { schemas, progress: 10, stage: "objects" });
+          setOwned({ schemas, progress: 10, stage: "objects" });
 
           const objects = parseDatabaseObjectsFromRows({
             engine: engine ?? "postgres",
             rows: [...(routinesRes.rows ?? []), ...(triggersRes.rows ?? [])],
           });
-          setCache(metaKey, { objects, progress: 20, stage: "tables" });
+          setOwned({ objects, progress: 20, stage: "tables" });
           fetchedObjects = objects;
 
           const tables: TableItem[] = (tablesRes.rows ?? [])
@@ -633,7 +663,7 @@ export function useDatabaseMetadata() {
               };
             })
             .filter((t: TableItem) => Boolean(t.schema && t.name));
-          setCache(metaKey, { tables, progress: 35, stage: "columns" });
+          setOwned({ tables, progress: 35, stage: "columns" });
 
           let columnsByTable = existing?.columnsByTable ?? {};
           let columnDetailsByTable = existing?.columnDetailsByTable ?? {};
@@ -667,14 +697,14 @@ export function useDatabaseMetadata() {
               // throttle progress updates
               if (i % 250 === 0) {
                 const prog = 35 + Math.floor((i / total) * 65);
-                setCache(metaKey, { progress: Math.min(99, prog) });
+                setOwned({ progress: Math.min(99, prog) });
               }
             }
 
             columnsLoaded = true;
           }
 
-          setCache(metaKey, {
+          setOwned({
             columnsByTable,
             columnDetailsByTable,
             columnsLoaded,
@@ -702,7 +732,7 @@ export function useDatabaseMetadata() {
             ? String(e.message)
             : String(e) || "LOAD_METADATA_FAILED";
 
-          setCache(metaKey, {
+          setOwned({
             loading: false,
             loaded: columnsOnly ? true : false,
             error: msg,
@@ -712,7 +742,8 @@ export function useDatabaseMetadata() {
 
           return cacheRef.current[metaKey]!;
         } finally {
-          inflightRef.current[metaKey] = null;
+          // Never clears the slot of a newer load.
+          if (owns()) inflightRef.current[metaKey] = null;
         }
       })();
 
@@ -765,6 +796,8 @@ export function useDatabaseMetadata() {
     const { metaKey } = args;
     delete cacheRef.current[metaKey];
     inflightRef.current[metaKey] = null;
+    // Work started before this clear no longer publishes anything.
+    tokenRef.current[metaKey] = (tokenRef.current[metaKey] ?? 0) + 1;
     touch();
   }, []);
 

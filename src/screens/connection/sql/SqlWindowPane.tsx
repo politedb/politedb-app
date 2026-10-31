@@ -46,6 +46,8 @@ export function SqlWindowPane(props: {
   metaKey: string;
   metadata: MetadataApi;
   runtimeConnectionId: string | undefined;
+  /** The connection tab the editor belongs to (D3). */
+  tabId?: string;
   isProfileLocked?: boolean;
   sqlSafetyMode?: QuerySafetyMode;
   sqlScopeKey?: string;
@@ -63,6 +65,7 @@ export function SqlWindowPane(props: {
     metaKey,
     metadata,
     runtimeConnectionId,
+    tabId,
     isProfileLocked = false,
     sqlSafetyMode = "default",
     sqlScopeKey,
@@ -100,6 +103,7 @@ export function SqlWindowPane(props: {
   } = useSqlRunner({
     activeSqlWindowId: scopedWindowId,
     runtimeConnectionId,
+    tabId,
     engine,
     isProfileLocked,
     sqlSafetyMode,

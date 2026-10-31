@@ -33,7 +33,13 @@ import {
   inflightSizeInfoByKey,
   rowsInflightByQueryKey,
 } from "../inflight";
-import { getErrorMessage, isNonEmptyName, parseBusyOpId } from "../helpers";
+import {
+  assertCurrent,
+  getErrorMessage,
+  isNonEmptyName,
+  parseBusyOpId,
+  STALE_LOAD,
+} from "../helpers";
 import type { ColumnRow } from "../types";
 
 export async function loadColumns(params: {
@@ -79,6 +85,7 @@ function resolveQueryTableSort(
 }
 
 function rowCountCacheKey(params: {
+  connId: string;
   schema: string;
   tableName: string;
   engine?: DatabaseEngine;
@@ -87,6 +94,8 @@ function rowCountCacheKey(params: {
   exact?: boolean;
 }) {
   return JSON.stringify({
+    // Per runtime connection: tabs on different databases never share a count.
+    conn: params.connId,
     schema: params.schema,
     table: params.tableName,
     engine: params.engine ?? "",
@@ -210,7 +219,8 @@ export async function loadSizeInfo(params: {
   addLogQuery: (sql: string, engine?: DatabaseEngine) => void;
   force?: boolean;
 }): Promise<{ totalSize: string; dataSize: string; indexSize: string }> {
-  const cacheKey = `${params.schema}.${params.tableName}:${params.engine ?? ""}`;
+  // Per runtime connection: tabs on different databases never share work.
+  const cacheKey = `${params.connId}:${params.schema}.${params.tableName}:${params.engine ?? ""}`;
   const inflight = params.force
     ? undefined
     : inflightSizeInfoByKey.get(cacheKey);
@@ -451,7 +461,8 @@ export async function loadForeignKeys(params: {
   addLogQuery: (sql: string, engine?: DatabaseEngine) => void;
   force?: boolean;
 }): Promise<any[]> {
-  const cacheKey = `${params.schema}.${params.tableName}:${params.engine ?? ""}`;
+  // Per runtime connection: tabs on different databases never share work.
+  const cacheKey = `${params.connId}:${params.schema}.${params.tableName}:${params.engine ?? ""}`;
   const inflight = params.force
     ? undefined
     : inflightForeignKeysByKey.get(cacheKey);
@@ -516,8 +527,13 @@ export async function startRowsStream(params: {
   filters?: TableFilterCondition[];
   filterCombine?: "AND" | "OR";
   sortBy?: TableSort | null;
+  /** False once this load may no longer publish (R5). */
+  isCurrent?: () => boolean;
+  /** The connection and tab epoch owning this load. */
+  owner?: string;
 }): Promise<void> {
   const {
+    isCurrent = () => true,
     key,
     connId,
     schema,
@@ -544,13 +560,17 @@ export async function startRowsStream(params: {
     querySort,
     engine
   );
+  // One stream per connection and table window: the same SQL on another
+  // database, or in another tab, is other work (R3/R5).
+  const streamKey = JSON.stringify([connId, params.owner ?? "", key, q]);
 
   if (!forceRefresh) {
-    const inflight = rowsInflightByQueryKey.get(q);
+    const inflight = rowsInflightByQueryKey.get(streamKey);
     if (inflight) return inflight;
   }
 
   const streamTask = (async () => {
+    assertCurrent(isCurrent);
     addLogQuery(q, engine);
 
     const store = useConnectionStore.getState();
@@ -586,11 +606,24 @@ export async function startRowsStream(params: {
       }
     );
 
+    // A late start reply for a tab that moved on: stop it, never begin it.
+    if (!isCurrent()) {
+      operationCancel(rowsOpId).catch(() => {});
+      throw new Error(STALE_LOAD);
+    }
+
     const cap = Math.max(1000, limit * 4);
 
     store.beginRowsStream(key, rowsOpId, cap, offset, resetCache, forceRefresh);
 
     let unsub: (() => void) | null = null;
+    /** Ends this stream's window (no new rows) if it still owns it. */
+    const retireStale = () => {
+      const cur = useConnectionStore.getState().getRowsWindowInfo(key);
+      if (cur?.opId === rowsOpId) {
+        useConnectionStore.getState().endRowsStream(key, rowsOpId);
+      }
+    };
 
     await new Promise<void>((resolve, reject) => {
       let settled = false;
@@ -607,12 +640,25 @@ export async function startRowsStream(params: {
       void operationBus
         .subscribe(rowsOpId, {
           onChunk: (chunk: TableChunk) => {
+            // The tab moved on (R5): stop the stream, write nothing more,
+            // and retire its pending state if it still owns the window.
+            if (!isCurrent()) {
+              operationCancel(rowsOpId).catch(() => {});
+              retireStale();
+              finish(() => reject(new Error(STALE_LOAD)));
+              return;
+            }
             useConnectionStore.getState().applyRowsChunk(key, rowsOpId, chunk);
           },
           onDone: () => {
             const cur = useConnectionStore.getState().getRowsWindowInfo(key);
             if (!cur || cur.opId !== rowsOpId) {
               finish(resolve);
+              return;
+            }
+            if (!isCurrent()) {
+              retireStale();
+              finish(() => reject(new Error(STALE_LOAD)));
               return;
             }
             useConnectionStore.getState().endRowsStream(key, rowsOpId);
@@ -622,6 +668,11 @@ export async function startRowsStream(params: {
             const cur = useConnectionStore.getState().getRowsWindowInfo(key);
             if (!cur || cur.opId !== rowsOpId) {
               finish(() => reject(err));
+              return;
+            }
+            if (!isCurrent()) {
+              retireStale();
+              finish(() => reject(new Error(STALE_LOAD)));
               return;
             }
             useConnectionStore
@@ -637,12 +688,12 @@ export async function startRowsStream(params: {
     });
   })();
 
-  rowsInflightByQueryKey.set(q, streamTask);
+  rowsInflightByQueryKey.set(streamKey, streamTask);
   try {
     await streamTask;
   } finally {
-    if (rowsInflightByQueryKey.get(q) === streamTask) {
-      rowsInflightByQueryKey.delete(q);
+    if (rowsInflightByQueryKey.get(streamKey) === streamTask) {
+      rowsInflightByQueryKey.delete(streamKey);
     }
   }
 }

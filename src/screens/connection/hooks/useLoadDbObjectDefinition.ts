@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
+import { checkTabTarget } from "src/lib/tabs/assertTabTarget";
 import { loadDatabaseObjectDefinition } from "src/lib/databaseObjects";
+import { useRuntimeLifetime } from "src/hooks/useRuntimeLifetime";
 import type { DatabaseEngine, DatabaseObjectItem } from "src/types";
 import { useObjectDraftStore } from "src/stores/objectDrafts";
 import { useScreenStore } from "src/stores/screen";
@@ -35,6 +37,14 @@ export function useLoadDbObjectDefinition(args: {
 
   const itemId = item?.id ?? null;
 
+  // The tab's epoch moved or its connection was refused: retire the
+  // obsolete request now (its late result is ignored anyway).
+  const lifetime = useRuntimeLifetime(connectionId);
+  useEffect(() => {
+    requestSeqRef.current += 1;
+    setLoading(false);
+  }, [lifetime]);
+
   useEffect(() => {
     const target = itemRef.current;
     if (!target) {
@@ -50,15 +60,30 @@ export function useLoadDbObjectDefinition(args: {
     const generation = draft.generation;
     const revision = draft.revision;
 
-    if (!connectionId || !target.capability.canReadDefinition) {
+    if (!target.capability.canReadDefinition) {
       requestSeqRef.current += 1;
       setLoading(false);
       setLoadError(null);
       store.applyDefinition(tabId, draftKey, generation, "", target);
       return;
     }
+    // No (admitted) connection yet, e.g. a tab whose target is unknown: the
+    // draft stays as it is, never replaced by an empty definition (R5).
+    if (!connectionId) {
+      requestSeqRef.current += 1;
+      setLoading(false);
+      setLoadError(null);
+      return;
+    }
 
     const seq = ++requestSeqRef.current;
+    // D3: read only through this tab's own connection; the draft stays.
+    const tabRefusal = checkTabTarget(tabId, connectionId);
+    if (tabRefusal) {
+      setLoading(false);
+      setLoadError(tabRefusal.message);
+      return;
+    }
     const epoch = useScreenStore.getState().tabEpoch[tabId] ?? 0;
     setLoading(true);
     setLoadError(null);

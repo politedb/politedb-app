@@ -1,4 +1,7 @@
-import { useCallback, useEffect, useState } from "preact/hooks";
+import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import { checkTabTarget } from "src/lib/tabs/assertTabTarget";
+import { runtimeWorkIsCurrent } from "src/lib/runtimeConnection";
+import { useRuntimeLifetime } from "src/hooks/useRuntimeLifetime";
 import { connectionVersion } from "src/lib/tauri";
 import { runSqlQuery } from "src/lib/tauri/query";
 import type { DatabaseEngine } from "src/types";
@@ -16,10 +19,12 @@ function pingSql(engine?: DatabaseEngine): string | null {
 
 export function useConnectionHealthCheck(args: {
   runtimeConnectionId?: string;
+  /** The connection tab pinged for (D3). */
+  tabId?: string;
   engine?: DatabaseEngine;
   loadError?: string | null;
 }) {
-  const { runtimeConnectionId, engine, loadError } = args;
+  const { runtimeConnectionId, tabId, engine, loadError } = args;
   const [checking, setChecking] = useState(false);
   const [status, setStatus] = useState<HealthStatus>(
     loadError ? "degraded" : runtimeConnectionId ? "unknown" : "down"
@@ -27,6 +32,13 @@ export function useConnectionHealthCheck(args: {
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
   const [checkedAt, setCheckedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const checkSeqRef = useRef(0);
+  // The connection lost authority: retire the obsolete ping now.
+  const lifetime = useRuntimeLifetime(runtimeConnectionId);
+  useEffect(() => {
+    checkSeqRef.current += 1;
+    setChecking(false);
+  }, [lifetime]);
 
   const runCheck = useCallback(async () => {
     if (!runtimeConnectionId) {
@@ -36,6 +48,22 @@ export function useConnectionHealthCheck(args: {
       return;
     }
 
+    // D3: only the tab's own connection, on its target, is pinged; any
+    // other is not healthy for this tab.
+    const tabRefusal = checkTabTarget(tabId, runtimeConnectionId);
+    if (tabRefusal) {
+      checkSeqRef.current += 1;
+      setChecking(false);
+      setStatus("down");
+      setLatencyMs(null);
+      setError(tabRefusal.message);
+      return;
+    }
+
+    // A ping of an older or refused connection never reports health (R5).
+    const seq = ++checkSeqRef.current;
+    const current = runtimeWorkIsCurrent(runtimeConnectionId);
+    const mine = () => checkSeqRef.current === seq && current();
     setChecking(true);
     setError(null);
     const started = performance.now();
@@ -46,19 +74,21 @@ export function useConnectionHealthCheck(args: {
       } else {
         await connectionVersion(runtimeConnectionId);
       }
+      if (!mine()) return;
       const elapsed = Math.max(1, Math.round(performance.now() - started));
       setLatencyMs(elapsed);
       setCheckedAt(Date.now());
       setStatus(elapsed > 1500 ? "degraded" : "healthy");
     } catch (err) {
+      if (!mine()) return;
       setLatencyMs(null);
       setCheckedAt(Date.now());
       setStatus("down");
       setError(err instanceof Error ? err.message : "Health check failed.");
     } finally {
-      setChecking(false);
+      if (checkSeqRef.current === seq) setChecking(false);
     }
-  }, [runtimeConnectionId, engine]);
+  }, [runtimeConnectionId, tabId, engine]);
 
   useEffect(() => {
     setLatencyMs(null);

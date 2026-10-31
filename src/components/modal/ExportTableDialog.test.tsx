@@ -8,6 +8,7 @@ import {
 import { useLicenseStore } from "src/stores/license";
 import type { LicenseState } from "src/lib/tauri/license";
 import { useProUpgradeStore } from "src/stores/proUpgrade";
+import { seedTabRuntime, resetTabRuntimes } from "src/test/fixtures/tabRuntime";
 
 const hookState = {
   format: "csv" as const,
@@ -79,6 +80,7 @@ function dialogElement(
       open
       handleClose={vi.fn()}
       connectionId="c1"
+      tabId="tab-1"
       schema="public"
       tableName="users"
       columns={columns}
@@ -98,6 +100,9 @@ function enableMasking() {
 describe("ExportTableDialog UX", () => {
   beforeEach(() => {
     showMessage.mockClear();
+    hookState.handleExport.mockClear();
+    resetTabRuntimes();
+    seedTabRuntime({ tabId: "tab-1", runtimeId: "c1" });
     useLicenseStore.setState({ state: { pro_access: true } as LicenseState });
     hookState.format = "csv";
     hookState.exporting = false;
@@ -255,6 +260,20 @@ describe("ExportTableDialog UX", () => {
     const exportBtn = screen.getByRole("button", { name: "Export" });
     expect((exportBtn as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText(/0 \/ 6 output columns/)).toBeTruthy();
+  });
+
+  it("exports only through the tab's own connection (D3)", async () => {
+    renderDialog();
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    await waitFor(() => expect(hookState.handleExport).toHaveBeenCalled());
+
+    hookState.handleExport.mockClear();
+    seedTabRuntime({ tabId: "tab-1", runtimeId: "c2" });
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    expect(
+      await screen.findByText(/no longer uses this connection/)
+    ).toBeTruthy();
+    expect(hookState.handleExport).not.toHaveBeenCalled();
   });
 
   it("does not render empty masked selection as all selected", () => {

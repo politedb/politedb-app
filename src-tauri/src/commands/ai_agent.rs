@@ -118,11 +118,11 @@ pub async fn ai_agent_start(
         Some(id) => {
             let connection_id =
                 uuid::Uuid::parse_str(id).map_err(|_| "CONNECTION_NOT_FOUND".to_string())?;
-            let connection = state
-                .connections
-                .get(&connection_id)
-                .ok_or_else(|| "CONNECTION_NOT_FOUND".to_string())?
-                .clone();
+            // Admitted once for the run; every tool is admitted again.
+            let connection =
+                crate::engines::runtime::admission::admit_runtime(&state, connection_id)?;
+            let admission =
+                crate::engines::runtime::admission::runtime_admission(&state, connection_id);
             let executor =
                 catalog::executor_for(&connection).ok_or_else(|| ENGINE_UNSUPPORTED.to_string())?;
             let dialect = executor.dialect();
@@ -133,12 +133,18 @@ pub async fn ai_agent_start(
                 column_details: input.include_column_details,
             };
             bound_to = Some(connection_id);
-            let mut tools = catalog::tools::registry(executor.clone(), alive.clone(), policy);
+            let mut tools = catalog::tools::registry(
+                executor.clone(),
+                alive.clone(),
+                admission.clone(),
+                policy,
+            );
             let bound = super::ai_agent_data::BoundConnection {
                 id: connection_id,
                 connection: &connection,
                 catalog: executor,
                 alive,
+                admission,
             };
             if let Some((data_tools, consent_gate)) =
                 super::ai_agent_data::data_tools(&app, &state, bound, &provider, mode)
@@ -239,11 +245,17 @@ pub async fn ai_agent_sql_safety(
     if sql.len() > MAX_SAFETY_SQL_BYTES {
         return Ok(SqlSafety::Unknown);
     }
-    let Some(executor) = uuid::Uuid::parse_str(&connection_id)
-        .ok()
-        .and_then(|id| state.connections.get(&id).map(|c| c.clone()))
-        .and_then(|connection| catalog::executor_for(&connection))
-    else {
+    let Ok(id) = uuid::Uuid::parse_str(&connection_id) else {
+        return Ok(SqlSafety::Unknown);
+    };
+    let connection = match crate::engines::runtime::admission::admit_runtime(&state, id) {
+        Ok(connection) => connection,
+        Err(e) if e == "CONNECTION_NOT_FOUND" => return Ok(SqlSafety::Unknown),
+        // A stale or unknown connection: the caller treats it as unknown and
+        // the tab learns why.
+        Err(e) => return Err(e),
+    };
+    let Some(executor) = catalog::executor_for(&connection) else {
         return Ok(SqlSafety::Unknown);
     };
     Ok(safety_on(executor.as_ref(), &sql).await)

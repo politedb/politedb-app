@@ -1,6 +1,7 @@
 import { act, render } from "@testing-library/preact";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useImportTableData } from "./useImportTableData";
+import { seedTabRuntime, resetTabRuntimes } from "src/test/fixtures/tabRuntime";
 
 const mocks = vi.hoisted(() => ({ importCsv: vi.fn() }));
 vi.mock("src/lib/system-dialog", () => ({
@@ -20,7 +21,38 @@ function Harness() {
   return null;
 }
 
+beforeEach(() => {
+  mocks.importCsv.mockReset();
+  resetTabRuntimes();
+  seedTabRuntime({ tabId: "tab-1", runtimeId: "c1" });
+});
+
 describe("runImport", () => {
+  it("imports nothing through a connection the tab no longer uses (D3)", async () => {
+    seedTabRuntime({ tabId: "tab-1", runtimeId: "c2" });
+    render(<Harness />);
+    await act(async () => {
+      await api.loadDataImport();
+    });
+    let outcome!: Awaited<ReturnType<typeof api.runImport>>;
+    await act(async () => {
+      outcome = await api.runImport({
+        connectionId: "c1",
+        tabId: "tab-1",
+        schema: "public",
+        tableName: "users",
+        columns: [{ name: "id", db_type: "int" }],
+        limit: 0,
+        offset: 0,
+        engine: "postgres" as const,
+        onSuccess: async () => {},
+      });
+    });
+    expect(outcome).toEqual({ status: "not-started" });
+    expect(mocks.importCsv).not.toHaveBeenCalled();
+    expect(api.error).toContain("no longer uses this connection");
+  });
+
   it("runs one import at a time, even for two calls in the same turn", async () => {
     let finish!: () => void;
     mocks.importCsv.mockReturnValue(
@@ -32,6 +64,7 @@ describe("runImport", () => {
     });
     const config = {
       connectionId: "c1",
+      tabId: "tab-1",
       schema: "public",
       tableName: "users",
       columns: [{ name: "id", db_type: "int" }],
@@ -63,6 +96,7 @@ describe("runImport", () => {
     await act(async () => {
       outcome = await api.runImport({
         connectionId: "c1",
+        tabId: "tab-1",
         schema: "public",
         tableName: "users",
         columns: [{ name: "id", db_type: "int" }],
@@ -85,6 +119,7 @@ describe("runImport", () => {
     });
     const config = {
       connectionId: "c1",
+      tabId: "tab-1",
       schema: "public",
       tableName: "users",
       columns: [{ name: "id", db_type: "int" }],

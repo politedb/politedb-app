@@ -1,6 +1,8 @@
 use tauri::{AppHandle, State};
 use uuid::Uuid;
 
+use crate::engines::driver::ConnectPolicy;
+use crate::profiles::target_override::{target_identity, RuntimeTarget};
 use crate::ssh_tunnel;
 use crate::ssh_tunnel::pool::{acquire_shared_tunnel, release_shared_tunnel_by_conn};
 use crate::state::AppState;
@@ -12,19 +14,57 @@ use super::helpers::close_tunnel_quietly;
 pub async fn connection_create(
     app: AppHandle,
     state: State<'_, AppState>,
+    input: ConnectionCreateInput,
+) -> Result<ConnectionInfo, String> {
+    let target = target_identity(None, None, &input);
+    create_runtime(&app, &state, input, ConnectPolicy::default(), target).await
+}
+
+/// A bounded, nonsensitive category for a connect error (its leading
+/// `CODE:`), never the message itself, which can name the database or path.
+pub(crate) fn error_category(err: &str) -> &str {
+    let code = err
+        .split(|c: char| c == ':' || c.is_whitespace())
+        .next()
+        .unwrap_or("");
+    if !code.is_empty()
+        && code.len() <= 64
+        && code
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+    {
+        code
+    } else {
+        "OTHER"
+    }
+}
+
+/// The trace of a failed connect: its category only (R10).
+fn log_connect_failed(id: Uuid, engine: crate::types::EngineKind, err: &str) {
+    tracing::error!(
+        conn_id = %id,
+        engine = ?engine,
+        error = error_category(err),
+        "connection_create: connect failed"
+    );
+}
+
+/// Opens and publishes a runtime connection opened on `target`. The target
+/// is published before the connection (and removed after it), so every
+/// listed connection has one.
+pub(crate) async fn create_runtime(
+    app: &AppHandle,
+    state: &AppState,
     mut input: ConnectionCreateInput,
+    policy: ConnectPolicy,
+    target: RuntimeTarget,
 ) -> Result<ConnectionInfo, String> {
     let id = Uuid::new_v4();
 
     let engine = input.engine;
     let label = input.label.clone();
 
-    tracing::info!(
-        conn_id = %id,
-        engine = ?engine,
-        label = %label,
-        "connection_create: start"
-    );
+    tracing::info!(conn_id = %id, engine = ?engine, "connection_create: start");
 
     let driver = state.engines.get(engine).ok_or("ENGINE_NOT_SUPPORTED")?;
 
@@ -34,16 +74,11 @@ pub async fn connection_create(
     if let Some(ssh_in) = input.ssh.clone() {
         tracing::info!(conn_id = %id, "connection_create: opening ssh tunnel");
 
-        let (key, shared) = acquire_shared_tunnel(&state, &ssh_in)
+        let (key, shared) = acquire_shared_tunnel(state, &ssh_in)
             .await
             .map_err(|e| format!("SSH_TUNNEL_OPEN_FAILED: {e:#}"))?;
 
-        tracing::info!(
-            conn_id = %id,
-            ssh_key = ?key,
-            local_bind = %shared.local_addr,
-            "connection_create: ssh tunnel acquired"
-        );
+        tracing::info!(conn_id = %id, "connection_create: ssh tunnel acquired");
 
         let local_port = shared.local_addr.port();
         input = driver.rewrite_tunnel_endpoint(input, "127.0.0.1", local_port)?;
@@ -51,45 +86,42 @@ pub async fn connection_create(
         acquired_key = Some(key);
     }
 
-    tracing::info!(
-        conn_id = %id,
-        engine = ?engine,
-        driver_kind = ?driver.kind(),
-        "connection_create: driver resolved"
-    );
-
     // 1) Connect (do NOT mutate state before connect succeeds)
-    let conn = match driver.connect(&app, id, label.clone(), input).await {
+    let conn = match driver
+        .connect_with_policy(app, id, label.clone(), input, &policy)
+        .await
+    {
         Ok(c) => c,
         Err(e) => {
-            tracing::error!(conn_id=%id, engine=?engine, error=%e, "connection_create: connect failed");
+            log_connect_failed(id, engine, &e);
 
             // rollback tunnel ref if acquired
             if let Some(key) = acquired_key {
                 // temporarily register mapping so release can find it
                 // (or you can write a release_by_key() helper)
                 state.conn_to_tunnel.insert(id, key);
-                release_shared_tunnel_by_conn(&state, id).await;
+                release_shared_tunnel_by_conn(state, id).await;
             }
 
             return Err(e);
         }
     };
 
-    // 3) Insert runtime connection
-    state.connections.insert(id, conn);
+    // 2) Publish: the target first, then the connection.
+    publish_runtime(state, id, conn, target.clone());
 
     if let Some(key) = acquired_key.take() {
         state.conn_to_tunnel.insert(id, key);
     }
 
-    tracing::info!(
-        conn_id = %id,
-        engine = ?engine,
-        "connection_create: inserted into runtime state"
-    );
+    tracing::info!(conn_id = %id, engine = ?engine, "connection_create: inserted into runtime state");
 
-    Ok(ConnectionInfo { id, engine, label })
+    Ok(ConnectionInfo {
+        id,
+        engine,
+        label,
+        target: Some(target),
+    })
 }
 
 #[tauri::command]
@@ -342,21 +374,50 @@ pub async fn connection_test(
     res
 }
 
+/// Publishes a runtime connection: its target first, so a listed
+/// connection always has one.
+pub(crate) fn publish_runtime(
+    state: &AppState,
+    id: Uuid,
+    conn: crate::engines::EngineConnection,
+    target: RuntimeTarget,
+) {
+    state.runtime_targets.insert(id, target);
+    state.connections.insert(id, conn);
+}
+
+/// Unpublishes a runtime connection: the connection first, then its target.
+pub(crate) fn unpublish_runtime(
+    state: &AppState,
+    id: Uuid,
+) -> Option<crate::engines::EngineConnection> {
+    let removed = state.connections.remove(&id).map(|(_, conn)| conn);
+    state.runtime_targets.remove(&id);
+    removed
+}
+
 #[tauri::command]
 pub async fn connection_list(state: State<'_, AppState>) -> Result<Vec<ConnectionInfo>, String> {
-    Ok(state
+    Ok(list_runtimes(&state))
+}
+
+pub(crate) fn list_runtimes(state: &AppState) -> Vec<ConnectionInfo> {
+    state
         .connections
         .iter()
         .map(|c| {
             let engine = c.value().engine_kind();
 
+            // Read while this connection's entry is held: removal (connection
+            // first, then its target) cannot slip in between.
             ConnectionInfo {
                 id: *c.key(),
                 engine,
                 label: c.value().label(),
+                target: state.runtime_targets.get(c.key()).map(|t| t.clone()),
             }
         })
-        .collect())
+        .collect()
 }
 
 #[tauri::command]
@@ -402,9 +463,9 @@ pub async fn connection_remove(
     // The connection is removed first, then its sessions end (rolled back):
     // a session begun meanwhile either is ended here or, finding the
     // connection gone, ends itself (sql_session_begin).
-    let removed = state.connections.remove(&connection_id);
+    let removed = unpublish_runtime(&state, connection_id);
     state.sql_sessions.end_for_connection(connection_id).await;
-    if let Some((_id, conn)) = removed {
+    if let Some(conn) = removed {
         conn.close().await;
     }
 
@@ -412,4 +473,139 @@ pub async fn connection_remove(
     crate::ssh_tunnel::pool::release_shared_tunnel_by_conn(&state, connection_id).await;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod registry_tests {
+    use super::*;
+    use crate::engines::registry::EngineRegistry;
+    use crate::engines::sqlite::driver::connect_sqlite;
+    use crate::types::{EngineKind, SqliteConnectInput};
+
+    async fn sqlite_runtime(id: Uuid) -> crate::engines::EngineConnection {
+        let path = std::env::temp_dir().join(format!("pdb-registry-{id}.db"));
+        let input = SqliteConnectInput {
+            path: path.to_string_lossy().into_owned(),
+            statement_timeout_ms: None,
+        };
+        crate::engines::EngineConnection::Sqlite(
+            connect_sqlite(id, "t".into(), input).await.unwrap(),
+        )
+    }
+
+    fn target(display: &str) -> RuntimeTarget {
+        RuntimeTarget {
+            profile_id: Some(Uuid::new_v4()),
+            profile_revision: Some("r".into()),
+            database_override: Some(display.into()),
+            engine: EngineKind::Sqlite,
+            display: display.into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_listed_connection_always_has_its_target() {
+        let state = std::sync::Arc::new(AppState::new(EngineRegistry::new(vec![])));
+        let ids: Vec<Uuid> = (0..16).map(|_| Uuid::new_v4()).collect();
+        let mut runtimes = Vec::new();
+        for id in &ids {
+            runtimes.push(sqlite_runtime(*id).await);
+        }
+
+        // Publish and remove while another thread keeps listing.
+        let lister = {
+            let state = state.clone();
+            std::thread::spawn(move || {
+                for _ in 0..2000 {
+                    for info in list_runtimes(&state) {
+                        assert!(info.target.is_some(), "listed without target");
+                    }
+                }
+            })
+        };
+        for (id, conn) in ids.iter().zip(runtimes) {
+            publish_runtime(&state, *id, conn, target("db"));
+        }
+        let listed = list_runtimes(&state);
+        assert_eq!(listed.len(), ids.len());
+        assert_eq!(listed[0].target.as_ref().unwrap().display, "db");
+        for id in &ids {
+            assert!(unpublish_runtime(&state, *id).is_some());
+        }
+        lister.join().unwrap();
+
+        assert!(list_runtimes(&state).is_empty());
+        assert!(state.runtime_targets.is_empty(), "no target left behind");
+        for id in &ids {
+            let _ =
+                std::fs::remove_file(std::env::temp_dir().join(format!("pdb-registry-{id}.db")));
+        }
+    }
+}
+
+#[cfg(test)]
+mod logging_tests {
+    use super::{error_category, log_connect_failed};
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
+    use tracing_subscriber::fmt::MakeWriter;
+
+    #[derive(Clone, Default)]
+    struct Buffer(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Buffer {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> MakeWriter<'a> for Buffer {
+        type Writer = Buffer;
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    /// The captured trace of a failed connect carries no database name,
+    /// path, host or label from the error.
+    #[test]
+    fn a_failed_connect_trace_names_nothing() {
+        let buffer = Buffer::default();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(buffer.clone())
+            .with_ansi(false)
+            .finish();
+        tracing::subscriber::with_default(subscriber, || {
+            log_connect_failed(
+                uuid::Uuid::new_v4(),
+                crate::types::EngineKind::Postgres,
+                "RUNTIME_CONNECT_FAILED: database \"secret_db\" on secret-host for /Users/me/secret.key (Secret Label)",
+            );
+        });
+        let out = String::from_utf8(buffer.0.lock().unwrap().clone()).unwrap();
+        assert!(out.contains("connect failed"), "{out}");
+        assert!(out.contains("RUNTIME_CONNECT_FAILED"), "{out}");
+        for marker in ["secret_db", "secret-host", "secret.key", "Secret Label"] {
+            assert!(!out.contains(marker), "{marker} in {out}");
+        }
+    }
+
+    /// Connect failures are logged by category only: the message can name
+    /// the database, a file path or the host.
+    #[test]
+    fn connect_errors_are_logged_by_category_only() {
+        let marker =
+            "SQLITE_CONNECT_FAILED: SQLITE_OPEN_FAILED: unable to open /Users/me/secret-db.sqlite";
+        assert_eq!(error_category(marker), "SQLITE_CONNECT_FAILED");
+        assert_eq!(
+            error_category("db error: FATAL: database \"secret_db\" does not exist"),
+            "OTHER"
+        );
+        assert_eq!(error_category("RUNTIME_STALE"), "RUNTIME_STALE");
+        assert_eq!(error_category(""), "OTHER");
+    }
 }

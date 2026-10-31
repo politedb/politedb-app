@@ -12,10 +12,17 @@ use crate::state::app_state::AppState;
 #[derive(Debug, Serialize)]
 pub struct SignalBackendResult {
     pub outcome: SignalOutcome,
+    /// Why the connection itself was refused (`RUNTIME_STALE`,
+    /// `RUNTIME_IDENTITY_MISSING`), so the tab can say so.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 fn result(outcome: SignalOutcome) -> Result<SignalBackendResult, String> {
-    Ok(SignalBackendResult { outcome })
+    Ok(SignalBackendResult {
+        outcome,
+        reason: None,
+    })
 }
 
 /// Cancel the current query of, or terminate, another client session seen in
@@ -37,9 +44,17 @@ pub async fn health_inspector_signal_backend(
     };
     // Borrow the runtime's own pool (SSH-rewritten endpoint); never open a
     // separate connection.
-    let pool = match state.connections.get(&connection_id).map(|c| c.clone()) {
-        Some(EngineConnection::Postgres(pg)) => pg.pool,
-        _ => return result(SignalOutcome::Unavailable),
+    let pool = match crate::engines::runtime::admission::admit_runtime(&state, connection_id) {
+        Ok(EngineConnection::Postgres(pg)) => pg.pool,
+        Ok(_) => return result(SignalOutcome::Unavailable),
+        // Not sent: the connection may take no new work (stale or unknown).
+        Err(reason) if reason != "CONNECTION_NOT_FOUND" => {
+            return Ok(SignalBackendResult {
+                outcome: SignalOutcome::Unavailable,
+                reason: Some(reason),
+            })
+        }
+        Err(_) => return result(SignalOutcome::Unavailable),
     };
     let Ok(app_name) = postgres_app_name() else {
         return result(SignalOutcome::SetupFailed);

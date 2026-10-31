@@ -33,6 +33,7 @@ import type { LicenseState } from "src/lib/tauri";
 import { useLicenseStore } from "src/stores/license";
 import { setAssistantMode } from "src/lib/ai-assistant/assistantMode";
 import { useAiAssistantSubmit } from "./useAiAssistantSubmit";
+import { resetTabRuntimes, seedTabRuntime } from "src/test/fixtures/tabRuntime";
 
 function setPro(pro_access: boolean) {
   useLicenseStore.setState({ state: { pro_access } as LicenseState });
@@ -57,6 +58,7 @@ function setup(overrides: Record<string, unknown> = {}) {
     model: "claude-opus-5-5",
     engine: "postgres",
     runtimeConnectionId: "conn-1",
+    tabId: "tab-1",
     activeSchema: "public",
     tables: [{ schema: "public", name: "orders" }],
     currentSql: "SELECT 1",
@@ -65,10 +67,12 @@ function setup(overrides: Record<string, unknown> = {}) {
     ...overrides,
   } as any;
   const { result } = renderHook(() => useAiAssistantSubmit(args));
-  return { result, finalize };
+  return { result, finalize, args };
 }
 
 beforeEach(() => {
+  resetTabRuntimes();
+  seedTabRuntime({ tabId: "tab-1", runtimeId: "conn-1" });
   vi.clearAllMocks();
   // Agent mode is a Pro feature; these cases run with Pro unless they say otherwise.
   setPro(true);
@@ -78,6 +82,18 @@ beforeEach(() => {
 });
 
 describe("useAiAssistantSubmit with the AI agent", () => {
+  it("starts no agent run through a connection the tab may not use (D3)", async () => {
+    seedTabRuntime({ tabId: "tab-1", runtimeId: "conn-2" });
+    const { result, args } = setup();
+    await act(() => result.current.handleSubmit());
+    expect(mocks.runAgentTurn).not.toHaveBeenCalled();
+    expect(mocks.plan).not.toHaveBeenCalled();
+    expect(args.appendAssistantMessage).toHaveBeenCalledWith(
+      { text: expect.stringContaining("no longer uses this connection") },
+      expect.any(Number)
+    );
+  });
+
   it("uses the agent when enabled on a supported engine", async () => {
     mocks.runAgentTurn.mockResolvedValue({
       text: "Count them:\n```sql\nSELECT customer_id, count(*) FROM orders GROUP BY 1;\n```",

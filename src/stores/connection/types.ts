@@ -65,6 +65,14 @@ export type NewTableDataState = {
   tableName: string;
   primaryKey: string | string[];
   columns: TableColumn[];
+  /**
+   * The schema the table is created in and its window's own table name
+   * (the draft's identity: the window id is `table:<schema>.<name>`, which
+   * cannot be split back when either contains a dot). Missing on drafts
+   * saved before they were recorded.
+   */
+  schema?: string;
+  windowName?: string;
 };
 
 export type TableFilterState = {

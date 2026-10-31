@@ -3,6 +3,10 @@ import { create } from "zustand";
 import { useProfileStore } from "src/stores/profile";
 import { ProfileTab, QuerySafetyMode, useScreenStore } from "src/stores/screen";
 import { normalizeQuerySafetyMode } from "@root/src/lib/queries/querySafety";
+import {
+  normalizePersistedTarget,
+  overrideMirror,
+} from "src/lib/tabs/tabTarget";
 
 import type {
   ConnectionOpenLogEntry,
@@ -49,6 +53,7 @@ type PersistedProfileTab = Pick<
   | "isLocked"
   | "querySafetyMode"
   | "databaseOverride"
+  | "target"
 >;
 
 type PersistedWindow =
@@ -140,6 +145,7 @@ function buildSnapshotFromScreen(): PersistentSnapshotV1 {
       profileId: t.profileId,
       isLocked: t.isLocked,
       querySafetyMode: t.querySafetyMode,
+      target: t.target ?? { kind: "unknown" },
       databaseOverride: t.databaseOverride,
     })),
 
@@ -298,8 +304,13 @@ export const usePersistentStore = create<PersistentStoreState>((set, get) => ({
           const mode = normalizeQuerySafetyMode(
             t.querySafetyMode ?? (t.isLocked ? "lock" : "default")
           );
+          // What the tab was opened on: its persisted target only (a tab
+          // saved before targets were recorded is unknown, R12).
+          const target = normalizePersistedTarget(t.target, t.engine);
           return {
             ...t,
+            target,
+            databaseOverride: overrideMirror(target),
             querySafetyMode: mode,
             isLocked: mode === "lock",
           };
@@ -324,7 +335,14 @@ export const usePersistentStore = create<PersistentStoreState>((set, get) => ({
       const activeWindowId: Record<string, string | null> = {};
 
       for (const tab of profileTabs) {
-        const list = snap.openWindows[tab.id] ?? [];
+        // Runtime handles never survive a restart (R11).
+        const list = (snap.openWindows[tab.id] ?? []).map((w) => {
+          if (!w || typeof w !== "object" || !("connectionId" in w)) return w;
+          const { connectionId: _stale, ...rest } = w as OpenWindow & {
+            connectionId?: string;
+          };
+          return rest as PersistedWindow;
+        });
         openWindows[tab.id] = list;
         const lastId = list.length > 0 ? list[list.length - 1].id : null;
         activeWindowId[tab.id] = snap.activeWindowId[tab.id] ?? lastId;

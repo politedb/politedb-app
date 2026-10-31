@@ -12,12 +12,9 @@ fn google_sheets_connection(
     state: &AppState,
     connection_id: Uuid,
 ) -> Result<crate::engines::google_sheets::connection::GoogleSheetsConn, String> {
-    let connection = state
-        .connections
-        .get(&connection_id)
-        .ok_or("CONNECTION_NOT_FOUND")?;
-    match connection.value() {
-        EngineConnection::GoogleSheets(connection) => Ok(connection.clone()),
+    let connection = crate::engines::runtime::admission::admit_runtime(state, connection_id)?;
+    match connection {
+        EngineConnection::GoogleSheets(connection) => Ok(connection),
         _ => Err("ENGINE_NOT_SUPPORTED".into()),
     }
 }

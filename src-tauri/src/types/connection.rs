@@ -49,6 +49,10 @@ pub struct ConnectionInfo {
     pub id: Uuid,
     pub engine: EngineKind,
     pub label: String,
+    /// What the connection was opened on; `None` only if it is missing,
+    /// which callers treat as unknown.
+    #[serde(default)]
+    pub target: Option<crate::profiles::target_override::RuntimeTarget>,
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]

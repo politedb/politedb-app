@@ -1,7 +1,4 @@
-import {
-  currentDatabaseFromInput,
-  inferDatabaseOverrideFromTabLabel,
-} from "src/lib/connection/connection";
+import { resolveTabTarget } from "src/lib/tabs/tabTarget";
 import { tabSafetyModeNow } from "src/lib/dump/dumpRestoreSafety";
 import { readNeedsTouchId } from "src/lib/queries/querySafety";
 import { securityTouchIdAuthenticate } from "src/lib/tauri/security";
@@ -22,11 +19,9 @@ export function tabDatabase(tabId: string): string {
     .profileTabs.find((item) => item.id === tabId);
   if (!tab) return "";
   const profile = useProfileStore.getState().getProfileById(tab.profileId);
-  return (
-    tab.databaseOverride ||
-    inferDatabaseOverrideFromTabLabel(profile?.label, tab.label) ||
-    currentDatabaseFromInput(profile?.engine, profile?.input)
-  );
+  // What the tab is opened on (R2); an unknown tab is on none (it never
+  // connects).
+  return resolveTabTarget(tab, profile).display;
 }
 
 /** Open tabs of a saved connection that are using a database. */

@@ -2,6 +2,7 @@ import { useCallback, useState } from "preact/hooks";
 import { confirmDialog, showMessage } from "src/lib/system-dialog";
 import { dropTableQuery, truncateTableQuery } from "src/lib/queries/sql";
 import type { DatabaseEngine, OpenWindow, TableItem } from "src/types";
+import { assertTabTarget } from "src/lib/tabs/assertTabTarget";
 
 export type TruncateOptions = { restartIdentity: boolean; cascade: boolean };
 
@@ -33,6 +34,8 @@ function errorMessage(error: unknown) {
  * Cascade / Restart identity options. Both are refused while the connection is locked.
  */
 export function useTableDestructiveActions(opts: {
+  /** The connection tab the actions run in (D3: its own connection only). */
+  tabId: string;
   isProfileLocked: boolean;
   engine?: DatabaseEngine;
   connectionId?: string | null;
@@ -40,6 +43,7 @@ export function useTableDestructiveActions(opts: {
   runSqlWithHistory: (args: {
     connectionId: string;
     sql: string;
+    tabId: string;
   }) => Promise<unknown>;
   refreshSchemaAndTables: () => Promise<unknown>;
   closeWindow: (id: string, e: MouseEvent) => Promise<unknown> | unknown;
@@ -47,6 +51,7 @@ export function useTableDestructiveActions(opts: {
   markTableStale: (key: string) => void;
 }) {
   const {
+    tabId,
     isProfileLocked,
     engine,
     connectionId,
@@ -61,11 +66,14 @@ export function useTableDestructiveActions(opts: {
   const dropTable = useCallback(
     async (table: TableItem) => {
       if (isProfileLocked || table.new) return;
-      if (!(await confirmDropTable(table.name))) return;
       try {
         if (!connectionId) throw new Error("Not connected.");
+        // D3: before the question, and again after it.
+        assertTabTarget(tabId, connectionId);
+        if (!(await confirmDropTable(table.name))) return;
+        assertTabTarget(tabId, connectionId);
         const sql = dropTableQuery(table.schema, table.name, engine);
-        await runSqlWithHistory({ connectionId, sql });
+        await runSqlWithHistory({ connectionId, sql, tabId });
         await refreshSchemaAndTables();
         const key = tableIdentity(table);
         for (const window of windows) {
@@ -81,6 +89,7 @@ export function useTableDestructiveActions(opts: {
       }
     },
     [
+      tabId,
       isProfileLocked,
       connectionId,
       engine,
@@ -94,9 +103,18 @@ export function useTableDestructiveActions(opts: {
   const openTruncate = useCallback(
     (table: TableItem) => {
       if (isProfileLocked || table.new) return;
+      try {
+        if (connectionId) assertTabTarget(tabId, connectionId);
+      } catch (error) {
+        void showMessage(errorMessage(error), {
+          title: "Error",
+          kind: "error",
+        });
+        return;
+      }
       setTruncateTarget(table);
     },
-    [isProfileLocked]
+    [tabId, connectionId, isProfileLocked]
   );
 
   const closeTruncate = useCallback(() => setTruncateTarget(null), []);
@@ -107,11 +125,13 @@ export function useTableDestructiveActions(opts: {
       const table = truncateTarget;
       if (!table || isProfileLocked) return;
       if (!connectionId) throw new Error("Not connected.");
+      assertTabTarget(tabId, connectionId);
       const sql = truncateTableQuery(table.schema, table.name, options, engine);
-      await runSqlWithHistory({ connectionId, sql });
+      await runSqlWithHistory({ connectionId, sql, tabId });
       markTableStale(tableIdentity(table));
     },
     [
+      tabId,
       truncateTarget,
       isProfileLocked,
       connectionId,

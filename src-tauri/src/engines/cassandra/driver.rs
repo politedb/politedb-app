@@ -155,9 +155,27 @@ async fn build_session(input: &CassandraConnectInput, password: &str) -> Result<
         .map_err(|e| format!("CASSANDRA_CONNECT_FAILED: {e}"))
 }
 
+/// A keyspace name as a CQL identifier: a plain lowercase name as is, any
+/// other name quoted (case kept) with embedded quotes doubled, so it can never
+/// end the identifier.
+fn keyspace_ident(ks: &str) -> String {
+    let plain = ks
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_lowercase() || c == '_')
+        && ks
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+    if plain {
+        ks.to_string()
+    } else {
+        format!("\"{}\"", ks.replace('"', "\"\""))
+    }
+}
+
 async fn smoke_cassandra(session: &Session, keyspace: Option<&str>) -> Result<(), String> {
     if let Some(ks) = keyspace.filter(|s| !s.is_empty()) {
-        let stmt = format!("USE {ks}");
+        let stmt = format!("USE {}", keyspace_ident(ks));
         session
             .query_unpaged(stmt, &[])
             .await
@@ -195,4 +213,17 @@ async fn test_cassandra_direct(
     let password = resolve_cassandra_password(app, &input.password, override_plain).await?;
     let session = build_session(&input, &password).await?;
     smoke_cassandra(&session, sanitize_opt(&input.keyspace).as_deref()).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::keyspace_ident;
+
+    #[test]
+    fn keyspace_identifiers() {
+        assert_eq!(keyspace_ident("app_1"), "app_1");
+        assert_eq!(keyspace_ident("MyKs"), "\"MyKs\"");
+        assert_eq!(keyspace_ident("a\"; DROP"), "\"a\"\"; DROP\"");
+        assert_eq!(keyspace_ident("1ks"), "\"1ks\"");
+    }
 }

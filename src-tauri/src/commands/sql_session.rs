@@ -31,21 +31,18 @@ pub async fn sql_session_begin(
         "snapshot" => SqlSessionMode::Snapshot,
         _ => return Err("SQL_SESSION_MODE_INVALID".into()),
     };
-    let config = match state
-        .connections
-        .get(&input.connection_id)
-        .ok_or("CONNECTION_NOT_FOUND")?
-        .value()
-    {
-        EngineConnection::Postgres(pg) => pg.config.clone(),
-        _ => return Err("SQL_SESSION_UNSUPPORTED".into()),
-    };
+    let config =
+        match crate::engines::runtime::admission::admit_runtime(&state, input.connection_id)? {
+            EngineConnection::Postgres(pg) => pg.config,
+            _ => return Err("SQL_SESSION_UNSUPPORTED".into()),
+        };
     let (session_id, snapshot_id) = state
         .sql_sessions
         .begin(input.connection_id, &config, mode)
         .await?;
     // The connection may have been removed meanwhile; its cleanup then
-    // missed this session.
+    // missed this session. Existence only (exempt from admission): a session
+    // begun before a profile save keeps working.
     if !state.connections.contains_key(&input.connection_id) {
         let _ = state.sql_sessions.end(session_id, false).await;
         return Err("CONNECTION_NOT_FOUND".into());

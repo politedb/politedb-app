@@ -1,4 +1,5 @@
 import type { DatabaseEngine } from "src/types";
+import { checkTabTarget } from "src/lib/tabs/assertTabTarget";
 import { operationExecuteTransaction } from "src/lib/tauri";
 import { runSqlQuery } from "src/lib/tauri/query";
 import { normalizeSqlError } from "src/lib/tauri/queryValidate";
@@ -69,6 +70,12 @@ export async function saveObjectDraftsForTab(args: {
     const connectionId = await args.resolveConnectionId();
     if (!connectionId) {
       args.setError("No active connection.");
+      return;
+    }
+    // D3: only through the tab's own connection, on its target.
+    const refusal = checkTabTarget(tabId, connectionId);
+    if (refusal) {
+      args.setError(refusal.message);
       return;
     }
 

@@ -1,4 +1,9 @@
 import { useCallback, useMemo } from "preact/hooks";
+import { showMessage } from "src/lib/system-dialog";
+import {
+  newTableDraftWindow,
+  UNRESOLVED_DRAFT_REASON,
+} from "../lib/newTableDrafts";
 import type {
   DatabaseCatalogKind,
   DatabaseCatalogWindow,
@@ -189,7 +194,36 @@ export function useConnectionWindows(
 
   const openTable = useCallback(
     async (table: TableItem) => {
-      const existing = windows.find(
+      // A draft listed while its window is closed reopens that window, with
+      // its own draft (its id keys the draft).
+      if (table.new && table.draftWindowId) {
+        const draftWindowId = table.draftWindowId;
+        const liveNow =
+          useScreenStore.getState().openWindows[activeProfileScreen] ?? [];
+        if (!liveNow.some((w) => w.id === draftWindowId)) {
+          const draft =
+            useConnectionStore.getState().newTableData[activeProfileScreen]?.[
+              draftWindowId
+            ];
+          const win = newTableDraftWindow(draftWindowId, draft);
+          if (!win) {
+            void showMessage(
+              `This unsaved table cannot be opened: ${UNRESOLVED_DRAFT_REASON}.`,
+              { title: "Unsaved table", kind: "warning" }
+            );
+            return draftWindowId;
+          }
+          addWindow(activeProfileScreen, win);
+        }
+        setActiveWindowId(activeProfileScreen, draftWindowId);
+        return draftWindowId;
+      }
+
+      // The live windows, not this render's: a window closed just before
+      // (a new table's draft, once created) is not reused.
+      const live =
+        useScreenStore.getState().openWindows[activeProfileScreen] ?? [];
+      const existing = live.find(
         (w) =>
           w.type === "table" &&
           w.table.schema === table.schema &&
@@ -216,7 +250,7 @@ export function useConnectionWindows(
 
       return win.id;
     },
-    [activeProfileScreen, windows, addWindow, setActiveWindowId]
+    [activeProfileScreen, addWindow, setActiveWindowId]
   );
 
   const openDatabaseObjectsManager = useCallback(

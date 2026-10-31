@@ -4,7 +4,8 @@ import { createSchemaQuery, createTableQuery } from "src/lib/queries/sql";
 import { sqlForDisplay } from "src/lib/sql/sqlDialect";
 import { useScreenStore } from "src/stores/screen";
 import { useConnectionStore } from "src/stores/connection";
-import { profileConnect } from "src/lib/tauri";
+import { connectTabOnce } from "src/lib/runtimeConnection";
+import { assertTabTarget } from "src/lib/tabs/assertTabTarget";
 import type { TableColumn } from "src/types";
 import { normalizeSqlError } from "src/lib/tauri/queryValidate";
 
@@ -20,7 +21,7 @@ interface ICreateTable {
 }
 
 export function useCreateSchemaTable() {
-  const { profileTabs, activeProfileScreen, updateTab } = useScreenStore();
+  const { profileTabs, activeProfileScreen } = useScreenStore();
   const { addSchema, addQueryHistory } = useConnectionStore();
 
   const [busy, setBusy] = useState(false);
@@ -36,15 +37,9 @@ export function useCreateSchemaTable() {
     // reuse if exists
     if (activeTab.runtimeConnectionId) return activeTab.runtimeConnectionId;
 
-    // ask backend to connect from saved profile (resolve keychain inside backend)
-    const res = await profileConnect(activeTab.profileId);
-    const connId = res.connection.id;
-
-    // persist to tab store
-    updateTab(activeTab.id, { runtimeConnectionId: connId });
-
-    return connId;
-  }, [activeTab, updateTab]);
+    // Connect on what the tab was opened on (installs it on the tab).
+    return connectTabOnce(activeTab.id);
+  }, [activeTab]);
 
   const createSchema = useCallback(
     async (schema: string, onSuccess?: () => void) => {
@@ -56,6 +51,7 @@ export function useCreateSchemaTable() {
       try {
         const connId = await ensureRuntimeConnection();
         if (!connId) return;
+        assertTabTarget(activeTab.id, connId);
 
         const query = createSchemaQuery(schema);
         addQueryHistory(activeTab.id, sqlForDisplay(query, activeTab.engine));
@@ -94,6 +90,7 @@ export function useCreateSchemaTable() {
           setBusy(false);
           return;
         }
+        assertTabTarget(activeTab.id, connId);
 
         const { schema, tableName, columns, primaryKey } = payload;
         const query = createTableQuery(

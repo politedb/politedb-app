@@ -43,6 +43,7 @@ export async function executeGoogleSheetsLoad(
       const result = await loadGoogleSheetsRows({
         key,
         connId: ctx.connId,
+        isCurrent: ctx.isCurrent,
         tableName: ctx.tableName,
         limit: ctx.limit,
         offset: ctx.offset,

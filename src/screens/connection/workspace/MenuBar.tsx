@@ -30,7 +30,6 @@ import {
 import { cn } from "src/utils/cn";
 import {
   formatConnectionDatabaseDisplay,
-  inferDatabaseOverrideFromTabLabel,
   pickHostDbUser,
   usesTableOnlyBreadcrumb,
 } from "src/lib/connection/connection";
@@ -41,8 +40,12 @@ import { formatDatabaseVersion, normalizeEngineName } from "src/utils/convert";
 import { DatabaseManagerDialog } from "src/components/modal/DatabaseManagerDialog";
 import { canOpenDatabases } from "src/hooks/useDatabases";
 import { formatTableBreadcrumbTarget } from "src/lib/engines";
-import { connectionCreate } from "src/lib/tauri";
-import type { ConnectionCreateInput } from "src/lib/tauri";
+import { connectTabOnce, tabLabelFor } from "src/lib/runtimeConnection";
+import {
+  resolveTabTarget,
+  supportsDatabaseOverride,
+} from "src/lib/tabs/tabTarget";
+import { useRuntimeTargetsStore } from "src/stores/runtimeTargets";
 import { type QuerySafetyMode } from "@root/src/lib/queries/querySafety";
 import { v4 as uuid } from "uuid";
 import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
@@ -166,101 +169,6 @@ function classifyTags(tags: string[]) {
   };
 }
 
-function withDatabaseInput(
-  input: ConnectionCreateInput,
-  database: string
-): ConnectionCreateInput {
-  if (input.engine === "postgres") {
-    if (!input.postgres) throw new Error("POSTGRES_CONFIG_MISSING");
-    return {
-      ...input,
-      postgres: {
-        ...input.postgres,
-        database,
-      },
-    };
-  }
-
-  if (input.engine === "mysql" || input.engine === "mariadb") {
-    if (!input.mysql) throw new Error("MYSQL_CONFIG_MISSING");
-    return {
-      ...input,
-      mysql: {
-        ...input.mysql,
-        database,
-      },
-    };
-  }
-
-  if (input.engine === "sqlserver") {
-    if (!input.sqlserver) throw new Error("SQLSERVER_CONFIG_MISSING");
-    return {
-      ...input,
-      sqlserver: {
-        ...input.sqlserver,
-        database,
-      },
-    };
-  }
-
-  if (input.engine === "mongo") {
-    if (!input.mongo) throw new Error("MONGO_CONFIG_MISSING");
-    return {
-      ...input,
-      mongo: {
-        ...input.mongo,
-        database,
-      },
-    };
-  }
-
-  if (input.engine === "sqlite") {
-    if (!input.sqlite) throw new Error("SQLITE_CONFIG_MISSING");
-    return {
-      ...input,
-      sqlite: {
-        ...input.sqlite,
-        path: database,
-      },
-    };
-  }
-
-  if (input.engine === "oracle") {
-    if (!input.oracle) throw new Error("ORACLE_CONFIG_MISSING");
-    return {
-      ...input,
-      oracle: {
-        ...input.oracle,
-        database,
-      },
-    };
-  }
-
-  if (input.engine === "clickhouse") {
-    if (!input.clickhouse) throw new Error("CLICKHOUSE_CONFIG_MISSING");
-    return {
-      ...input,
-      clickhouse: {
-        ...input.clickhouse,
-        database,
-      },
-    };
-  }
-
-  if (input.engine === "cassandra") {
-    if (!input.cassandra) throw new Error("CASSANDRA_CONFIG_MISSING");
-    return {
-      ...input,
-      cassandra: {
-        ...input.cassandra,
-        keyspace: database,
-      },
-    };
-  }
-
-  throw new Error("ENGINE_NOT_SUPPORTED_FOR_OPEN_DATABASE");
-}
-
 export function MenuBar({
   activeSchema,
   activeTable,
@@ -283,6 +191,7 @@ export function MenuBar({
   });
   const health = useConnectionHealthCheck({
     runtimeConnectionId: rt.runtimeConnectionId,
+    tabId: rt.profileId,
     engine: rt.engine,
     // Only seed health from connection-level errors, not table/query failures.
     loadError: isConnectionError ? loadTableError : null,
@@ -367,13 +276,23 @@ export function MenuBar({
     return getProfileById(activeTab.profileId);
   }, [activeTab, getProfileById]);
 
+  // What the tab's connection was opened on, as the backend recorded it (D1).
+  const runtimeDisplay = useRuntimeTargetsStore((s) =>
+    activeTab?.runtimeConnectionId
+      ? (s.targets[activeTab.runtimeConnectionId]?.display ?? "")
+      : ""
+  );
+
   const connectionInfo = useMemo(() => {
     if (!profile) return null;
     const { database, user } = pickHostDbUser(profile);
+    // What the connection was actually opened on (D1), else what the tab
+    // was opened on (R2) before it connects.
+    const resolved = resolveTabTarget(activeTab, profile);
     const activeDatabase =
-      activeTab?.databaseOverride ||
-      inferDatabaseOverrideFromTabLabel(profile.label, activeTab?.label) ||
-      database;
+      runtimeDisplay ||
+      resolved.intended?.override ||
+      (resolved.state === "ok" ? database : "");
 
     const isSsh = Boolean(profile?.input?.ssh?.enabled);
 
@@ -388,8 +307,8 @@ export function MenuBar({
     };
   }, [
     profile,
-    activeTab?.databaseOverride,
-    activeTab?.label,
+    activeTab,
+    runtimeDisplay,
     databaseVersion,
     activeSchema,
     activeTable,
@@ -515,22 +434,27 @@ export function MenuBar({
       }
 
       if (!nextDb || nextDb === connectionInfo?.database) return;
+      if (!supportsDatabaseOverride(profile.engine)) {
+        throw new Error("ENGINE_NOT_SUPPORTED_FOR_OPEN_DATABASE");
+      }
 
-      const nextInput = withDatabaseInput(profile.input, nextDb);
-      const conn = await connectionCreate(nextInput);
-
+      // The tab records what it is opened on (R12); its connection is opened
+      // by the backend from the saved profile on that database, and the tab
+      // owns it (R3).
+      const target = { kind: "override" as const, database: nextDb };
       const nextTabId = `tab-${uuid()}`;
       const nextTab = {
         id: nextTabId,
-        label: `${profile.label} · ${nextDb}`,
+        label: tabLabelFor(profile.label, target),
         engine: profile.engine,
-        runtimeConnectionId: conn.id,
         profileId: profile.id,
+        target,
         databaseOverride: nextDb,
         profileTags: profile.input?.tags ?? [],
       };
       addTab(nextTab);
       setActiveProfileScreen(nextTabId);
+      await connectTabOnce(nextTabId);
       void import("src/stores/connectionLog").then(
         ({ recordConnectionSessionOpened }) =>
           recordConnectionSessionOpened(nextTab)

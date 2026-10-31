@@ -267,9 +267,6 @@ pub async fn connection_version(
     state: State<'_, AppState>,
     connection_id: Uuid,
 ) -> Result<String, String> {
-    let conn = state
-        .connections
-        .get(&connection_id)
-        .ok_or("CONNECTION_NOT_FOUND")?;
-    fetch_connection_version(conn.value()).await
+    let conn = crate::engines::runtime::admission::admit_runtime(&state, connection_id)?;
+    fetch_connection_version(&conn).await
 }

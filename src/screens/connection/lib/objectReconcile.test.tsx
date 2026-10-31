@@ -9,6 +9,7 @@ import { canExecute, useObjectDraftStore } from "src/stores/objectDrafts";
 import { useScreenStore } from "src/stores/screen";
 import type { DatabaseObjectItem } from "src/types";
 import { reconcileObjectDraftsOnMetadataLoads } from "./objectReconcile";
+import { resetTabRuntimes, seedTabRuntime } from "src/test/fixtures/tabRuntime";
 
 const mocks = vi.hoisted(() => ({
   objects: [] as DatabaseObjectItem[],
@@ -71,6 +72,9 @@ beforeEach(() => {
     ],
     tabEpoch: {},
   });
+  resetTabRuntimes();
+  seedTabRuntime({ tabId: "t1", runtimeId: "c1" });
+  useScreenStore.setState({ tabEpoch: {} });
   unsubscribe = reconcileObjectDraftsOnMetadataLoads();
   render(<Harness />);
 });

@@ -72,11 +72,7 @@ pub async fn dispatch_operation(
     state: State<'_, AppState>,
     input: OperationExecuteInput,
 ) -> Result<Uuid, String> {
-    let conn = state
-        .connections
-        .get(&input.connection_id)
-        .ok_or("CONNECTION_NOT_FOUND")?
-        .clone();
+    let conn = crate::engines::runtime::admission::admit_runtime(&state, input.connection_id)?;
 
     let op_id = Uuid::new_v4();
     let conn_id: Uuid = input.connection_id;

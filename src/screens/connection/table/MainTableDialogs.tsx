@@ -23,6 +23,8 @@ export function MainTableDialogs(props: {
   cloneDialogOpen: boolean;
   onCloneClose: () => void;
   connectionId: string | null;
+  /** The connection tab the dialogs act in. */
+  tabId: string;
   schema: string;
   tableName: string;
   columns: ColumnMeta[];
@@ -97,6 +99,7 @@ export function MainTableDialogs(props: {
           open={exportDialogOpen}
           handleClose={() => setExportDialogOpen(false)}
           connectionId={connectionId}
+          tabId={props.tabId}
           schema={schema}
           tableName={tableName}
           columns={columns}

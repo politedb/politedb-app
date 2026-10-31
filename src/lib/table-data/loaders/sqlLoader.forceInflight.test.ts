@@ -24,6 +24,7 @@ describe("loadRowCount force inflight bypass", () => {
 
     // Seed a never-settling inflight entry like a cancelled pane load.
     const seedKey = JSON.stringify({
+      conn: "c1",
       schema: "public",
       table: "software_titles",
       engine: "mysql",
@@ -61,6 +62,7 @@ describe("loadRowCount force inflight bypass", () => {
     });
 
     const seedKey = JSON.stringify({
+      conn: "c1",
       schema: "public",
       table: "software_titles",
       engine: "mysql",

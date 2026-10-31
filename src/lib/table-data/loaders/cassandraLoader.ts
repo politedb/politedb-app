@@ -1,3 +1,4 @@
+import { assertCurrent } from "../helpers";
 import { useProfileStore } from "src/stores/profile";
 import {
   cassandraFetchRows,
@@ -9,10 +10,15 @@ import type { ColumnRow } from "../types";
 
 export function resolveCassandraKeyspaceForLoad(
   schema: string,
-  profileId: string
+  profileId: string,
+  /** The keyspace the tab was opened on, before the profile's own (R2). */
+  tabKeyspace?: string | null
 ): string {
   const fromSchema = schema?.trim();
   if (fromSchema && fromSchema !== "default") return fromSchema;
+
+  const fromTab = tabKeyspace?.trim();
+  if (fromTab) return fromTab;
 
   const profile = useProfileStore.getState().getProfileById(profileId);
   const fromProfile = profile?.input?.cassandra?.keyspace?.trim();
@@ -63,6 +69,8 @@ export async function loadCassandraOverview(params: {
 }
 
 export async function loadCassandraRows(params: {
+  /** False once this load may no longer publish (R5). */
+  isCurrent?: () => boolean;
   key: string;
   connId: string;
   schema: string;
@@ -91,6 +99,8 @@ export async function loadCassandraRows(params: {
     offset,
   });
 
+  // A late answer for a tab that moved on writes nothing (R5).
+  assertCurrent(params.isCurrent);
   const store = useConnectionStore.getState();
   const opId = `cassandra:${key}:${offset}:${limit}`;
   const cap = Math.max(1000, limit * 4);

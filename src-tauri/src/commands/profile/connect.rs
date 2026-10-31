@@ -1,8 +1,10 @@
 use tauri::{AppHandle, State};
 use uuid::Uuid;
 
-use crate::commands::connection::lifecycle::{connection_create, connection_test};
+use crate::commands::connection::lifecycle::{connection_test, create_runtime, error_category};
+use crate::engines::driver::ConnectPolicy;
 use crate::profiles::store as profile_store;
+use crate::profiles::target_override::{apply_override, normalize_override, target_identity};
 use crate::profiles::types::{
     ConnectionProfile, ProfileConnectInput, ProfileConnectResult, ProfileConnectTestInput,
 };
@@ -39,7 +41,6 @@ pub async fn profile_save_and_connect(
         profile_id = %profile_id,
         persist_secrets = persist_secrets,
         engine = ?input.engine,
-        label = %input.label,
         "start"
     );
 
@@ -91,22 +92,23 @@ pub async fn profile_save_and_connect(
         crate::commands::ai_agent_data::cancel_profile_runs(&state, profile_id);
     }
 
-    // 4) Runtime connect
-    let profiles = std::sync::Arc::clone(&state.connection_profiles);
-    let connection: AppConnectionInfo = connection_create(app.clone(), state, input)
-        .await
-        .map_err(|e| {
-            tracing::error!(
-                step = "runtime_connect",
-                mode,
-                profile_id = %profile_id,
-                error = %e,
-                "failed"
-            );
-            format!("RUNTIME_CONNECT_FAILED: {e}")
-        })?;
+    // 4) Runtime connect (the profile's own target)
+    let target = target_identity(Some(&profile), None, &input);
+    let connection: AppConnectionInfo =
+        create_runtime(&app, &state, input, ConnectPolicy::default(), target)
+            .await
+            .map_err(|e| {
+                tracing::error!(
+                    step = "runtime_connect",
+                    mode,
+                    profile_id = %profile_id,
+                    error = error_category(&e),
+                    "failed"
+                );
+                format!("RUNTIME_CONNECT_FAILED: {e}")
+            })?;
 
-    profiles.insert(
+    state.connection_profiles.insert(
         connection.id,
         crate::ai::agent::consent::ProfileBinding::of(&profile),
     );
@@ -151,7 +153,6 @@ pub async fn profile_save(
         profile_id = %profile_id,
         persist_secrets = persist_secrets,
         engine = ?input.engine,
-        label = %input.label,
         "start"
     );
 
@@ -212,6 +213,31 @@ pub async fn profile_save(
     Ok(profile)
 }
 
+/// The agent profile binding of a connection: given for the profile's own
+/// target only. A connection opened on another database (even one named
+/// like the profile's own) stays unbound, so consent for one database never
+/// covers another (D2).
+fn binding_for(
+    profile: &ConnectionProfile,
+    database: &Option<String>,
+) -> Option<crate::ai::agent::consent::ProfileBinding> {
+    database
+        .is_none()
+        .then(|| crate::ai::agent::consent::ProfileBinding::of(profile))
+}
+
+/// Publishes the agent binding of a new connection, if it gets one.
+fn bind_runtime(
+    state: &AppState,
+    connection_id: Uuid,
+    profile: &ConnectionProfile,
+    database: &Option<String>,
+) {
+    if let Some(binding) = binding_for(profile, database) {
+        state.connection_profiles.insert(connection_id, binding);
+    }
+}
+
 #[tauri::command]
 pub async fn profile_connect(
     app: AppHandle,
@@ -237,27 +263,36 @@ pub async fn profile_connect(
         format!("PROFILE_NOT_FOUND: {e}")
     })?;
 
-    // 2) Clone input (profile input MUST already contain SecretRef::Keychain)
-    let input = profile.input.clone();
+    // 2) Clone input (profile input MUST already contain SecretRef::Keychain),
+    // opened on the requested database instead of its own when asked.
+    let database = normalize_override(payload.database.as_deref());
+    let (input, policy) = match &database {
+        Some(db) => (
+            apply_override(&profile.input, db)?,
+            // Reopening a database a tab was opened on: a missing SQLite file
+            // is an error, not a new empty database.
+            ConnectPolicy {
+                sqlite_create: false,
+            },
+        ),
+        None => (profile.input.clone(), ConnectPolicy::default()),
+    };
+    let target = target_identity(Some(&profile), database.clone(), &input);
 
     // 3) Runtime connect
-    let profiles = std::sync::Arc::clone(&state.connection_profiles);
-    let connection = connection_create(app.clone(), state, input)
+    let connection = create_runtime(&app, &state, input, policy, target)
         .await
         .map_err(|e| {
             tracing::error!(
                 step = "runtime_connect",
                 profile_id = %profile_id,
-                error = %e,
+                error = error_category(&e),
                 "failed"
             );
             format!("RUNTIME_CONNECT_FAILED: {e}")
         })?;
 
-    profiles.insert(
-        connection.id,
-        crate::ai::agent::consent::ProfileBinding::of(&profile),
-    );
+    bind_runtime(&state, connection.id, &profile, &database);
 
     tracing::info!(
         step = "profile_connect",
@@ -360,4 +395,82 @@ pub async fn profile_connect_test(
     );
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn profile() -> ConnectionProfile {
+        let input: crate::types::ConnectionCreateInput =
+            serde_json::from_value(serde_json::json!({
+                "engine": "postgres", "label": "p",
+                "postgres": {
+                    "host": "h", "port": 5432, "database": "app", "user": "u",
+                    "password": { "kind": "keychain", "value": "k" }
+                }
+            }))
+            .unwrap();
+        ConnectionProfile {
+            id: Uuid::new_v4(),
+            engine: input.engine,
+            label: "p".into(),
+            input,
+            tags: vec![],
+            indicator_color: None,
+            created_at: 0,
+            updated_at: 0,
+            revision: "r".into(),
+        }
+    }
+
+    /// Through the published state: a connection opened on another database
+    /// has no binding, so agent data access is unavailable on it (D2).
+    #[tokio::test]
+    async fn an_override_connection_has_no_agent_data_access() {
+        use crate::engines::registry::EngineRegistry;
+        let state = AppState::new(EngineRegistry::new(vec![]));
+        let p = profile();
+        let path = std::env::temp_dir().join(format!("pdb-bind-{}.db", Uuid::new_v4()));
+        for database in [None, Some("other".to_string()), Some("app".to_string())] {
+            let id = Uuid::new_v4();
+            let conn = crate::engines::sqlite::driver::connect_sqlite(
+                id,
+                "t".into(),
+                crate::types::SqliteConnectInput {
+                    path: path.to_string_lossy().into_owned(),
+                    statement_timeout_ms: None,
+                },
+            )
+            .await
+            .unwrap();
+            crate::commands::connection::lifecycle::publish_runtime(
+                &state,
+                id,
+                crate::engines::EngineConnection::Sqlite(conn),
+                crate::profiles::target_override::RuntimeTarget {
+                    profile_id: None,
+                    profile_revision: None,
+                    database_override: database.clone(),
+                    engine: crate::types::EngineKind::Sqlite,
+                    display: "x".into(),
+                },
+            );
+            bind_runtime(&state, id, &p, &database);
+            let bound = crate::commands::ai_agent_data::data_profile(&state, &id.to_string())
+                .unwrap()
+                .is_some();
+            assert_eq!(bound, database.is_none(), "{database:?}");
+        }
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn only_the_profiles_own_target_is_bound() {
+        let p = profile();
+        assert!(binding_for(&p, &None).is_some());
+        assert!(binding_for(&p, &Some("other".into())).is_none());
+        // Named like the profile's own database: still an override, unbound.
+        assert!(binding_for(&p, &Some("app".into())).is_none());
+    }
 }

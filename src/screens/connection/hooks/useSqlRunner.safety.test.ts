@@ -22,6 +22,7 @@ vi.mock("src/lib/tauri/security", () => ({
 
 import { useSqlRunner } from "./useSqlRunner";
 import type { DatabaseEngine } from "src/types";
+import { resetTabRuntimes, seedTabRuntime } from "src/test/fixtures/tabRuntime";
 
 let seq = 0;
 
@@ -34,6 +35,7 @@ async function run(sql: string, engine: DatabaseEngine, locked: boolean) {
   const hook = renderHook(() =>
     useSqlRunner({
       activeSqlWindowId: windowId,
+      tabId: "tab-1",
       runtimeConnectionId: "conn-1",
       engine,
       sqlSafetyMode: locked ? "lock" : "default",
@@ -49,6 +51,8 @@ async function run(sql: string, engine: DatabaseEngine, locked: boolean) {
 }
 
 beforeEach(() => {
+  resetTabRuntimes();
+  seedTabRuntime({ tabId: "tab-1", runtimeId: "conn-1" });
   mocks.validate.mockReset().mockResolvedValue(undefined);
   mocks.touchId.mockReset().mockResolvedValue(true);
 });

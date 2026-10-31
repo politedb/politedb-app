@@ -1,4 +1,5 @@
 import { aiAgentDataAccessGrant } from "src/lib/tauri/aiAgent";
+import { checkTabTarget } from "src/lib/tabs/assertTabTarget";
 import {
   AgentProHint,
   isAgentProHintDismissed,
@@ -40,6 +41,8 @@ type Props = {
   engine: DatabaseEngine;
   onClose?: () => void;
   runtimeConnectionId?: string;
+  /** The connection tab the assistant works in (D3). */
+  tabId?: string;
   activeSchema?: string;
   activeTable?: TableItem;
   tables: TableItem[];
@@ -104,6 +107,7 @@ export function AiAssistantPanel(props: Props) {
     engine,
     onClose,
     runtimeConnectionId,
+    tabId,
     activeSchema,
     activeTable,
     tables,
@@ -435,6 +439,7 @@ export function AiAssistantPanel(props: Props) {
       model: providerModel,
       engine,
       runtimeConnectionId,
+      tabId,
       querySafetyMode,
       activeSchema: effectiveActiveSchema,
       activeTable: effectiveActiveTable,
@@ -582,6 +587,12 @@ export function AiAssistantPanel(props: Props) {
             const provider = providerId;
             const generation = allowGenerationRef.current;
             if (!connectionId || !provider || submitBlocked) return false;
+            // D3: consent is granted for the tab's own connection only.
+            const refusal = checkTabTarget(tabId, connectionId);
+            if (refusal) {
+              appendAssistantMessage({ text: refusal.message });
+              return false;
+            }
             // Data access belongs to agent mode (Pro), also on cards saved earlier.
             if (!hasProAccessNow()) {
               useProUpgradeStore.getState().open("ai-agent");

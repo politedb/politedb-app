@@ -43,25 +43,17 @@ pub struct MongoCollectionSizeInfo {
     pub index_size_bytes: u64,
 }
 
-fn mongo_conn<'a>(
-    state: &'a AppState,
-    connection_id: Uuid,
-) -> Result<dashmap::mapref::one::Ref<'a, Uuid, EngineConnection>, String> {
-    let conn = state
-        .connections
-        .get(&connection_id)
-        .ok_or("CONNECTION_NOT_FOUND")?;
+fn mongo_conn(state: &AppState, connection_id: Uuid) -> Result<EngineConnection, String> {
+    let conn = crate::engines::runtime::admission::admit_runtime(state, connection_id)?;
 
-    match conn.value() {
+    match &conn {
         EngineConnection::Mongo(_) => Ok(conn),
         _ => Err("ENGINE_NOT_SUPPORTED".into()),
     }
 }
 
-fn as_mongo_client(
-    conn: &dashmap::mapref::one::Ref<'_, Uuid, EngineConnection>,
-) -> Result<(mongodb::Client, Option<String>), String> {
-    match conn.value() {
+fn as_mongo_client(conn: &EngineConnection) -> Result<(mongodb::Client, Option<String>), String> {
+    match conn {
         EngineConnection::Mongo(mongo) => {
             Ok((mongo.client.clone(), mongo.default_database.clone()))
         }

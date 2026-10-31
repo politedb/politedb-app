@@ -41,8 +41,11 @@ const VIEW_LIST_PAGE_SIZE = 20;
 // Tables render a page at a time: a schema can hold thousands.
 const TABLE_LIST_PAGE_SIZE = 100;
 
-function tableWindowId(table: Pick<TableItem, "schema" | "name">) {
-  return `table:${table.schema}.${table.name}`;
+function tableWindowId(
+  table: Pick<TableItem, "schema" | "name" | "draftWindowId">
+) {
+  // A closed draft keeps its own window id, whatever its name now.
+  return table.draftWindowId ?? `table:${table.schema}.${table.name}`;
 }
 
 function TableName({ className, name }: { className?: string; name: string }) {
@@ -331,7 +334,10 @@ export function LeftNavItemsPane({
           {
             type: "item",
             label: "Clone...",
-            disabled: isProfileLocked || !supportsTableMutations,
+            disabled:
+              isProfileLocked ||
+              !supportsTableMutations ||
+              !!tableMenu.table.unresolvedDraft,
             onClick: () => {
               if (tableMenu.table.new) {
                 setCloneNewTableTarget(tableMenu.table);
@@ -519,6 +525,8 @@ export function LeftNavItemsPane({
                 <div class="space-y-1 pl-3">
                   {visibleTables.map((table) => {
                     const key = `${table.schema}.${table.name}`;
+                    // A closed draft is its own item, whatever its name.
+                    const itemKey = table.draftWindowId ?? key;
                     const isActive = activeWindowId === `table:${key}`;
                     const hasChanges = windowHasPatchChanges(
                       dataPatchMap[profileId]?.[`table:${key}`]
@@ -533,7 +541,7 @@ export function LeftNavItemsPane({
                         data-sidebar-item
                         variant={useDefaultActive ? "default" : "ghost"}
                         active={useDefaultActive}
-                        key={key}
+                        key={itemKey}
                         onClick={() => void actions.selectTable(table)}
                         onContextMenu={(e: MouseEvent) => {
                           e.preventDefault();
@@ -651,6 +659,8 @@ export function LeftNavItemsPane({
             useConnectionStore
               .getState()
               .setNewTableData(profileId, nextWindowId, {
+                schema: nextTable.schema,
+                windowName: nextTable.name,
                 tableName: newTableName,
                 primaryKey: sourceDraft?.primaryKey ?? "",
                 columns: structuredClone(sourceDraft?.columns ?? []),

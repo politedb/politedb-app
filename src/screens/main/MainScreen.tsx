@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { useMainViewStore } from "src/stores/mainView";
 import { useScrollMemory } from "src/hooks/useScrollMemory";
 import { readTextFile } from "src/lib/system-fs";
-import { v4 as uuid } from "uuid";
 
 import { ConnectionModal } from "src/components/modal/ConnectionModal";
 import { ConnectionFormDialog } from "src/components/connection/ConnectionFormDialog";
@@ -15,7 +14,7 @@ import {
 import { OverlayModal } from "src/components/modal/OverlayModal";
 import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 
-import { ProfileTab, useScreenStore } from "src/stores/screen";
+import { useScreenStore } from "src/stores/screen";
 import { useProfileStore } from "src/stores/profile";
 import { useConnectionGroupsStore } from "src/stores/connectionGroups";
 import { usePinnedConnectionsStore } from "src/stores/pinnedConnections";
@@ -62,10 +61,10 @@ import {
 } from "src/lib/tauri";
 import { pickOpenFile, showMessage } from "src/lib/system-dialog";
 import { trackEvent } from "src/lib/analytics";
-import { seedSqliteTemplateDemo } from "src/lib/sqliteTemplateSeed";
+import { openSqliteTemplateTab } from "./sqliteTemplate";
 
 export function MainScreen() {
-  const { addTab, setActiveProfileScreen } = useScreenStore();
+  const { setActiveProfileScreen } = useScreenStore();
 
   const {
     loadProfiles,
@@ -248,6 +247,8 @@ export function MainScreen() {
   async function handleNewProfile(v?: ConnectionProfile) {
     if (v) assignSelectedGroupToProfile(v.id);
 
+    // Publish what was saved at once (R16), then refresh the list.
+    if (v) await saveProfile(v);
     await loadProfiles();
     closeNew();
     closeEdit();
@@ -273,6 +274,8 @@ export function MainScreen() {
 
   async function finishExternalImport(path: string, password?: string) {
     const result = await profileImportExternal(path, password);
+    // The complete list after the import, published at once (R16).
+    useProfileStore.getState().publishProfiles(result.profiles);
     await loadProfiles();
     await showMessage(formatExternalImportSuccessMessage(result), {
       title: "Import complete",
@@ -282,6 +285,8 @@ export function MainScreen() {
 
   async function finishPoliteDbImport(json: string) {
     const result = await profileImport(json);
+    // The complete list after the import, published at once (R16).
+    useProfileStore.getState().publishProfiles(result.profiles);
     await loadProfiles();
 
     const meta = parseProfileExportMeta(json);
@@ -405,11 +410,7 @@ export function MainScreen() {
         },
       } as SaveAndConnectInput & SaveAndConnectAction);
 
-      try {
-        await seedSqliteTemplateDemo(saved.connection.id);
-      } catch (seedErr) {
-        console.warn("[sqlite template] demo seed failed:", seedErr);
-      }
+      const newTab = await openSqliteTemplateTab(saved);
 
       if (selectedGroupId) {
         assignGroup(saved.profile.id, selectedGroupId);
@@ -417,15 +418,6 @@ export function MainScreen() {
 
       await loadProfiles();
 
-      const newTab: ProfileTab = {
-        id: `tab-${uuid()}`,
-        label: saved.profile.label || "Hello World",
-        profileId: saved.profile.id,
-        engine: saved.profile.engine,
-        runtimeConnectionId: saved.connection.id,
-        profileTags: saved.profile.input?.tags ?? [],
-      };
-      addTab(newTab);
       setActiveProfileScreen(newTab.id);
       void import("src/stores/connectionLog").then(
         ({ recordConnectionSessionOpened }) =>

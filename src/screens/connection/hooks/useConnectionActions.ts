@@ -1,12 +1,19 @@
 import { useCallback, useRef } from "preact/hooks";
 
+import {
+  newTableDraftWindow,
+  unresolvedNewTableDrafts,
+  unresolvedNewTableNotices,
+} from "../lib/newTableDrafts";
+import { assertTabTarget } from "src/lib/tabs/assertTabTarget";
 import type {
   DatabaseEngine,
   OpenWindow,
   TableItem,
   TableWindow,
 } from "src/types";
-import { connectionRemove, operationExecuteTransaction } from "src/lib/tauri";
+import { operationExecuteTransaction } from "src/lib/tauri";
+import { releaseRuntime } from "src/lib/runtimeConnection";
 import {
   collectObjectChangeSummary,
   collectObjectSaveNotices,
@@ -76,6 +83,8 @@ export type RefreshSchemaAndTablesFn = () => Promise<void>;
 export type RunSqlWithHistoryFn = (args: {
   connectionId: string;
   sql: string;
+  /** The tab the work belongs to (D3). */
+  tabId: string;
 }) => Promise<RunSqlReturn>;
 
 export type UseConnectionActionsArgs = {
@@ -237,28 +246,51 @@ function isValidNewTable(v: unknown): v is NewTableLike {
   return obj.tableName.trim().length > 0 && hasAnyCol;
 }
 
-function getNewTableDraftEntries(args: {
+export function getNewTableDraftEntries(args: {
   tabId: string;
   openWindows: Record<string, OpenWindow[]>;
   engine: DatabaseEngine | undefined;
-}): { data: NewTableDraftEntry[]; error: string | null } {
+}): {
+  data: NewTableDraftEntry[];
+  error: string | null;
+  /** Drafts not run because their identity cannot be told (window ids). */
+  unresolved: { windowId: string; name: string }[];
+} {
   const s = useConnectionStore.getState();
   const drafts = s.newTableData[args.tabId] ?? {};
   const windows = args.openWindows[args.tabId] ?? [];
   const windowsById = new Map(windows.map((w) => [w.id, w]));
 
   const result: NewTableDraftEntry[] = [];
+  const unresolved = unresolvedNewTableDrafts(drafts, windows);
+
+  // Two drafts creating the same table: neither runs (no duplicate CREATE,
+  // and no edits silently dropped); the user renames or discards one.
+  const targets = new Set<string>();
 
   for (const [windowId, draft] of Object.entries(drafts)) {
-    const window = windowsById.get(windowId);
-    if (!window || window.type !== "table" || !window.table.new) continue;
+    // A draft whose window was closed is still listed and still saved, in
+    // the schema it records; one whose identity cannot be told is not run.
+    const window =
+      windowsById.get(windowId) ?? newTableDraftWindow(windowId, draft);
+    if (!window) continue; // listed by unresolvedNewTableDrafts below
+    if (window.type !== "table" || !window.table.new) continue;
 
     if (!isValidNewTable(draft)) {
-      return { data: [], error: "Invalid new table data" };
+      return { data: [], error: "Invalid new table data", unresolved };
     }
 
     const validColumns = draft.columns.filter((col) => col.column_name?.trim());
     const tableName = draft.tableName.trim();
+    const target = JSON.stringify([window.table.schema, tableName]);
+    if (targets.has(target)) {
+      return {
+        data: [],
+        error: `Two unsaved new tables are both named "${tableName}". Rename or discard one of them, then save.`,
+        unresolved,
+      };
+    }
+    targets.add(target);
 
     result.push({
       window,
@@ -273,7 +305,7 @@ function getNewTableDraftEntries(args: {
     });
   }
 
-  return { data: result, error: null };
+  return { data: result, error: null, unresolved };
 }
 
 function patchMapHasAnyChanges(patchMap: PatchMap | undefined): boolean {
@@ -518,8 +550,15 @@ export function useConnectionActions(
 
   const getObjectSaveNotices = useCallback((): ObjectSaveNotice[] => {
     if (!engine) return [];
-    return collectObjectSaveNotices({ tabId: activeProfileScreen, engine });
-  }, [engine, activeProfileScreen]);
+    // New-table drafts this save cannot run are reported with the objects'.
+    return [
+      ...collectObjectSaveNotices({ tabId: activeProfileScreen, engine }),
+      ...unresolvedNewTableNotices(
+        useConnectionStore.getState().newTableData[activeProfileScreen] ?? {},
+        openWindows[activeProfileScreen] ?? []
+      ),
+    ];
+  }, [engine, activeProfileScreen, openWindows]);
 
   const getObjectChangeSummary = useCallback((): ObjectChangeSummary => {
     if (!engine) return emptyObjectChangeSummary();
@@ -545,6 +584,8 @@ export function useConnectionActions(
     }
 
     try {
+      // D3: changes go only through the tab's own connection, on its target.
+      assertTabTarget(activeProfileScreen, connectionId);
       const changedEntries = Object.values(
         patchMap as unknown as Record<string, PatchMapEntry>
       );
@@ -633,6 +674,8 @@ export function useConnectionActions(
         setError("An error occurred while applying patches.");
         return;
       }
+      // Again after the loads above.
+      assertTabTarget(activeProfileScreen, connectionId);
 
       await runSqlTransaction({
         engine: engine ?? "postgres",
@@ -655,6 +698,7 @@ export function useConnectionActions(
           await runSqlWithHistory({
             connectionId,
             sql: stmt,
+            tabId: activeProfileScreen,
           });
         },
       });
@@ -798,6 +842,7 @@ export function useConnectionActions(
       await runSqlWithHistory({
         connectionId,
         sql: draft.sql,
+        tabId: activeProfileScreen,
       });
 
       s.clearNewTableData(activeProfileScreen, draft.window.id);
@@ -920,11 +965,8 @@ export function useConnectionActions(
           );
         }
 
-        if (currentTab?.runtimeConnectionId) {
-          try {
-            await connectionRemove(currentTab.runtimeConnectionId);
-          } catch {}
-        }
+        // Only connections this tab owns (never another tab's, R4).
+        await releaseRuntime(currentTab?.runtimeConnectionId, tabId);
 
         const windows = openWindows[tabId] ?? [];
         if (!windows.length) return;
@@ -940,11 +982,7 @@ export function useConnectionActions(
 
             removeTableData(schema, name);
 
-            if (connId) {
-              try {
-                await connectionRemove(connId);
-              } catch {}
-            }
+            await releaseRuntime(connId, tabId);
           })
         );
       } finally {

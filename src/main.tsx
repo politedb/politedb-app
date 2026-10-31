@@ -13,6 +13,9 @@ import { applyStoredUiFontPreference } from "src/lib/uiFont";
 import { applyStoredUiDensityPreference } from "src/lib/density";
 import { restoreLegacyWebStorage } from "src/lib/legacyWebStorage";
 import { readLegacyWebStorage } from "src/lib/tauri/legacyWebStorage";
+// Registers the tab execution guard (plan tab-database-reconnect D3) and
+// the stale-connection handler before any command can reach a connection.
+import "src/lib/runtimeConnection";
 
 function isTauriRuntime() {
   return typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;

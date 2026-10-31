@@ -33,6 +33,7 @@ pub fn new_profile(input: ConnectionCreateInput) -> ConnectionProfile {
         indicator_color: None,
         created_at: now,
         updated_at: now,
+        revision: String::new(),
     }
 }
 

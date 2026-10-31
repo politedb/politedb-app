@@ -40,6 +40,14 @@ vi.mock("../hooks/useConnectionWindows", () => ({
     openObjectDraft: mocks.openObjectDraft,
   }),
 }));
+// The tab guard (D3) is covered by useDropDatabaseObject.test.ts.
+vi.mock("src/lib/runtimeConnection", () => ({
+  runtimeWorkIsCurrent: () => () => true,
+}));
+vi.mock("src/lib/tabs/assertTabTarget", () => ({
+  assertTabTarget: () => {},
+  TabTargetError: class extends Error {},
+}));
 vi.mock("src/stores/screen", () => {
   const state = () => ({
     openWindows: { "profile-1": mocks.windows },

@@ -691,3 +691,522 @@ Non-blocking documentation correction: `src-tauri/src/engines/postgres/sql_sessi
 - `git diff --check`: passed before report edit. Only round 15 appended to `.agent/REVIEW.md`; unrelated dialog change and untracked `.claude/launch.json` preserved. No source edits, commit, push or merge.
 
 **Verdict for `6761e1a`: VERIFIED WITH LIMITATIONS. Verdict for the complete `main..HEAD` branch: VERIFIED WITH LIMITATIONS.** Round 14's atomic ownership issue is resolved; missing deterministic/live concurrency coverage, sandbox-blocked full Rust verification and the documented compatibility limits remain. Partition duplication/topology is separately tracked and non-blocking.
+
+## tab-database-reconnect — Phase 1 review
+
+### Status
+
+CHANGES REQUIRED
+
+Reviewed by Codex, 2026-10-30. Implementation: `46350abd` on `fix/tab-database-reconnect`, using `origin/main..HEAD`; plan-only commit `d12cee83` excluded from implementation findings. Read `AGENTS.md`, `.agent/WORKFLOW.md`, the approved plan's current requirements/decisions, Progress, deviations and verification matrix. No application or test code edited. Untracked `.claude/launch.json` preserved.
+
+Scope is Phase 1. Phase 2's frontend D3 guard is intentionally absent and is not itself a finding. Both phases must ship together; this report does not approve shipping Phase 1 alone. R15/R17/R18/R19 belong to the superseded frontend publication protocol and are not current implementation requirements. D5's separate profile/Keychain atomicity work is excluded.
+
+### Findings
+
+No P0 established. Four P1 correctness blockers; four P2 requirement/verification gaps.
+
+**P1-1 — Row streams bypass the new publication guards (R5, R16).** `src/hooks/useLoadTableData.ts:180-233` guards metadata/cache setters, but `src/lib/table-data/execute/sqlExecute.ts:88` does not pass provenance to `startRowsStream`. `src/lib/table-data/loaders/sqlLoader.ts:593,610-634` calls `beginRowsStream`, `applyRowsChunk`, `endRowsStream` and `failRowsStream` directly; the row store checks operation id, not tab epoch/runtime. Reproduction by interleaving: admit a stream on A; publish a saved/imported profile revision (epoch bumps, runtime id stays A); deliver another chunk/error/done from A. It still mutates the visible rows. A delayed stream-start reply can also recreate an old stream after reconnect has cleared it. The same direct row-store pattern exists in Mongo/Cassandra/Redis/Sheets loaders. Carry `{tabId, runtimeId, epoch}` through execution and every row publication, reject late start replies and chunks, cancel/retire obsolete streams, and preserve ownership of newer slots. Add deferred start/chunk/error/done tests after save/import, runtime replacement and tab close.
+
+**P1-2 — Table work still coalesces across database runtimes (R3/R5).** `src/lib/table-data/loaders/sqlLoader.ts:90-122` builds the row-count in-flight key from schema/table/engine/filters without `connId`; `:550-552,642-647` deduplicates row streams by SQL text alone. Concurrent tabs on databases A and B with the same `public.t` query can therefore share A's count, while B's stream simply awaits A's task and never populates B's rows. Separate tab-owned connections do not prevent this lower-level coalescing. Include runtime identity and appropriate table/request ownership in these keys, including generation when invalidation must allow new work. Test simultaneous A/B and same-target/different-owner tabs with distinct results. Existing size/FK key changes do not cover count/rows.
+
+**P1-3 — Installation can relabel foreign table data as the new runtime; reconnect retains old caches and filters (R4/R5).** `src/lib/runtimeConnection.ts:195-205` invalidates only when the tab already had a runtime. With no tab runtime and a table entry referencing a foreign/wrong runtime, `detachForeignTableConnections` (`:220-234`) rewrites that entry's `connectionId` to the newly installed runtime while retaining its rows, columns, constraints and loaded flags. Subsequent load planning can treat those old rows as loaded for the new target. Even ordinary replacement calls `invalidateTabData` (`:208-217`), which removes rows/table metadata but leaves `columnsCache`, `sizeInfoCache`, filters and sort state; `sqlExecute.ts:41-52` immediately republishes the old cached columns/size. Detach incompatible references without adopting their data, invalidate every affected cache/filter/sort and pending owner even when the tab previously lacked a runtime, and preserve dirty-state refusal. Test no-runtime + foreign-table-id, existing-runtime replacement, changed schema/columns and post-reconnect filter/sort/edit/save behavior.
+
+**P1-4 — Successful local mutations do not always invalidate before a second list request (R16).** `src/screens/main/MainScreen.tsx:249-255` ignores the returned saved profile and awaits `loadProfiles`; import completions at `:275-286` likewise await a separate list. `src/lib/tauri/profile.ts:843-862` announces ordinary imported ids only to the AI change event, and external import has no tab invalidation. The profile store bumps epochs only when a new snapshot/profile is actually published. Hold or fail that subsequent list after a successful save/import: old admitted work can finish and publish under the unchanged epoch, even though this window already knows the mutation succeeded. New backend work is safely refused by R20, but the required no-later-request R16 guarantee is missing. Publish the returned save immediately; conservatively invalidate imported/affected tabs immediately on successful import, before any refresh, including external import and failed-refresh paths. Add real caller orchestration tests with deferred/rejected list requests.
+
+**P2-1 — Epoch changes do not retire local pending state until old requests settle (R5).** `src/screens/connection/hooks/useLoadDbObjectDefinition.ts:69-124`, `src/hooks/useDatabases.ts:82-117`, `src/screens/connection/hooks/useConnectionHealthCheck.ts:38-70`, and `src/components/modal/DiagramGeneratorDialog.tsx:43-78` check epoch when applying results, but do not subscribe to epoch changes to retire the old pending owner. Their spinner cleanup still depends on the obsolete promise's `finally`. A Save-only/import/stale refusal with a stalled old request leaves loading/checking active indefinitely. Subscribe to generation invalidation, retire obsolete local requests immediately, and ensure an old finally cannot clear a newer request's state. Add deferred promises that remain unresolved across invalidation, then start a newer request.
+
+**P2-2 — Status-only admission refusals lose their recovery category (R20).** `src-tauri/src/commands/ai_agent.rs:250` turns admission errors into `SqlSafety::Unknown`; `src-tauri/src/commands/health_inspector/signal.rs:40` turns them into undifferentiated `Unavailable`. `commands/ai_agent_data.rs:224-230` does return `reason`, but `src/lib/tauri/aiAgent.ts:145-160` omits/ignores it, and `runtimeInvoke.ts:25-31` only reports rejected promises. These paths refuse target work safely, but never trigger the required stale banner/epoch invalidation from their unavailable result. Preserve and consume the typed refusal category on status responses. Test stale and missing-identity results, plus a late refusal after a replacement runtime is installed.
+
+**P2-3 — Nested SSH traces still expose private-key paths (R10).** `src-tauri/src/commands/connection/lifecycle.rs:70` reaches `ssh_tunnel/pool.rs:88,92,111,126,149,161`, which trace `ssh_key=?key`. `auth_fingerprint` (`pool.rs:35-46`) puts the raw `identity_file` path into that key. Removing the outer lifecycle key trace therefore does not satisfy the approved cleanup of nested connect/tunnel traces: a private-key SSH reconnect still logs a sensitive filesystem path. This is a retained pre-existing leak explicitly included in R10, not a newly demonstrated consent or credential bypass. Replace these traces with nonsensitive bounded fields/categories; add tracing capture using synthetic path/database/label markers. The planned exact-key telemetry allow-list regression is also absent; existing analytics sanitization/opt-out was not changed by this commit.
+
+**P2-4 — SSH preservation test silently tests `None` (R9 verification).** `src-tauri/src/profiles/target_override.rs:162-166` deserializes invalid SSH JSON (`host`/`port`/`user`, string `auth`) and swallows the error with `.ok()`. `sets_only_the_target_field` consequently verifies an input with no SSH configuration. Use a valid typed fixture, assert SSH is present, and verify password/private-key variants and option/SecretRef preservation. Add command-level default/override binding tests, including override equal to default; current static wiring supports D2, but this fixture and pure mapping tests do not prove it.
+
+### Requirements and decisions assessment
+
+| Scope | Assessment |
+| --- | --- |
+| R1/R2/R6 | Shared override-aware acquisition/resolver is wired into restore/reload/table/schema, Open database and form Connect; default form/template behavior retained structurally. R6 form orchestration matrix is not covered by new tests. MainScreen save publication has P1-4. |
+| R3/R4/R5 | Per-tab acquisition key, connect generation, owner-aware release and both close paths are present; connect supersession/foreign-owner tests pass. End-to-end table isolation/publication/invalidation remains incomplete: P1-1/2/3 and P2-1. |
+| R7/R11/R12, D4 | Persisted provenance, malformed/missing target normalization to unknown, no label inference, transient identity/ownership and stripped window handles are present with restore/resolver tests. Phase 2 still must enforce unknown-target execution refusal at every boundary. Native manual copy/close/reopen scenario unverified. |
+| R8/R9/R13a | Nine-engine override mapping, cloned input, SQLite existing-file policy and Cassandra identifier escaping are present. Missing SQLite file noncreation has a passing unit test. Mongo lazy-database limitation matches the approved choice. SSH fixture gap: P2-4; non-PostgreSQL live engines unverified. |
+| R10 | Outer connect traces reduced to categories and labels removed; nested SSH cleanup and privacy regressions remain P2-3. No new outbound database-name telemetry established by static review. |
+| R13/R14 | Target-before-runtime publication, connection-before-target removal and guarded list lookup match lock-order design. Store serializes read/modify/write/backfill, uses preserving replacement, issues backend revisions for create/update/import and publishes revisions after writes. New store/registry tests pass. No additional deadlock or store rollback regression established. |
+| R16/R21 | Equality-only observed-revision invalidation and form dirty preflight/installation recheck are present. Local mutation publication gap is P1-4; pending/stream gaps remain. Dirty sibling/import/reload, drafts created during await and full form race matrix lack regression coverage. |
+| R20, D2 | Dispatcher, transaction/CSV, session begin, engine readers and AI startup/tools use admission; missing identity fails closed. Override connects remain unbound, including equal-to-default overrides; default binding retained. AI tools check admission before executor access and after native approval. Category propagation incomplete: P2-2. |
+| D1/D3/D5 | Startup identity and intended/runtime breadcrumb/banner are present. Leaving AppStatusBar unchanged is a declared deviation, not evidence that all D1 display checks were exercised. D3 frontend guard intentionally deferred to Phase 2; D5 atomic save/Keychain response-order defects remain separate. |
+
+Concurrency assessment is structural where tests are absent. Admission clones the runtime and drops its map guard before target/revision reads, takes no store lock and holds no map guard across await. Work admitted before the revision publication point may continue, as designed; SQL session execute/end still use the already-admitted session. The new admission tests check target equality and enumerate source readers; they do not exercise save/admit/remove/session races through command integration. The registry overlap test verifies listing identities, not all connect/remove/tunnel/binding publication interleavings. No additional backend P0/P1 established, but these are test limitations, not proven live guarantees.
+
+### Verification
+
+- `cargo test` from `src-tauri/`: **448 passed / 47 failed / 22 ignored**; exit 101. Failures are AI HTTP/model/prepare/transport and license loopback fixtures, including `PermissionDenied` / `Operation not permitted` socket binds and dependent assertions. Full Rust suite is not green in this sandbox; these failures do not establish a reconnect regression. New store, override, admission, registry, SQLite policy, Cassandra quoting and AI stale-tool tests are included among passing tests.
+- `cargo fmt --check` from `src-tauri/`: **passed**.
+- `npm run build`: **passed** (TypeScript + Vite). Browser externalization, ineffective dynamic-import, chunk-size and plugin-timing warnings remain.
+- `npx vitest run --exclude '**/.claude/**'`: **279 files passed / 1 skipped; 2402 tests passed / 1 skipped**.
+- `git diff --check`: **passed** before report append.
+- Live prerequisite: attempted only `docker inspect --format '{{.Name}} {{.State.Running}} {{json .NetworkSettings.Ports}}' pdb-review-session`; Docker API access denied at the OrbStack socket by the sandbox. Credentials were neither retrieved nor printed. No live database connection, write, container mutation or other container/database access performed. PostgreSQL default-A/override-B sentinels, harmless write, save/stale/reload and missing-B scenarios could not be independently run. No native `tauri:dev` restart/restore check performed.
+- Coverage remains insufficient for the approved deferred-completion and orchestration matrix: passing helper/unit tests do not cover P1-1 through P1-4, immediate pending retirement, form save/connect failure/close races, backend session races, runtime binding isolation, or tracing/telemetry capture. Fix findings with focused regressions, rerun required checks in an environment permitting loopback, then re-review Phase 1. Complete/review Phase 2 and the workflow's second security pass before the combined PR ships.
+
+**Verdict for Phase 1 at `46350abd`: CHANGES REQUIRED.** Only this report section was appended; no application edits, commit, push or merge.
+
+## tab-database-reconnect — Phase 1 review round 2
+
+### Status
+
+CHANGES REQUIRED
+
+Reviewed by Codex, 2026-10-30, at `f5a2f1b0` on `fix/tab-database-reconnect`. Read `AGENTS.md` first, then `.agent/WORKFLOW.md`, the approved plan's current requirements, Progress and verification matrix, and round 1 above. Reviewed fixes in `ad93967e..f5a2f1b0` in the context of the complete Phase 1 application diff `origin/main..HEAD`, excluding plan/review documents. Phase 2's D3 guard remains intentionally deferred; its absence is not a finding. Both phases still ship together. Profile/Keychain atomicity and frontend profile-response ordering remain D5 follow-ups.
+
+### Findings
+
+No P0 established. Two P1 blockers remain; one P2 verification gap remains. These are incomplete Phase 1 fixes/contracts, not evidence that a new backend admission bypass was introduced.
+
+**R2-P1-1 — Reconnect still coalesces into obsolete table loads (R5; remaining round-1 P1-2/P2-1 lifecycle work).** `src/hooks/useLoadTableData.ts:88-119` looks up `inflightLoadBySignature`, `inflightLoadByTableKey` and `loadingKeysRef` without runtime or epoch ownership. `buildLoadSignature` (`src/lib/table-data/loadPlan.ts:145-175`) contains only table/pagination/flags; even force requests hit the signature lookup before bypass handling. Neither `invalidateTabData` nor the new `retireTabStreams` retires these slots. Reproduction through the real hook: start a deferred load on runtime A; update the tab to runtime B (epoch changes); call the same table load again. The executor is called only once, with A; B merely waits for A, whose publications are now correctly discarded. If A stalls, B never loads; if A settles, the awaited B call still has not loaded B. Canceling the row operation does not retire a stalled columns/count/metadata promise or a stream-start reply that has not supplied its operation id. At the lower stream layer, `[connId, key, q]` also omits epoch, so new work in the same runtime can join an obsolete generation. Give all table/stream slots a runtime/generation owner, retire obsolete pending state at invalidation, and compare owner tokens in cleanup (including `loadingKeysRef.current.delete` at line 229). Add a deferred hook regression proving B dispatches while A remains unresolved and A's eventual completion cannot clear B's slot. The cross-tab count/stream keys added in this commit do fix the original A/B lower-level collision; they do not fix this outer lifecycle collision.
+
+**R2-P1-2 — Table-first acquisition resurrects the foreign metadata that installation deleted (R4/R5; round-1 P1-3 remains partial).** `src/hooks/useLoadTableData.ts:122-159` captures `prev` and computes its load plan before awaiting acquisition. `installTabRuntime` now correctly deletes foreign entries (`src/lib/runtimeConnection.ts:196-221`), but the awaiting loader then calls `patchMeta(setMeta, key, prev, { connectionId: connId })`. `patchMeta` (`src/lib/table-data/metaPatch.ts:9`) falls back to that captured foreign `prev` after deletion, restoring its columns, constraints, counts and loaded state under the new connection id. Its pre-acquisition plan and captured column/size caches also remain authoritative to the executor. Reproduction through the real hook and real `connectTabOnce`/installer, with only Tauri connect and engine I/O mocked: tab has no runtime, its table entry has connection `foreign`, column `foreign_column` and constraint `foreign_pk`; load the table; after acquisition the entry has connection `new` and still contains both foreign markers. Thus the installer-only regression passes while the caller restores exactly the state it was meant to discard. Resolve/validate the runtime before deriving the plan, then reread metadata/caches from the live store; never fall back to a snapshot invalidated during acquisition. Guard acquisition failure/success publications against close/retarget/supersession as well. Add a hook-level regression asserting all foreign metadata stays absent and the new target's columns/constraints are actually fetched before editing/saving.
+
+**R2-P2-1 — Required orchestration/security regressions remain narrower than the round-1 requests.** `src/lib/runtimeConnection.test.ts` exercises installation directly, and `src/lib/table-data/loaders/provenance.test.ts` covers count isolation and one already-stale Mongo response. There is no SQL stream deferred-start/chunk/done/error regression, or table-load acquisition/invalidation test; the two P1 reproductions above pass through gaps these helper tests miss. `commands/profile/connect.rs` tests `binding_for` in isolation, not command publication/default-versus-override AI data availability; the new privacy tests check category/tag helpers, not captured traces. Add focused real-orchestration tests for the P1 fixes, SQL event/late-finally ownership, and command-level default/override/equal-default binding isolation; retain synthetic trace capture from the approved verification matrix. Existing source wiring supports D2 and no consent bypass was established, but helper tests alone do not close the requested verification. This finding is a test/requirement gap, not a claim that binding or logging is currently broken.
+
+### Round 1 disposition
+
+| Finding | Round 2 result |
+| --- | --- |
+| P1-1 row publication | Direct publication defect fixed structurally: `isCurrent` reaches SQL and Mongo/Cassandra/Redis/Sheets row loaders; late SQL start cancels without beginning, stale events do not apply rows/errors; epoch changes stop existing row windows. Full deferred SQL event coverage still missing (R2-P2-1); obsolete load-slot retirement remains R2-P1-1. |
+| P1-2 cross-runtime coalescing | Original lower-level collision fixed: count keys include connection; stream keys include connection/table key/SQL. Outer table slots and same-runtime generations remain R2-P1-1. |
+| P1-3 foreign data/caches | Partial: direct installation drops foreign entries and replacement clears caches/filter/sort/structure/constraints. Real table-first caller restores captured foreign metadata (R2-P1-2). |
+| P1-4 immediate local mutation invalidation | Fixed in source: MainScreen publishes the saved profile before `loadProfiles`; both import paths synchronously publish their returned complete lists before refresh. Store regression passes. Deferred/failed-refresh caller orchestration remains untested. |
+| P2-1 local pending retirement | Listed object/diagram/database-list/ping hooks now observe `useRuntimeLifetime` and advance request sequence/clear pending on invalidation; old finally checks its sequence. Ping retirement regression passes. Table-load slots/pending remain R2-P1-1; the other three hooks lack equivalent deferred tests. |
+| P2-2 status refusal category | Fixed in source: AI SQL safety propagates admission errors; health signal returns `reason`; health and AI status wrappers report reason through `noteRuntimeError`. Existing runtime-handler regression verifies a replaced runtime's late refusal does not bump the new runtime. Status-specific stale/missing-identity tests remain absent. |
+| P2-3 SSH trace/telemetry | Reported raw `TunnelKey` traces replaced by bounded hash tags; outer connect errors remain categorized. Reconnect test checks exact event keys and sanitizer output. Raw path leak identified in round 1 is removed; trace-capture verification remains R2-P2-1. |
+| P2-4 SSH fixture/binding tests | Invalid `.ok()` fixture fixed: valid password/private-key variants, SSH presence and preservation asserted. `binding_for` covers default/override/equal-default decisions; command-level isolation remains R2-P2-1. |
+
+Backend revision publication, admission lock ordering, no-create SQLite overrides and unbound override wiring remain consistent with round 1's structural assessment. No new backend P0/P1 established. Admission/session/remove races, live SSH and non-PostgreSQL engines remain unverified; source enumeration is not command integration evidence.
+
+### Verification
+
+- `cargo test` from `src-tauri/`: **451 passed / 47 failed / 22 ignored**, exit 101. Failures remain AI HTTP/model/prepare/transport and license fixtures requiring loopback binds, with `PermissionDenied` / `Operation not permitted` and dependent assertions, matching round 1's failure classes. No reconnect-specific failing test established; full Rust suite cannot be called green in this sandbox.
+- `cargo fmt --check` from `src-tauri/`: **passed**.
+- `npm run build`: **passed** (TypeScript + Vite); browser externalization/dynamic-import/chunk-size/plugin-timing warnings remain.
+- `npx vitest run --exclude '**/.claude/**'`: **282 files passed / 1 skipped; 2411 tests passed / 1 skipped**, exit 0.
+- Additional temporary review probes: **2 passed**, explicitly asserting the two incorrect observed behaviors described in R2-P1-1/2. Used real `useLoadTableData`, stores and acquisition/installation; mocked native connect/engine I/O. Probe removed from repository after execution; scratch copy at `/tmp/pdb-round2.probe.test.ts`. Passing probes demonstrate bugs, not acceptance tests or live database behavior.
+- Live prerequisite: only `docker inspect --format '{{.Name}} {{.State.Running}} {{json .NetworkSettings.Ports}}' pdb-review-session` attempted; access to the OrbStack Docker socket denied. No credentials fetched, no other container/database accessed, no live database query/write or container mutation. Cannot verify that `127.0.0.1:55440` belongs to the permitted container, so no direct database fallback attempted. Disposable PostgreSQL sentinels/stale/reload/missing-target checks and native restart/restore scenario remain unverified.
+- `git diff --check`: passed before report append; rerun after append. Untracked `.claude/launch.json` preserved. No application/test changes retained, no commit/push/merge.
+
+**Verdict for Phase 1 at `f5a2f1b0`: CHANGES REQUIRED.** Fix R2-P1-1/2 with real hook regressions and close R2-P2-1's required verification, then re-review. Phase 2 and the workflow's second security pass remain required before the combined PR ships.
+
+
+## tab-database-reconnect — Phase 1 review round 3
+
+### Status
+
+CHANGES REQUIRED
+
+Reviewed by Codex, 2026-10-30, at `208b2653` on `fix/tab-database-reconnect`; fixes reviewed against `57e305c9`. Read `AGENTS.md` first, then `.agent/WORKFLOW.md`, the approved plan (including Progress), and both previous Phase 1 reviews. Reviewed changed orchestration with its existing load planner, SQL executor, metadata patching, stream loader, runtime installation/invalidation and profile epoch paths. Phase 2's frontend D3 guard is intentionally deferred and is not a finding. Phase 1 remains part of the combined release unit; D5 profile/Keychain atomicity and response ordering remain separate follow-ups.
+
+### Findings
+
+No P0 or new P1 established. Three P2 defects remain within the already-approved Phase 1 lifecycle/compatibility requirements; fix these before verification. These findings do not establish a backend admission bypass or wrong-database execution.
+
+**R3-P2-1 — An obsolete load still clears its replacement's busy state.** `src/hooks/useLoadTableData.ts:178-185` authorizes `retire` by `latestLoadSignatureByKey`, which contains no runtime/epoch owner. Start unresolved A, replace its runtime with B, then start the identical table request on B and leave B unresolved. Both requests have the same `loadSignature`. A's next guarded metadata publication correctly discards its data, but calls `retire`, setting B's live entry to `busy: false`. A real SQL load reaches this callback on delayed columns, metadata, row errors or final settlement. The temporary real-hook probe reproduced B changing from busy to idle while B's executor remained pending and current. The committed reconnect test finishes B before releasing A and checks `isCurrent()` only, so it misses this race. Give pending metadata a full owner/request token; an old publication/finally must never clear another owner's pending state. Test A settling while B stays unresolved, with identical signatures and both runtime replacement and same-runtime epoch invalidation. This is the remaining pending-state portion of R2-P1-1, now isolated to busy-state correctness rather than the original B-never-dispatches blocker.
+
+**R3-P2-2 — Late acquisition failures overwrite a replacement load's state.** `src/hooks/useLoadTableData.ts:141-148` checks only that the tab still exists, then uses unguarded `setMeta` to publish `busy: false` and the old acquisition error. Start a table-first acquisition A; install runtime B and load the table successfully; reject A. A's catch merges its error into B's live metadata, so the table now reports A's failure despite retaining B's connection/data. If B is still pending, A also clears B's busy flag. A superseded connect can reach this path too: `connectTabOnce` rejects `TAB_CONNECT_SUPERSEDED` after a newer connect wins. The temporary real-hook/real-acquisition probe reproduced the old error on the replacement entry. Fence failure publication by the acquisition's target/generation and pending owner, and ignore superseded work. Add delayed reject and superseded-success regressions after a newer load starts/succeeds, as well as tab-close coverage. R2-P1-2 explicitly requested acquisition failure/success fencing; live cache rereading fixes its primary metadata defect but not this failure path.
+
+**R3-P2-3 — A table-first load stops coalescing with identical requests after its own successful acquisition.** `src/hooks/useLoadTableData.ts:95-103,169,244` keeps the pre-acquisition owner (initially `[null, epoch]`) for in-flight table/signature slots and row streams, but installation changes the tab to `[runtimeId, epoch+1]`. The ongoing executor is accepted as current using the post-acquisition epoch. Another ordinary identical load then gets a different owner, bypasses the still-current first load, and executes again on the same runtime. The temporary probe, through real `connectTabOnce`/installation, held the first executor pending and confirmed two executions with equal connection ids, both `isCurrent() === true`, and different owners. At the SQL layer these different owners also prevent row-stream coalescing; the second stream can cancel the first window despite neither caller requesting force refresh. This is a regression introduced by the new ownership keys. After validated acquisition, associate the current task/stream with the actual installed runtime lifetime (while keeping obsolete owners isolated), and preserve ordinary same-lifetime coalescing. Test acquisition-triggered rerender/repeated load with the first stream still pending, plus force/meta refresh bypass controls.
+
+### Round 2 disposition and compatibility assessment
+
+| Round 2 finding / guarantee | Round 3 result |
+| --- | --- |
+| R2-P1-1: old runtime/generation coalescing | Original dispatch blocker fixed: signature/table slots and loading guard include the starting runtime/epoch; SQL streams receive an owner; map cleanup compares task or owner. B dispatches while old A remains unresolved. Busy retirement still uses ownerless signatures (R3-P2-1); acquisition changes the task's own effective lifetime without rekeying it (R3-P2-3). Not fully closed. |
+| R2-P1-2: foreign metadata restored after acquisition | Primary defect fixed: connection acquisition precedes planning, metadata and column/size caches are read live, and no pre-acquisition `prev` fallback reaches the executor. Existing hook regression confirms foreign columns/constraints stay absent and new columns are requested. Close/different-connection success checks exist. Acquisition error publication remains unfenced (R3-P2-2). |
+| R2-P2-1: orchestration/security regressions | Substantially addressed: real-hook/acquisition tests added; SQL late-start cancellation and stale chunk/done/error tests added; Rust publishes a runtime, invokes actual binding publication, and queries agent data availability for default/override/equal-default; captured failed-connect trace excludes synthetic database/host/path/label markers. New tests pass. The binding test composes production helpers with SQLite rather than invoking the entire native profile command; the trace test captures the production failure logger rather than a full failed SSH/network connect. These are useful integration-boundary tests with explicit limits. Existing hook tests do not exercise newer-load pending ownership, delayed acquisition rejection or acquisition-to-runtime coalescing; those gaps expose the three findings above. |
+| Force/meta refresh bypass | Existing bypass flag list is preserved. Additional hook control confirms `forceRefresh`, `refreshMeta` and `refreshForeignKeys` each dispatch while an ordinary table load remains pending. SQL force-refresh still bypasses row and count/size/FK coalescing as before. No new forced-refresh omission established. |
+| Rows and metadata | SQL stream keys now include owner, and stale events/late starts retain currentness/op-id checks. The three new SQL stream tests pass. Metadata uses post-acquisition live state and guarded setters; old busy/error publication and acquisition-owner transition remain the findings above. Non-SQL execution receives the same guarded context; no new loader-specific publication regression established. |
+
+The owner used for slots is captured before acquisition, while publication currentness is captured afterwards. A further probe confirmed a load crossing a same-runtime epoch bump during the acquisition await adopts the later epoch. This alone does not prove stale row publication or a backend admission bypass: its engine work had not begun before invalidation. Any ownership fix should nevertheless explicitly distinguish installation's own epoch change from independent save/refusal invalidation, rather than silently treating every post-await epoch as the original request's lifetime.
+
+### Verification
+
+- `cargo test` from `src-tauri/`: **453 passed / 47 failed / 22 ignored**, exit 101. Failures remain AI HTTP/model/prepare/transport and license loopback fixtures: `PermissionDenied` / `Operation not permitted` socket binds and dependent assertions, matching the earlier reviews' failure classes. New captured-trace and published-binding tests pass. Full Rust suite is not green in this sandbox.
+- `cargo fmt --check` from `src-tauri/`: **passed**, exit 0.
+- `npm run build`: **passed**, exit 0 (TypeScript + Vite); existing browser-externalization, dynamic-import, chunk-size and plugin-timing warnings remain.
+- `npx vitest run --exclude '**/.claude/**'`: **284 files passed / 1 skipped; 2416 tests passed / 1 skipped**, exit 0. This run completed against committed tests, before the temporary probes were included in any test run.
+- Temporary review probe file: **7 passed**, including the two committed hook cases, three assertions reproducing R3-P2-1/2/3, the same-runtime epoch observation above, and a force/meta bypass control. These probes use real hook/stores/acquisition and mocked engine/native I/O. Passing defect assertions demonstrate observed bugs, not acceptance. Scratch copy: `/tmp/pdb-round3.probe.test.ts`; output: `/tmp/pdb-r3-probe.log`. Probe removed from repository; no application/test edits retained. An initial extra coalescing probe needed to await completion of real acquisition before asserting dispatch; the corrected final run above passes.
+- Live prerequisite: attempted only `docker inspect --format '{{.Name}} {{.State.Running}} {{json .NetworkSettings.Ports}}' pdb-review-session`; Docker API access denied at the OrbStack socket. Could not verify the permitted container's port identity, so no direct database fallback. No credentials fetched, no database queried/written, no other container inspected or mutated. Disposable PostgreSQL and native restart/restore scenarios remain unverified.
+- `git diff --check`: passed before report append; rerun after append. Only this review section retained; existing untracked `.claude/launch.json` preserved. No commit, push or merge.
+
+**Verdict for Phase 1 at `208b2653`: CHANGES REQUIRED.** Fix the three P2 lifecycle/coalescing defects with deferred orchestration regressions, then re-review. Phase 2 and the workflow's second security pass remain required before the combined PR ships.
+
+
+## tab-database-reconnect — Phase 1 review round 4
+
+### Status
+
+VERIFIED WITH LIMITATIONS
+
+Reviewed by Codex, 2026-10-31, at `cea6a514` on `fix/tab-database-reconnect`; fixes reviewed against `37c00ba4`. Read `AGENTS.md`, `.agent/WORKFLOW.md`, the approved plan and its Progress section, and the preceding Phase 1 reviews. Reviewed the hook changes and tests alongside load planning, metadata patching, SQL execution/stream ownership, runtime acquisition/installation and screen epochs. No application code changed.
+
+### Findings
+
+- **P0:** None established.
+- **P1:** None established.
+- **P2:** No new actionable defect established in the reviewed fixes. R3-P2-1, R3-P2-2 and R3-P2-3 are resolved for their reported cases.
+
+### Round 3 disposition
+
+| Finding | Round 4 result |
+| --- | --- |
+| R3-P2-1 — obsolete load clears replacement busy state | **Resolved.** `src/hooks/useLoadTableData.ts:224-239` uses a unique request token for pending ownership; stale publications and settlement retire only that request's pending flag. Committed deferred tests settle A while B remains pending, for both runtime replacement and same-runtime epoch invalidation; B stays busy until B settles. |
+| R3-P2-2 — late acquisition failure overwrites replacement state | **Resolved.** `src/hooks/useLoadTableData.ts:171-193` requires a live, still-disconnected tab in the original lifetime with no competing pending owner, and suppresses `TAB_CONNECT_SUPERSEDED`. Committed tests cover a late rejection after replacement success and the superseded error. Additional review probes cover rejection while replacement stays pending, close-before-rejection, current failure/retry, and real `connectTabOnce` supersession: old native success arrives after a forced newer acquisition and newer pending table load, with no old error/busy publication. |
+| R3-P2-3 — acquired load no longer coalesces | **Resolved.** `src/hooks/useLoadTableData.ts:207-216` registers the same task under its installed runtime lifetime and updates the loading guard; the executor/stream receives that lifetime at line 296. Committed real-acquisition test keeps the initial executor pending, confirms an ordinary repeated load joins it, and confirms force refresh dispatches separately. |
+
+### Compatibility and cleanup
+
+- Signature coalescing remains scoped to runtime/epoch. Different-lifetime work dispatches without waiting for the old executor. Re-registration preserves the original alias until settlement and adds the acquired-lifetime alias; cleanup compares each map entry with the task before deletion (`src/hooks/useLoadTableData.ts:319-325`).
+- Force/meta refresh bypass flags remain unchanged. Additional hook probes verify separate dispatch for `force`, `forceRefresh`, `forceRows`, `refreshMeta`, `refreshForeignKeys`, `refreshStats`, and `refreshRowCount` while an ordinary load is pending. Identical-signature requests retain their existing coalescing behavior, including identical refresh requests.
+- Additional late-acquisition-failure probe starts another identical ordinary request while the replacement remains pending; it joins the replacement, demonstrating old cleanup did not remove that signature slot. Each bypass control also performs another ordinary load after settlement and confirms fresh dispatch, checking settled slots are removed.
+- Live metadata/cache rereading remains after acquisition. Foreign metadata regression and SQL stale-start/chunk/done/error tests pass in the full suite. No new row-publication, error-reporting or slot-cleanup regression established within these paths.
+
+### Verification
+
+- `npm run build`: **passed**, exit 0 (TypeScript + Vite). Existing browser externalization, ineffective dynamic imports, chunk size and plugin timing warnings remain.
+- `npx vitest run --exclude '**/.claude/**'`: **284 files passed / 1 skipped; 2421 tests passed / 1 skipped**, exit 0. Completed before the temporary review probe file was created. Log: `/tmp/pdb-r4-vitest.log`.
+- Temporary review probes: **18 passed**, exit 0: seven copied committed hook tests plus eleven additional controls described above. Real hook/stores/acquisition with native connect and engine executor I/O mocked. Scratch copy: `/tmp/pdb-round4.probe.test.ts`; log: `/tmp/pdb-r4-probe.log`. Probe removed from the repository after execution; no application/test edits retained.
+- Rust tests not rerun: Rust is unchanged since round 2. Prior round 3 review records **453 passed / 47 failed / 22 ignored**, with sandbox loopback socket failures and dependent AI/license assertions; that historical result is not a current green Rust run.
+- No native desktop/live database/SSH/engine matrix run in this review. Earlier live PostgreSQL, native restart/restore and full trace/network limitations remain unverified; unit orchestration coverage does not replace them. No new Docker or database access attempted.
+- `git diff --check`: passed after report append. Only `.agent/REVIEW.md` changed; pre-existing untracked `.claude/launch.json` preserved. No commit, push or merge.
+
+**Verdict for Phase 1 at `cea6a514`: VERIFIED WITH LIMITATIONS.** Round 3 findings closed. Phase 2's frontend D3 guard remains intentionally unimplemented and is not a Phase 1 finding; both phases and the workflow's second security pass remain required before the combined release ships. D5 profile/Keychain atomicity and frontend profile-response ordering remain separate follow-ups.
+
+
+## tab-database-reconnect — Phase 2 review round 1
+
+### Status
+
+CHANGES REQUIRED
+
+Reviewed by Codex, 2026-10-31, commit `e48138a26b3248215241ba6732c4102658d879c9` on `fix/tab-database-reconnect`, diff `bb1f856f..e48138a2`. Read `AGENTS.md`, referenced RTK instructions, `.agent/WORKFLOW.md`, the approved plan's D3 section, R4/R5/R7/R20/R21 and Verification 9. Reviewed changed production code/tests and relevant dispatch, acquisition, SQL session, template, import/export, AI and health consumers. This section is the Phase 2 verdict; preceding Phase 1 reports remain intact. No application source changed.
+
+### Findings
+
+**P0:** None established.
+
+**D3-P1-1 — Health inspector cancel/terminate bypasses the frontend guard.** `src/lib/tauri/runtimeInvoke.ts:16-18,28-31` recognizes `connectionId`/`connection_id`, including nested input/payload, but not `runtimeConnectionId`. `src/lib/tauri/health-inspector-actions.ts:65-72` sends exactly that unrecognized property. Consequently no dispatch guard runs for `health_inspector_signal_backend`. The hook's post-confirmation checks (`src/hooks/useDbHealthInspector.ts:256-280`) compare its captured context and entitlement, not authoritative target identity/ownership. A tab becoming unknown or losing its recorded identity while retaining the runtime id can still send cancel/terminate; a superseded same-target runtime also escapes the shared check. Backend R20 checks revision freshness, not frontend tab authority, so it does not complete D3 here. The review probe used the real wrapper/registered guard with an unknown tab and mocked native transport: `checkTabTarget` refused, yet the native signal command was called and its `signalled` result returned.
+
+**Required fix:** Include the real health command argument shape in explicit runtime dispatch identification, and check the originating tab before confirmation and again after it. Preserve the health action's existing entitlement, token, busy and confirmation checks. Report a frontend refusal as definitely not dispatched with its actionable message; do not let `catch { return "unknown" }` misclassify it as an uncertain signal. Add real-wrapper/native-invoke-spy tests for unknown target, absent identity, mismatch, foreign and superseded runtimes, including changes during confirmation and an allowed-current control.
+
+**D3-P1-2 — Dispatch checks the runtime's owner instead of the caller's tab, allowing foreign runtime execution.** `src/lib/tabs/assertTabTarget.ts:179-193` derives the tab from `owners[runtimeId]` and checks that tab against itself. It cannot prove the caller is that owner. `src/screens/connection/hooks/useSqlHistoryRunner.ts:47-80` accepts an arbitrary connection id and dispatches it without checking its originating tab; its history and metadata context can belong to A while the connection belongs to B. The review probe mounted the real history hook for active tab A, supplied B's valid authoritative runtime on another target, and observed `operation_execute` sent on B, although `checkTabTarget(A, B)` correctly returned `RUNTIME_NOT_AUTHORITATIVE`. This is precisely the distinction the guard must enforce. It also matters for table consumers that pass cached `meta.connectionId`, such as import at `src/screens/connection/table/MainTableDataPane.tsx:964-973`; an owner-only transport check cannot reject A's foreign table reference to B. Existing unit tests reject `checkTabTarget(A, B)` directly but never establish that these caller boundaries invoke it. R20 can admit B because B itself is fresh.
+
+**Required fix:** Retain the transport check, but enforce `checkTabTarget(originatingTabId, runtimeId)` at every covered caller boundary, or carry that explicit origin through a shared dispatch context. Capture origin when work starts; do not use whichever tab is active later. Recheck after asynchronous dialogs/approvals and before dispatch. Audit the operations relying solely on interception, particularly SQL history/editor, table import/export, AI, health and reads. Add real-hook/wrapper tests with A's context and B's authoritative runtime (same target and different targets), asserting no native dispatch or foreign publication, plus controls for switching active tabs while valid A work continues. This implements D3/R4/Verification 9 without changing the accepted background-script behavior.
+
+**D3-P2-1 — The new owner requirement blocks every SQLite template seed.** `src/lib/tabs/assertTabTarget.ts:184-190` refuses connections with no owning tab. `src/screens/main/MainScreen.tsx:415-418` calls `seedSqliteTemplateDemo` immediately after save/connect, before creating/registering the tab at `:427-440`. Its first SQL operation therefore throws `TabTargetError` before native dispatch; the caught warning lets an empty “Hello World” database open as if the template succeeded. `src/lib/sqliteTemplateSeed.ts:33-45` goes through the real guarded query path. The review probe reproduced refusal/no native call for the freshly created, not-yet-registered runtime, with only event-bus initialization/native I/O mocked. This is a new legitimate-flow regression from enabling the global guard, contrary to behavioral compatibility and the plan's explicit SQLite template control.
+
+**Required fix:** Establish the intended default tab, runtime identity and ownership before seeding through the guarded query path, with coherent cleanup on failure/close. Do not globally exempt arbitrary unowned SQL work. Add a MainScreen template orchestration regression using the registered guard and a native operation spy; assert demo DDL/rows actually dispatch and the resulting tab owns the same runtime. Keep ordinary unowned/mismatched SQL refused.
+
+### Coverage, compatibility and test assessment
+
+- `checkTabTarget` itself correctly refuses unknown targets, absent identity, foreign ownership, superseded same-target connections, mismatched targets and previously refused connections. The defect is coverage/provenance at consumers, not the helper's basic predicates. Backend remains the revision authority; frontend equality does not authorize stale runtime reuse.
+- Explicit caller guards exist for backup, restore/SQL dump import, database changes, function/procedure/trigger drop, table drop/truncate, row patch apply, object save and schema/table DDL. Backup rechecks after the file dialog; restore rechecks after confirmation/Touch ID and before first dispatch/session admission; database changes recheck after `prepare`; object/table drop recheck after native confirmation. Lower SQL wrappers recheck recognized runtime ids before native invoke, including busy retries. Covered-operation completeness is **not verified** because of D3-P1-1/2.
+- Object drop now fences draft/window removal, refresh and ordinary errors/toasts using captured runtime/epoch authority, and releases its duplicate-drop bookkeeping in `finally`. Committed tests cover reconnect/target change during confirmation (no DROP, drafts/windows retained) and reconnect while DROP is pending (no stale completion cleanup). This is useful real-store hook coverage of the plan's named regression; procedure/trigger variants share this orchestration but are not separately demonstrated by these tests.
+- Dispatch parsing reaches ordinary SQL operation/transaction/CSV and SQL-session-begin input, Mongo/Cassandra/Sheets wrappers, AI start/status/grant and version lookups through their recognized connection fields. Table export streams dispatch through the SQL wrapper; file-only export writes carry no runtime and are not database admission. These transport paths still need originating-tab coverage under D3-P1-2. AI tool-by-tool revision admission remains Phase 1 backend work, not something the frontend guard replaces.
+- Connection test/create/profile-connect take configuration/profile payloads rather than an existing runtime id and are not incorrectly subjected to runtime admission. Ordinary acquisition installs identity/owner before normal tab work; reload retains Phase 1 dirty-draft installation refusal. SQLite template is the exception identified above. No change to lock/production/transaction/close-admission policy was established in this diff; frontend target guards are additional checks, not substitutes for those existing gates. Live/native behavior remains unverified.
+- SQL session begin is guarded; execute/end/cancel identify admitted work by session/operation id and remain usable after target invalidation. A review control confirmed that an unknown tab blocks new session begin while existing session execute and rollback/end still reach native transport. This preserves R20's admitted-session exception and cleanup, rather than trapping a transaction behind a new tab guard. It does not prove native transaction semantics.
+- The committed tests cover important helper refusal cases and selected confirmation/Touch ID races. Many hooks mock the query/session wrappers, so their passing assertions do not verify the registered transport guard or argument extraction. The dispatch tests exercise ordinary `runQuery`, not every covered wrapper. Fixture-seeding a valid owned runtime in existing suites also bypasses the real pre-registration template lifecycle. Required regressions belong with the three findings; 2,454 passing tests do not satisfy Verification 9's every-operation matrix.
+
+### Verification
+
+- `npm run build`: **passed**, exit 0 (TypeScript + Vite). Browser externalization, chunk-size and plugin-timing warnings remain.
+- `npm run test:run -- --exclude '**/.claude/**'`: **286 files passed / 1 skipped; 2454 tests passed / 1 skipped**, exit 0.
+- Temporary review probes: **16 passed**, exit 0: 12 copied committed guard/dispatch cases, three assertions demonstrating D3-P1-1/2/P2-1, and the admitted-session control. Real guard/stores/history hook/query/session/health wrappers; native invoke and event-bus initialization mocked. Passing defect assertions reproduce incorrect behavior, not acceptance. Final probe/log retained outside the repository at `/tmp/pdb-d3-review/probe.test.ts` and `/tmp/pdb-d3-review/probe.log`. Earlier scratch runs failed due to external test-path/mock resolution and missing event-bus mock; corrected final run passed. Scratch repository test/config removed; no production or committed-test edits retained.
+- Rust tests not rerun: this reviewed commit changes no Rust. No live PostgreSQL, native desktop/restart, SSH, Touch ID or engine integration exercised. No Docker commands, container changes, database access or secret retrieval performed.
+- `git diff --check`: passed after report append. Only `.agent/REVIEW.md` changed; pre-existing untracked `.claude/launch.json` preserved. No commit/push/merge.
+
+**Verdict for Phase 2 at `e48138a2`: CHANGES REQUIRED.** Fix D3-P1-1/2 and D3-P2-1 with boundary/lifecycle regressions, then re-review. Both phases remain one release unit; the workflow's second security review remains required before shipping. D5 follow-ups remain separate.
+
+## tab-database-reconnect — Phase 2 review round 2
+
+### Status
+
+CHANGES REQUIRED
+
+Reviewed by Codex, 2026-10-31, HEAD `2f802d92` on `fix/tab-database-reconnect`, fix diff `2aa2fa99..HEAD`, original Phase 2 `e48138a2`. Read the workflow, approved D3 scope and preceding report; traced fixes and adjacent consumers. No application source changed.
+
+### Findings
+
+**P0:** None established.
+
+**D3-R2-P1-1 — Caller-origin coverage remains incomplete for independent reads and SQL preflight.** The immutable owner strengthens the last dispatch check only after a caller has checked its own tab. `src/hooks/useDbHealthInspector.ts:153-167` starts snapshot collection without checking `ctx.tabId`; only session actions gained that check. `src/lib/tabs/assertTabTarget.ts:185-194` still validates B against B when A supplies B's valid runtime. A real-hook/collector/operation-wrapper probe mounted Inspector context A with B's authoritative runtime on another target: `checkTabTarget(A, B)` returned `RUNTIME_NOT_AUTHORITATIVE`, but native `operation_execute` was called on B. This can read and display another tab's database information; backend freshness does not reject a fresh B. Mock native transport rejected the operation immediately, so the probe proves dispatch, not a successful database read.
+
+The same unguarded caller-boundary pattern remains in covered object-definition reads: `src/screens/connection/hooks/useLoadDbObjectDefinition.ts:99` calls `loadDatabaseObjectDefinition` without checking its explicit `tabId`; its `stillCurrent` check is applied to completion, after dispatch. SQL editor validation also precedes the newly bound history callback: `src/screens/connection/hooks/useSqlRunner.ts:471-488` calls `validateSqlQueryBE` before `onRunSql`, and `src/lib/tauri/queryValidate.ts:161-177` sends a database operation directly. Explain Analyze starts directly at `src/screens/connection/hooks/useSqlRunner.ts:940`, likewise outside the new history guard. These routes cannot rely on the new history boundary to establish originating-tab provenance.
+
+**Required fix:** Complete the approved operation audit with an originating-tab check before each independent read/preflight/Analyze dispatch, or carry captured origin through a shared dispatch context. Preserve valid background SQL scripts across active-tab switches and already-admitted session cleanup. Recheck after asynchronous approval and before subsequent dispatches; fence foreign results as well as sends. Add real-hook/native-spy regressions for foreign same-target and different-target runtimes, unknown/missing/mismatched identity, and valid-origin controls. Do not equate immutable runtime ownership with proof of caller origin. This is the remaining part of D3-P1-2, not a new scope requirement.
+
+**P2:** No additional actionable regression established in the fix diff.
+
+### Round 1 disposition
+
+| Finding | Round 2 result |
+| --- | --- |
+| D3-P1-1 — health signal bypass | **Resolved for cancel/terminate.** `runtimeInvoke.ts` now recognizes top-level `runtimeConnectionId`; the hook checks the captured tab before/after confirmation; `TabTargetError` becomes the definite pre-dispatch `refused` outcome with reconnect guidance. Existing entitlement/token/confirmation/busy gates remain. Additional real-wrapper probe confirms unknown-target signal returns `refused` with zero native calls. Snapshot reads remain the finding above. |
+| D3-P1-2 — caller versus owner | **Partially resolved; still open.** SQL history requires explicit origin and records history there; ConnectionScreen binds that origin in its callback. Import, export, standalone export metadata, AI agent submit/grant and health signals now check caller tab. Owners cannot be reassigned by `register`/`setOwner`, supporting subsequent transport checks after a successful origin check. Independent read/preflight boundaries above remain uncovered. |
+| D3-P2-1 — SQLite template | **Resolved for reported pre-registration failure.** `src/screens/main/sqliteTemplate.ts:15-35` registers ownership and adds the default tab before seeding. Committed real-operation-wrapper/native-spy test observes all five seed statements, including DDL and inserts; unowned seed remains refused. Seed failure retains the prior warning/empty-database behavior. Native file creation/close races are not demonstrated by this test. |
+
+### Compatibility and coverage
+
+- SQL scripts: the screen callback closes over the originating tab; `useSqlRunner` retains its invocation's callback while awaiting statements/streams. A later active-tab switch does not replace that running invocation's origin. Committed history-hook controls verify valid A work while B is active and refusal of foreign same/different-target runtimes. Full multi-statement editor/stream switching was traced, not exercised in a native UI; validation and Analyze require the fix above.
+- Health actions retain confirmation and entitlement checks and classify frontend refusal as not sent. Import checks after parsing/validation before its transaction; export checks before starting export, while subsequent runtime commands retain transport admission. Standalone metadata export checks its tab before loading. AI submit and grant check scope tab; backend tool admission remains unchanged. Tests for these consumers pass, but many mock query/agent wrappers rather than exercising native dispatch.
+- Backup/restore, database changes, row patch, object save, schema/table DDL and table/object drop retain existing explicit boundaries and asynchronous rechecks from Phase 2. SQL session execute/end/cancel remain admitted-session operations; no new guard was added that would trap rollback/cleanup. No new defect established in these unchanged paths.
+- Connect/reload: no configuration-based create/test/connect commands were newly admitted as runtime work; ordinary acquisition still registers ownership before installation. Immutable ownership is compatible with fresh runtime IDs and prevents foreign re-ownership. Existing acquisition, stale-result, dirty-draft and reload tests pass. No new connect/reload regression established.
+- Covered-operation completeness is **not verified**. Object-definition reads, Inspector snapshot reads and SQL preflight/Analyze demonstrate why owner-only interception is insufficient. Other metadata/diagram/table/health-ping readers must be included in the implementer's origin audit rather than inferred safe from the transport check alone.
+
+### Verification
+
+- `npm run build`: **passed**, exit 0; existing externalization/dynamic-import/chunk-size warnings remain. Log `/tmp/pdb-d3-r2-build.log`.
+- `npm run test:run -- --exclude '**/.claude/**'`: **288 files passed / 1 skipped; 2468 tests passed / 1 skipped**, exit 0. Log `/tmp/pdb-d3-r2-tests.log`. Completed before temporary probes were included.
+- Additional review probes: **2 passed**, exit 0. One reproduces foreign-runtime snapshot dispatch through the real hook/collector/registered guard/operation wrapper; one confirms the repaired health signal refusal through the real wrapper. Native invoke, event-bus initialization and persistence mocked. Passing defect assertion demonstrates the remaining bug. Scratch test retained at `/tmp/pdb-d3-r2-probe.test.ts`, log `/tmp/pdb-d3-r2-probe.log`; temporary repository test removed.
+- Rust unchanged; not rerun. No native desktop, live database, SSH, Touch ID, restart or engine matrix exercised. No Docker command/container access, database access, secret retrieval, commit, push or merge.
+- Only this review append retained; existing untracked `.claude/launch.json` preserved. `git diff --check` passed after append.
+
+**Verdict for Phase 2 at `2f802d92`: CHANGES REQUIRED.** Close remaining D3-P1-2 caller-origin gaps with boundary regressions, then re-review. D3-P1-1 and D3-P2-1 reported cases are closed. Both phases remain one release unit; the workflow's second security review remains required before shipping.
+
+
+## tab-database-reconnect — Phase 2 review round 3
+
+### Status
+
+VERIFIED WITH LIMITATIONS
+
+Reviewed by Codex, 2026-10-31, HEAD `40154c65` on `fix/tab-database-reconnect`; round 2 fix diff `HEAD~1..HEAD` (`2f802d92..40154c65`), full Phase 2 `bb1f856f..40154c65`. Read workflow, approved D3 scope and preceding findings; reviewed changes and adjacent caller/transport paths. No application source or committed tests changed.
+
+### Findings
+
+**P0:** None established.
+
+**P1:** None established. **D3-R2-P1-1 resolved** for the reviewed operation matrix.
+
+**P2:** None established. Test-run limitation recorded below; no source regression established from it.
+
+### Round 2 disposition and origin audit
+
+| Operation | Evidence / result |
+| --- | --- |
+| SQL validation and statements | `src/screens/connection/hooks/useSqlRunner.ts:427,482` captures editor origin per run and checks before each statement's validation/dispatch; real screen supplies it through `workspace/ActiveWindowContent.tsx:228` and `sql/SqlWindowPane.tsx:106`. History checks explicit origin again at `hooks/useSqlHistoryRunner.ts:62`, after validation; transport checks subsequent sends. Refusal stops remaining statements. |
+| Explain Analyze | `src/screens/connection/hooks/useSqlRunner.ts:850,868,895` captures origin, refuses before dialogs and includes it in `stillAllowed` after Touch ID/confirmation and during operation startup. Committed tests cover foreign runtime and target change during dialog. |
+| Health Inspector snapshots | `src/hooks/useDbHealthInspector.ts:139` checks `ctx.tabId` before collector invocation, cancels obsolete collection and clears snapshot/pending state on refusal. Context identity now includes tab at `:93`. Temporary real-hook/collector/registered-guard/native-spy tests confirm same-target foreign, different-target foreign, unknown, missing identity and mismatch cause zero native calls; valid context reaches native operation wrapper. Native stub rejects immediately: valid control proves dispatch only. |
+| Object definitions | `src/screens/connection/hooks/useLoadDbObjectDefinition.ts:81` checks explicit draft tab before loading. Refusal preserves draft; existing request/epoch/generation/revision completion fences remain. |
+| Database metadata | `src/hooks/useDatabaseMetadata.ts:162-165` resolves tab from its tab-scoped metadata key and checks before version lookup and every engine branch, including column enrichment/Mongo sampling. Loaded-cache/in-flight fast paths perform no new dispatch. Cache clear/token ownership remain intact. |
+| Diagrams | `src/components/modal/DiagramGeneratorDialog.tsx:73` checks explicit origin before `loadDiagramState`; `ConnectionScreen.tsx:1172` supplies screen tab. Existing completion/lifetime fencing remains. |
+| Health ping | `src/screens/connection/hooks/useConnectionHealthCheck.ts:53` checks caller tab before SQL/version work, records down on refusal; `workspace/MenuBar.tsx:194` supplies screen tab. Existing stale-result fencing remains. |
+| Table loads | `src/hooks/useLoadTableData.ts:211` checks key's tab after acquisition, before engine work; existing runtime/epoch in-flight ownership, coalescing, guarded publications and pending retirement remain. |
+
+No covered D3 operation still lacking an originating-tab boundary was found. Rechecked remaining full-Phase-2 routes: database list/change, backup/restore/SQL import, object/table drop and truncate, row patch apply, object save, schema/table creation, history, table import/export (including standalone metadata), AI submit/grant and Inspector signals retain explicit origin checks. `src/lib/tabs/assertTabTarget.ts:184` plus immutable ownership in `src/stores/runtimeTargets.ts:56` carries a successful caller check to subsequent runtime dispatches; `src/lib/tauri/runtimeInvoke.ts:36` checks immediately before native invoke. This does not substitute owner identity for the initial caller check. Configuration-based connect/test/create and admitted operation/session identifiers retain their intended treatment.
+
+### Compatibility and regression assessment
+
+- **SQL scripts across active-tab switches:** temporary real `useSqlRunner`/stream-store probe starts a two-statement script in A, switches active tab to B and rerenders while A's first stream runs, then completes both streams. Both statements dispatch through A's callback/runtime and finish. Existing sequential/cancel/late-start/refusal tests also pass. No active-tab lookup was added to ordinary run continuation.
+- **Admitted-session cleanup:** temporary registered-guard/real-wrapper/native-spy probe makes A unknown: new session begin is refused with zero native calls, while existing session execute, rollback/end and operation cancellation still reach native transport. `src/lib/tauri/sqlSession.ts:26-38` and operation cancellation carry admitted IDs, not runtime IDs; backup/restore cleanup remains usable. Native transaction semantics were not exercised.
+- **Health Inspector:** snapshot origin check closes the round 2 reproduction; existing signal entitlement, confirmation, refusal classification, action reconciliation and lifecycle tests remain passing. Adding tab to context identity clears old state when origin changes without changing profile/runtime.
+- **Metadata after reconnect:** temporary real metadata-hook probe first receives origin refusal, installs a new owned runtime for the same tab, clears the tab cache, then calls `refreshWithOutcome`; refresh succeeds and SQL calls use only the new runtime. Native version and SQL I/O mocked. Screen epoch clear at `src/screens/connection/ConnectionScreen.tsx:310-323` and metadata `clear` token invalidation at `src/hooks/useDatabaseMetadata.ts:795-801` remain unchanged. Existing reconnect/table acquisition regressions pass. This is hook-level evidence, not a mounted desktop reconnect scenario.
+- Committed new boundary tests mostly mock the downstream query/collector/loader. Shared helper tests cover refusal predicates; review probes add native transport evidence for Inspector. This is not an end-to-end native-spy matrix for every operation/engine.
+
+### Verification
+
+- `npm run build`: **passed**, exit 0 (TypeScript + Vite); existing externalization/dynamic-import/chunk warnings. Log `/tmp/pdb-d3-r3-build.log`.
+- First `npm run test:run -- --exclude '**/.claude/**'`: **289 files passed / 1 skipped; 2481 tests passed / 1 skipped**, but **exit 1** for an unhandled `EnvironmentTeardownError` importing `src/lib/connection/connection.ts` through `tabTarget.ts`/persistence after `src/components/AppHeader.test.tsx` teardown. Do not count this as a clean suite pass. Log `/tmp/pdb-d3-r3-tests.log`.
+- Full-suite rerun with the same command, after removing scratch suites: **289 files passed / 1 skipped; 2481 tests passed / 1 skipped**, **exit 0**, no unhandled error. First-run teardown anomaly did not reproduce. Log `/tmp/pdb-d3-r3-tests-rerun.log`.
+- Additional review probes: **28 passed**, exit 0 across three scratch suites (includes copied existing controls). Native snapshot refusal matrix/valid dispatch, admitted-session cleanup, script switch/rerender and reconnect metadata controls described above. Native transport/event bus/persistence or focused I/O mocked. First metadata probe lacked a version mock and failed; supplied mock, then all probes passed. Scratch suites moved out of repo to `/tmp/pdb-d3-r3-probes/`; final log `/tmp/pdb-d3-r3-probes.log`.
+- Rust unchanged in Phase 2; not rerun. No native desktop, live database, restart, SSH, Touch ID or engine integration exercised. No Docker/container commands or secret retrieval. No commit/push/merge.
+- Only this report append retained; pre-existing untracked `.claude/launch.json` preserved. `git diff --check` passed after append.
+
+**Verdict for Phase 2 at `40154c65`: VERIFIED WITH LIMITATIONS.** D3-R2-P1-1 closed; no further P0/P1/P2 source finding established. Limitations: native/live scenario and complete per-engine operation matrix unverified; test teardown anomaly documented above. Both phases remain one release unit; workflow's second security review remains required before shipping. D5 follow-ups remain separate.
+
+
+## tab-database-reconnect — post-Phase-2 manual-feedback follow-ups (PR #89)
+
+### Status
+
+CHANGES REQUIRED
+
+Reviewed by Codex, 2026-11-01, branch `fix/tab-database-reconnect`, HEAD `e15895c6`. Exact review range: `e15895c6~3..e15895c6` (`5ded5e80`, `5d3ff230`, `e15895c6`); did not use `b4c1a4f2..HEAD`. Read AGENTS.md, RTK guidance, workflow, approved `.agent/plans/tab-database-reconnect.md` and preceding Phase 2 review. No application source or committed tests changed.
+
+### Findings
+
+**P0:** None established.
+
+**FU-P1-1 — Closed drafts can execute CREATE TABLE in the wrong schema.** `src/screens/connection/hooks/useConnectionActions.ts:248-253,271,284-286`: `closedNewTableWindow` splits the unescaped `table:<schema>.<name>` identifier at its first dot, then uses the reconstructed schema for executable SQL. For a closed draft `table:tenant.eu.untitled` belonging to schema `tenant.eu`, the collector generates `CREATE TABLE "tenant"."orders"`, not `CREATE TABLE "tenant.eu"."orders"`. If `tenant` exists and is writable, this creates an unintended object; otherwise a previously valid draft fails. The open-window path retains the correct schema, so closing changes its save destination. Existing sidebar parsing has the same lossy assumption, but this follow-up newly uses it to execute closed-draft DDL. Scratch probe reproduces the exact SQL destination with the real collector/query builder; no database write performed.
+
+**Required fix:** Keep structured schema/window identity with the authoritative draft and preserve it across close/reopen. Do not infer executable identity by splitting an ambiguous string, including at the last dot (table names can contain dots too). Refuse ambiguous legacy entries instead of guessing. Add open-versus-closed save regressions for dotted schemas, dotted table names, and both together, asserting identical intended SQL destinations.
+
+**FU-P1-2 — Saving closed drafts also saves stale aliases of a reopened renamed draft.** `src/screens/connection/hooks/useConnectionActions.ts:269-271`: the new fallback collects every closed entry independently. Existing sidebar reconstruction uses the edited name (`ConnectionScreen.tsx:448-468`), while `useConnectionWindows.ts:206-212` derives the reopened window ID from that name and `NewTablePane.tsx:54-75` seeds a new draft at that ID. Reproduction: edit `table:public.untitled` to name `orders`, close it, reopen its sidebar item (window `table:public.orders`), then save. Both keys are now collected and produce identical CREATE statements; `saveNewTables` executes them sequentially (`useConnectionActions.ts:818-830`), so one succeeds and the next fails. If the reopened copy is edited to another name, the hidden stale original can create an additional table the user did not intend. Previously the closed original was skipped. Scratch probe exercises real openTable/store/collector and observes two equal CREATE statements; pane seeding is simulated explicitly, not mounted.
+
+**Required fix:** Reopen the same authoritative draft identity and retain its current contents; never manufacture a second entity from its display name. Resolve existing alias/collision cases without silently discarding different edits. Add a real close/sidebar-reopen/edit/save regression that asserts one intended CREATE, latest edits preserved, draft cleared once, and no duplicate window IDs. Name-based SQL deduplication alone is insufficient.
+
+**FU-P2-1 — A pending reconnect confirmation remains live after unmount.** `src/screens/connection/workspace/TabTargetBanner.tsx:65-83`: the effect has no cleanup. `currentRef` retains its last problem/runtime on unmount, so resolving the confirmation with true still invokes the old reconnect callback. Navigating to main unmounts ConnectionScreen (`src/layout/index.tsx:87-88`); its captured reload callback can still reconnect the former tab in the background (`src/hooks/useEnsureRuntimeConnection.ts:107-129`). A remount suppresses a replacement prompt through the global asked set while the obsolete callback remains pending. Scratch component probe unmounts while confirmation is pending, resolves true, and observes one reconnect invocation. This establishes the callback lifecycle defect, not that ordinary pointer navigation is possible while a native modal is open.
+
+**Required fix:** Invalidate the pending continuation on unmount/effect replacement and verify the originating tab/lifetime is still eligible before invoking reconnect. Preserve once-per-problem behavior without letting an obsolete confirmation authorize later work. Add deferred-confirm tests for unmount/remount, navigation, runtime replacement, and target change; obsolete callbacks must not reconnect.
+
+**FU-P2-2 — Reconnect filtering suppresses genuine database-error dialogs.** `src/lib/tabs/assertTabTarget.ts:64-65`: substring matching classifies any message containing `RUNTIME_STALE` or `RUNTIME_IDENTITY_MISSING` as reconnect-only. For example, the genuine PostgreSQL error `relation "RUNTIME_STALE" does not exist` returns true. Both new consumers (`ConnectionScreen.tsx:239`, `useMainTableDataLoading.ts:250`) then skip their ordinary error dialog even though no reconnect refusal occurred and no reconnect prompt is due. Scratch predicate probe confirms the false positive. This suppresses the dialog; it does not remove the stored table error or bypass execution guards.
+
+**Required fix:** Classify the structured refusal code before flattening errors, or use narrowly defined exact/anchored backend error encodings. Keep arbitrary database/network text visible. Add negative cases containing both tokens in quoted identifiers and ordinary error text, plus positive cases for actual frontend and backend refusals through the consumers.
+
+### Compatibility and test quality
+
+- **Native prompt:** the single active ConnectionScreen is mounted by the layout; no newly mounted banner for every inactive tab was found. The global runtime/problem set prevents ordinary rerender/remount repetitions for the same problem; a new refused runtime can legitimately ask again. However, committed tests cover rerender only, not remount, deferred confirmation, target/runtime changes, rejection, or active-tab transitions. No native desktop modal interaction was exercised.
+- **Unknown targets / R7:** the banner and no-confirm branch remain; resolver and D3 fail-closed operation guards are unchanged. The new suppression does not authorize execution. Unknown drafts/text remain subject to existing preservation/close behavior.
+- **Labels:** `profile.ts:101-113,164-177,205-207` updates labels only for observed revisions and only when different; updates do not republish profiles, so no label/profile sync loop was found. Default and override labels share `tabLabelFor`; explicit unknown targets keep their labels. Committed regression verifies loadProfiles, default/override/unknown and unrelated profiles. Direct saveProfile/publishProfiles label controls and repeated same-revision no-op label assertions would strengthen coverage; those paths use the same helper. Profile ordering and backend revision authority remain unchanged.
+- **Created-table opening:** the live store lookup fixes the reported stale-render reuse after draft removal. The committed real-hook test proves the reported same-name case. It does not exercise actual DDL/save completion, multiple drafts, existing destination windows/drafts, or renamed closed drafts. Existing shared draft/created-table ID semantics are unchanged; no additional duplicate-window regression from this live lookup alone was established. FU-P1-2 concerns the newly saved closed alias entries, not a claim that addWindow deduplicates IDs.
+- **Save intent:** saving a closed draft is explicitly requested behavior, and global Cmd+S still opens the existing save-review dialog (`useConnectionActions.ts:762-789`); inclusion alone is not a finding. The collector remains tab-scoped and still rejects invalid drafts. The stale alias issue above makes the saved set incorrect. The new test covers only a simple `public` schema and one closed entry; it does not cover edited names/reopen identity, dotted identifiers, invalid drafts or collision behavior.
+- **D3 / R5 / R21:** operation admission, runtime ownership, conservative epoch invalidation and dirty reconnect/install checks remain in their existing modules. Relabeling changes display only, not target identity; no new runtime/draft migration or dirty-check bypass was found. The confirmation should obey the same asynchronous provenance discipline (FU-P2-1). Draft identity reconstruction/duplication violates AGENTS.md's authoritative-representation and adjacent-workflow expectations (FU-P1-1/2). These findings do not reopen the previously verified Phase 2 caller-origin matrix.
+
+### Verification
+
+- `npm run build`: **passed**, exit 0 (TypeScript + Vite); existing externalization/dynamic-import/chunk-size warnings. Log `/tmp/pdb-followup-build.log`.
+- `npm run test:run -- --exclude '**/.claude/**'`: **291 files passed / 1 skipped; 2488 tests passed / 1 skipped**, exit 0. Log `/tmp/pdb-followup-tests.log`.
+- Additional scratch probes: **4 passed**, exit 0; these intentionally assert the defective behavior documented above, not remediation. Used real stores, collector/query builder, openTable hook and banner component; persistence and native confirmation mocked, reopened-pane seeding simulated. Files `/tmp/pdb-followup-probes/followup.test.tsx` and `vite.config.mts`; log `/tmp/pdb-followup-probes.log`. Initial external-test configuration failed before collecting tests because of `/tmp` versus `/private/tmp` resolution; corrected scratch root and reran successfully. All scratch files remain outside repository.
+- Rust unchanged; not rerun. No native desktop, live database, restart, engine matrix, SSH or Touch ID exercised. Browser fallback cannot establish native-modal lifecycle behavior. No Docker/container commands, secret retrieval, commit, push or merge.
+- Only this review append retained; pre-existing untracked `.claude/launch.json` preserved. `git diff --check` checked after append.
+
+**Verdict for the three follow-ups at `e15895c6`: CHANGES REQUIRED.** Fix FU-P1-1/2 before verification; address FU-P2-1/2 with focused lifecycle/error-classification regressions. Prior Phase 2 verification remains historical evidence, not approval of these follow-ups.
+
+
+## tab-database-reconnect — manual-feedback follow-ups re-review round 2 (PR #89)
+
+### Status
+
+CHANGES REQUIRED
+
+Reviewed by Codex, 2026-11-01, branch `fix/tab-database-reconnect`, HEAD `c8e20458`. Fix range: `git diff HEAD~1..HEAD` (`e15895c6..c8e20458`); prior follow-up context: `5ded5e80`, `5d3ff230`, `e15895c6` and the preceding FU report. Read workflow, RTK instructions, affected production paths and tests. No application source or committed tests changed.
+
+### Findings
+
+**P0:** None established.
+
+**P1:** None established in this fix.
+
+**FU-R2-P2-1 — Ambiguous legacy drafts become invisible and silently unsaveable.** `src/screens/connection/lib/newTableDrafts.ts:27-30` correctly refuses to guess a dotted identity, but `src/screens/connection/ConnectionScreen.tsx:452-458` removes that draft from the sidebar and `src/screens/connection/hooks/useConnectionActions.ts:264-266` silently skips it with no error. A valid legacy `table:tenant.eu.untitled` draft is collected while its structured window is present, then returns `{data: [], error: null}` when closed. A previously closed persisted draft has no sidebar entry through which to reopen, inspect, clone or discard it. Cmd+S can do nothing, or save other work without explaining the omitted draft. Data remains in the store; this is loss of access/save feedback, not proof of physical data loss. The committed legacy test explicitly expects this silent omission.
+
+**Required fix:** Preserve fail-closed SQL targeting, but expose an actionable unresolved-draft notice/recovery or discard path and report omitted work in save review. Recover structured identity from an authoritative open window when available; never infer an ambiguous closed identity. Add legacy open/closed regressions verifying no wrong-schema dispatch, visible explanation and accessible recovery/discard, including mixed valid and unresolved drafts.
+
+**FU-R2-P2-2 — Pending reconnect lifecycle remains incomplete.** `src/screens/connection/workspace/TabTargetBanner.tsx:68-93` invalidates the old callback on unmount but retains the global asked key until the old promise resolves. Remount before that resolution sees the key and skips its effect; resolving the old answer only deletes a nonreactive Set entry, so the mounted replacement never asks or reconnects. Because reconnectable problems return no banner (`:95`), it also has no banner recovery action. A real component/deferred-dialog probe confirms one confirmation, zero old/replacement callbacks after this sequence. Separately, the continuation tracks only problem text/runtime id (`:60-63,85-93`), not intended target or originating tab lifetime: changing the target while retaining a refused runtime leaves the same stale-message string and effect dependencies, and an old positive answer invokes the replacement callback. A second component probe confirms this target-change case. The latter establishes missing provenance at this component boundary; it does not establish an ordinary UI route that changes target during a native modal.
+
+**Required fix:** Track prompt ownership and originating tab/target lifetime explicitly. Let an eligible replacement reliably obtain a fresh prompt after obsolete work settles, without duplicate native dialogs; an obsolete answer must never authorize replacement work. Include target identity in continuation validation and invalidation. Add remount-before-answer, same-message target change, active-tab/navigation, and runtime-replacement deferred tests, keeping once-per-problem behavior after a live cancellation.
+
+### Round 1 disposition
+
+| Finding | Round 2 result |
+| --- | --- |
+| FU-P1-1 — wrong schema for closed dotted drafts | **Resolved for recorded identities.** `NewTablePane.tsx:72-77` records schema/window name; `newTableDrafts.ts:20-25` reconstructs from those fields; collector uses open structured windows or that helper. Dotted schema/window-name open-versus-closed tests pass. Ambiguous legacy SQL is safely withheld, but its silent disappearance requires FU-R2-P2-1. |
+| FU-P1-2 — reopened renamed draft creates stale alias | **Resolved for the reported close/sidebar-reopen path.** `ConnectionScreen.tsx:451-463` carries the original draft key, `useConnectionWindows.ts:193-210` reopens that same key, and the pane writes back under that key. No second draft is seeded from its display name. Collector also refuses duplicate SQL destinations with an explicit error rather than discarding edits (`useConnectionActions.ts:271-281`). Existing different-name stale aliases are not automatically merged or discarded. |
+| FU-P2-1 — reconnect after unmount | **Partially resolved.** Cleanup prevents the original post-unmount reconnect; committed test covers old-answer-before-remount. Remount-before-answer and same-message target replacement remain faulty: FU-R2-P2-2. |
+| FU-P2-2 — ordinary database errors suppressed | **Resolved for the reported token false positives.** Shared anchored `runtimeRefusalOf` accepts bare codes/one `Error:` prefix and rejects quoted identifiers or arbitrary suffix text. `isReconnectMessage` and AI formatting use it. Backend admission returns these bare string codes (`src-tauri/src/engines/runtime/admission.rs:25-34,47-55`); runtimeInvoke preserves/reports them and AI event handling converts the event code to Error.message (`src/lib/ai-assistant/agent.ts:178-190`). Review probes cover both codes through real runtimeInvoke/native rejection and real AI formatter. |
+
+### Compatibility and test quality
+
+- New-table create/save: structured identity is written alongside editor values; open windows remain authoritative for collection. Closed recorded drafts retain SQL schema regardless of current schema selection. Successful save still clears each original draft/window and opens the created table from the live window store. The committed same-name created-table control passes; no additional source regression established in that path.
+- Reopen: committed real-hook/store test verifies one original window/draft and one CREATE after reopening a renamed closed draft. It does not mount NewTablePane, edit again, execute save, or assert draft cleanup. Thus it is useful identity/collector evidence, not a full close/reopen/edit/save UI regression.
+- Sidebar clone/drop: `LeftNavItemsPane.tsx:41-48,198-214` now looks up/discards closed drafts by original key; clone reads that same source and creates an independent identity with copied columns (`:644-661`). Open-window items continue using their own names. No additional clone/drop source defect established for distinct destination names. No mounted sidebar clone/drop test was added or run; ambiguous legacy entries cannot reach those actions (finding above). Existing name-collision behavior and full database DDL execution are not newly verified.
+- Duplicate-destination test checks explicit rejection without discarding either edit, but does not cover aliases with differing edited names or sidebar visibility collisions. Dotted tests cover original window names; explicit edited destination names containing dots would strengthen SQL coverage.
+- Reconnect tests correctly add unmount and runtime replacement controls; the remount test resolves the old promise before remount, missing the remaining ordering. No target-change control exists. Unknown-target banner and once-per-live-cancel behavior remain intact.
+- Refusal tests add useful negative cases. Committed tests still lack consumer-level ordinary-error-dialog assertions and real-wrapper refusal reporting controls; the review probes add wrapper/formatter evidence only. No broad D3 caller-origin matrix or native backend run was repeated.
+
+### Verification
+
+- `npm run build`: **passed**, exit 0, TypeScript + Vite. Existing externalization/dynamic-import/chunk-size warnings. Log `/tmp/pdb-fu-r2-build.log`.
+- `npm run test:run -- --exclude '**/.claude/**'`: **291 files passed / 1 skipped; 2497 tests passed / 1 skipped**, exit 0. Log `/tmp/pdb-fu-r2-tests.log`.
+- Additional review probes: **5 passed**, exit 0. Two deferred component probes intentionally assert remaining lifecycle defects; one collector probe asserts legacy omission/open-window control; two real-wrapper/AI-formatter probes verify actual bare backend code rejection/reporting. Native I/O/dialog/persistence mocked. Log `/tmp/pdb-fu-r2-probes.log`; scratch source `/tmp/pdb-followup-probes/r2.test.tsx`. External-root execution twice failed before collection due Vite path resolution; ran a temporary repository scratch test successfully, then removed it. No source/test modifications retained.
+- Rust unchanged; not rerun. No native desktop, live database, restart, engine matrix, SSH or Touch ID verification. No Docker/container commands or secret retrieval. No commit/push/merge.
+- Only this report append retained; pre-existing `.claude/launch.json` preserved. `git diff --check` passed after append.
+
+**Verdict at `c8e20458`: CHANGES REQUIRED.** Wrong-schema SQL and reopened-draft alias findings are fixed for their reported modern-draft cases; resolve legacy draft accessibility and remaining reconnect lifecycle cases before verification.
+
+
+## tab-database-reconnect — manual-feedback follow-ups re-review round 3 (PR #89)
+
+### Status
+
+CHANGES REQUIRED
+
+Reviewed by Codex, 2026-11-01, branch `fix/tab-database-reconnect`, HEAD `9c897b37`. Fix range: `git diff HEAD~1..HEAD` (`c8e20458..9c897b37`). Read workflow, round 2 findings, complete fix diff, affected production consumers and committed tests. No application source or tests changed.
+
+### Findings
+
+**P0:** None established.
+
+**P1:** None established.
+
+**FU-R3-P2-1 — Unresolved-table notices never reach the save-review dialog.** `src/screens/connection/hooks/useConnectionActions.ts:556-573` adds skipped-table notices to the action getter, and `:795-816` uses it to open review, but the rendered dialog gets `objectSaveNotices` from `useObjectSaveReview` (`src/screens/connection/ConnectionScreen.tsx:832-837,1072`). That hook still collects only object-editor notices (`src/screens/connection/hooks/useObjectSaveReview.ts:23-40`), with no new-table subscription or collector. With only an unresolved legacy table, Cmd+S opens an empty review without the promised explanation; with a valid table plus an unresolved table, review shows the valid SQL and can save it without identifying the omitted draft. The new collector tests assert `unresolved` metadata, not what this consumer renders.
+
+**Required fix:** Feed unresolved-table notices into the actual rendered review through a shared authoritative collection path, reactive to table drafts and open-window identity. Keep existing live object SQL/conflict/skip behavior. Add rendered save-review regressions for unresolved-only and mixed valid/unresolved drafts, including changes while review is open; assert the omitted draft name/reason is visible and no unresolved CREATE is dispatched.
+
+**FU-R3-P2-2 — Unresolved drafts can still lose their only discard path through sidebar filtering/deduplication.** `src/screens/connection/ConnectionScreen.tsx:455-456` omits closed drafts with a blank edited name, even though the collector reports them unresolved using their window id. For named drafts, `:461` assigns the currently selected schema, then `:478-483` deduplicates against database tables and other drafts solely by schema/name. Example: closed legacy `table:tenant.eu.untitled`, edited name `orders`, while `public.orders` is listed: the unresolved item is discarded from the sidebar model. Likewise two unresolved drafts called `orders` expose only one. The notice directs the user to sidebar Drop, but that item is absent; the visible real table's Drop operates on the real table, not the hidden draft. No destructive action was run. This is incomplete resolution of FU-R2-P2-1, not a claim that name deduplication was introduced in this commit.
+
+**Required fix:** Preserve separate sidebar identities for unresolved draft window ids regardless of duplicate/blank display names; provide a fallback label and an explicit unresolved indication. Keep their local discard action available without routing through a real table item. Add mounted sidebar controls for collisions with a database table, another draft, and blank names; verify Drop clears only the chosen draft and never dispatches database DDL.
+
+### Round 2 disposition
+
+| Finding | Round 3 result |
+| --- | --- |
+| FU-R2-P2-1 — legacy unresolved drafts | **Partially resolved, still open.** Collector reports unresolved work; ordinary named noncolliding closed drafts now appear, opening warns, cloning is disabled, and local Drop uses the original draft key. Structured open windows remain authoritative and dotted legacy SQL is withheld when closed. Actual save-review wiring and sidebar edge cases remain the two findings above. |
+| FU-R2-P2-2 — reconnect prompt lifecycle | **Resolved for the reviewed same-situation handoff model, with native limitations below.** A single module-level pending dialog serializes questions; its key includes tab/profile/override/runtime/problem. Cleanup removes an obsolete asker; settlement wakes mounted waiters. Same-key remount takes ownership of the existing question and receives its answer through its live callback; different tab/target/runtime cannot take that answer and may ask after settlement. This deliberately transfers the pending question for the identical situation rather than opening a fresh native dialog. An answer with no eligible mounted owner authorizes nothing. |
+
+### Compatibility and test quality
+
+- **Sidebar list/open/clone/drop:** modern recorded drafts retain original keys and recorded schemas; open-window recovery and same-key reopen tests pass. Unresolved open is refused with an explanatory warning; unresolved Clone is disabled. Local Drop retains confirmation and clears the original draft, while modern Clone still copies columns into its independent identity. These menu actions were source-traced, not exercised in a mounted sidebar; collisions/blank names above remain untested. No full close/reopen/edit/save/native-DDL UI test was added.
+- **Mixed work/save:** collector tests now cover valid plus unresolved drafts and authoritative open legacy identity; duplicate destination refusal and dotted-schema coverage remain. Valid SQL stays separate from unresolved work and save cleanup iterates collected valid entries only. Collector metadata alone does not prove save-review feedback, as FU-R3-P2-1 demonstrates. Existing object-review tests exercise the unchanged object-only path and therefore miss the new integration gap.
+- **Reconnect:** eight component tests pass using the real banner and runtime store with mocked native confirmation. Deferred cases cover same-key unmount/remount before answer (one dialog, replacement callback only), answer while unmounted followed by a later prompt, same-message target change followed by a serialized new prompt, runtime replacement, and a different tab waiting for the original dialog to settle. Live Not now stays quiet across rerender/remount; unknown target retains its banner without asking. Matching questions are keyed by identity rather than display text alone.
+- **Reconnect coverage limits:** no native desktop/navigation interaction, actual reload callback integration, or target-change-away-and-back test. Tab switching is represented by unmount/remount with a different tab id, not a full layout test. Runtime replacement test uses a fresh healthy id rather than a second refused runtime. Rejection is handled as cancellation in source but lacks a committed rejection test. Global coordinator state is not reset between tests; unique runtime ids and fully settled promises isolate the current cases, but future deferred tests must settle pending dialogs. No additional production defect established from these coverage limits.
+- Runtime admission, target resolution, SQL execution wrappers, backend and destructive-database confirmation behavior were not changed by this fix. Prior D3 verification remains historical evidence; no new bypass established in reviewed paths.
+
+### Verification
+
+- `npm run build`: **passed**, exit 0; TypeScript + Vite. Existing externalization/dynamic-import/chunk-size warnings. Log `/tmp/pdb-fu-r3-build.log`.
+- `npm run test:run -- --exclude '**/.claude/**'`: **291 files passed / 1 skipped; 2503 tests passed / 1 skipped**, exit 0. Log `/tmp/pdb-fu-r3-tests.log`.
+- Findings established by production caller/data-flow inspection; no additional scratch probes run. Passing suite does not exercise the missing save-review wiring or mounted sidebar edge cases.
+- Rust unchanged; not rerun. No native desktop, live database, restart, SSH, Touch ID or engine-matrix verification. No Docker/container access, secret retrieval, commit, push or merge.
+- Only this review append retained; pre-existing untracked `.claude/launch.json` preserved. `git diff --check` run after append.
+
+**Verdict at `9c897b37`: CHANGES REQUIRED.** Reconnect lifecycle is repaired for the reviewed handoff model; finish actual unresolved-draft save feedback and collision-safe discard access before verification.
+
+
+## tab-database-reconnect — manual-feedback follow-ups re-review round 4 (PR #89)
+
+### Status
+
+VERIFIED WITH LIMITATIONS
+
+Reviewed by Codex, 2026-11-01, branch `fix/tab-database-reconnect`, HEAD `0db7ad1a`. Exact fix range: `git diff HEAD~1..HEAD` (`9c897b37..0db7ad1a`). Read workflow, round 3 report, complete fix diff, affected consumers and tests. No application source or tests modified.
+
+### Findings
+
+**P0:** None established.
+
+**P1:** None established.
+
+**P2:** No new finding established. Both round 3 findings resolved for their reported cases. No required source fix identified.
+
+### Round 3 disposition
+
+| Finding | Round 4 result |
+| --- | --- |
+| FU-R3-P2-1 — notices absent from rendered review | **Resolved.** `src/screens/connection/hooks/useObjectSaveReview.ts:28-29,42-51` subscribes to tab-scoped table drafts and open windows and includes the shared unresolved notices alongside live object notices. `ConnectionScreen.tsx:786-791,1023-1026` feeds that hook into the actual dialog. Shared `unresolvedNewTableDrafts` / `unresolvedNewTableNotices` (`lib/newTableDrafts.ts:48-73`) also supply the action/collector path, eliminating the prior discrepancy. Rendered tests cover unresolved-only disabled Confirm and mixed SQL with reactive notice addition/removal. |
+| FU-R3-P2-2 — unresolved sidebar items disappear | **Resolved.** `src/screens/connection/lib/newTableDrafts.ts:115-122,142-147` gives unresolved drafts an explicit cannot-be-saved label, blank-name fallback and original draft identity, and bypasses name deduplication only for those items. `nav/LeftNavItemsPane.tsx:529,544` keys rows by draft id. Real-table collision, two same-name unresolved drafts and blank name are covered in helper tests; mounted collision test confirms local discard leaves the other draft intact without SQL or database Drop. |
+
+### Compatibility and test quality
+
+- **Sidebar list/dedup/search:** `ConnectionScreen.tsx:431-446` passes the same schema, search, windows and draft dependencies to the extracted helper. `newTableDrafts.ts:89-103,124-145` preserves base-table ordering, normal open/closed draft filtering and schema/name deduplication. Unresolved drafts remain independently searchable by their displayed names and receive the selected schema only as display context; this schema never supplies executable identity. Search can intentionally hide an item until cleared. No new normal-table or resolved-draft list regression established.
+- **Active highlight:** `LeftNavItemsPane.tsx:530-558` retains the prior schema/name active check and shared style functions; open draft rows retain their structured window names, while unresolved closed drafts cannot become active windows. Original-id lookup for scroll visibility remains at `:169-170`. No changed active-highlight behavior established. This is source comparison plus existing style/search tests, not a new mounted full-screen selection matrix.
+- **Save review / Confirm:** object SQL, summary, conflicts and skips still use the existing object collectors (`useObjectSaveReview.ts:38-45`). Existing rendered tests cover late conflict, disappearing/returning objects and an empty create receiving SQL. New tests cover unresolved-only and mixed valid SQL notices while open. `SaveChangesDialog.tsx:407-408` enables Confirm only for executable SQL without summary error and while not saving; notices alone do not enable it. Collector tests verify unresolved entries produce no CREATE, mixed work includes only valid entries and open structured identity recovers legacy drafts. Actual save still iterates collected valid entries only; unresolved notices do not authorize SQL.
+- **Drop:** `LeftNavItemsPane.tsx:45-48,209-214,360-370` uses the original draft id for local clear/close after confirmation when `new` is true; real tables continue to `actions.dropTable`. Unresolved Clone remains disabled. Mounted test uses the real sidebar/store with mocked confirmation, action context and native SQL; it proves one colliding draft is cleared and the other remains. No database DDL executed.
+- **Test strengths/limits:** the new tests catch both reported integration defects. Sidebar helper tests include blank names and collisions; rendered save tests verify visible reason/name and Confirm state. However, the mounted sidebar test identifies rows by empty measured text and position (`LeftNavItemsPane.drafts.test.tsx:90-99`), so it does not verify visible fallback labels, reactive row removal, real-table Drop, cancellation, search or highlight. Mixed review injects a valid SQL prop instead of mounting ConnectionScreen/real collection, and no rendered window-identity-change case was added. Those are coverage improvements, not independently established source defects. No full close/reopen/edit/save/native-DDL test performed.
+- **QueryAnalyzer anomaly:** reported earlier full-suite single failure passed alone, per handoff. This review's full suite passed, including QueryAnalyzer; an additional isolated run passed all 28 tests. HEAD changes neither QueryAnalyzer nor its plan, license, export or focus implementation; analyzer tests mock their native wrappers and reset their own relevant stores. No affected caller path found. Judge unrelated intermittent test/environment behavior, not evidence of this fix regressing QueryAnalyzer. Exact cause remains unconfirmed because the earlier failing assertion/log was not supplied; a passing rerun does not establish its cause.
+
+### Verification
+
+- `npm run build`: **passed**, exit 0 (TypeScript + Vite); existing externalization/dynamic-import/chunk warnings. Log `/tmp/pdb-fu-r4-build.log`.
+- `npm run test:run -- --exclude '**/.claude/**'`: **293 files passed / 1 skipped; 2509 tests passed / 1 skipped**, exit 0. Log `/tmp/pdb-fu-r4-tests.log`. jsdom canvas-not-implemented diagnostics did not fail the run.
+- `npm run test:run -- src/components/editor/query-analyzer/QueryAnalyzer.test.tsx --exclude '**/.claude/**'`: **1 file / 28 tests passed**, exit 0. Log `/tmp/pdb-fu-r4-analyzer.log`.
+- Rust unchanged; not rerun. No native desktop, live database, full-screen visual QA or engine-matrix verification. No Docker/container commands, secret retrieval, commit, push or merge.
+- Only this review append retained; pre-existing untracked `.claude/launch.json` preserved. `git diff --check` run after append.
+
+**Verdict at `0db7ad1a`: VERIFIED WITH LIMITATIONS.** FU-R3-P2-1 and FU-R3-P2-2 closed; no new P0/P1/P2 source finding established. Limitations are mounted full-screen/native coverage and the unconfirmed cause of the historical QueryAnalyzer flake.

@@ -1,4 +1,6 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./runtimeInvoke";
+import { isTabTargetError } from "src/lib/tabs/assertTabTarget";
+import { noteRuntimeError } from "./runtimeAdmission";
 import { CMD } from "./commands";
 
 export type SessionActionKind = "cancel" | "terminate";
@@ -9,6 +11,8 @@ export const PRE_DISPATCH_OUTCOMES = [
   "unavailable",
   "busy",
   "setup_failed",
+  // The tab may not use this connection (plan tab-database-reconnect D3).
+  "refused",
 ] as const;
 
 /** Signal sent, refused, or not matched — PostgreSQL answered. */
@@ -61,7 +65,7 @@ export async function signalHealthInspectorBackend(
     return "invalid";
   }
   try {
-    const result = await invokeFn<{ outcome?: unknown }>(
+    const result = await invokeFn<{ outcome?: unknown; reason?: unknown }>(
       CMD.healthInspectorSignalBackend,
       {
         runtimeConnectionId: target.runtimeConnectionId,
@@ -70,9 +74,14 @@ export async function signalHealthInspectorBackend(
         kind: target.kind,
       }
     );
+    // The connection itself was refused (stale): the tab says so (R20).
+    if (typeof result?.reason === "string") {
+      noteRuntimeError(target.runtimeConnectionId, result.reason);
+    }
     return isSessionActionOutcome(result?.outcome) ? result.outcome : "unknown";
-  } catch {
-    return "unknown";
+  } catch (err) {
+    // Refused before it was sent: certainly not signalled.
+    return isTabTargetError(err) ? "refused" : "unknown";
   }
 }
 

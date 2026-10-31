@@ -24,6 +24,8 @@ vi.mock("src/lib/tauri/queryValidate", async (importOriginal) => ({
 import { clearSqlRunnerWindowState, useSqlRunner } from "./useSqlRunner";
 import type { RunSqlReturn } from "./useSqlHistoryRunner";
 import { clearSqlStream } from "./useSqlStreamResult";
+import { TabTargetError } from "src/lib/tabs/assertTabTarget";
+import { resetTabRuntimes, seedTabRuntime } from "src/test/fixtures/tabRuntime";
 
 let WIN = "scope:seq";
 let winSeq = 0;
@@ -49,6 +51,7 @@ function setup() {
   const hook = renderHook(() =>
     useSqlRunner({
       activeSqlWindowId: WIN,
+      tabId: "tab-1",
       runtimeConnectionId: "conn-1",
       engine: "postgres",
       sqlSafetyMode: "default",
@@ -87,6 +90,8 @@ const slots = (hook: ReturnType<typeof setup>["hook"]) =>
   ]?.slots.map((slot: { status: string }) => slot.status);
 
 beforeEach(() => {
+  resetTabRuntimes();
+  seedTabRuntime({ tabId: "tab-1", runtimeId: "conn-1" });
   WIN = `scope:seq-${++winSeq}`;
   mocks.cancel.mockReset().mockResolvedValue(undefined);
   handlersByOp.clear();
@@ -141,6 +146,45 @@ describe("useSqlRunner statement order", () => {
     finish("op-3");
     await flush();
     expect(slots(hook)).toEqual(["done", "done", "done"]);
+  });
+
+  it("validates nothing through another tab's connection (D3)", async () => {
+    seedTabRuntime({ tabId: "tab-1", runtimeId: "conn-other" });
+    const { hook, onRunSql } = setup();
+    void hook.result.current.startRun({
+      windowId: WIN,
+      sql: "create table t (id int); select * from t",
+    });
+    await flush();
+    expect(mocks.validate).not.toHaveBeenCalled();
+    expect(onRunSql).not.toHaveBeenCalled();
+    expect(slots(hook)).toEqual(["error", "queued"]);
+  });
+
+  it("stops the run when the tab may no longer use its connection (D3)", async () => {
+    const { hook, onRunSql } = setup();
+    void hook.result.current.startRun({
+      windowId: WIN,
+      sql: "create table t (id int); insert into t values (1); select * from t",
+    });
+    await flush();
+    // The tab reconnects while the first statement runs.
+    onRunSql.mockImplementation(async () => {
+      throw new TabTargetError({
+        code: "RUNTIME_NOT_AUTHORITATIVE",
+        message: "This tab no longer uses this connection. Reconnect the tab.",
+      });
+    });
+    finish("op-1");
+    await flush();
+    await flush();
+    expect(onRunSql).toHaveBeenCalledTimes(2);
+    expect(order).not.toContain("validate:select * from t");
+    const run =
+      hook.result.current.sqlRuns[hook.result.current.sqlRuns.length - 1]!;
+    expect(run.slots[1]!.status).toBe("error");
+    expect(run.slots[1]!.error).toContain("no longer uses this connection");
+    expect(run.slots[2]!.status).toBe("queued");
   });
 
   it("marks a statement done however long its stream ran", async () => {
@@ -329,6 +373,7 @@ describe("useSqlRunner runs ended before the backend answered", () => {
     const hook = renderHook(() =>
       useSqlRunner({
         activeSqlWindowId: WIN,
+        tabId: "tab-1",
         runtimeConnectionId: "conn-1",
         engine: "postgres",
         sqlSafetyMode: "default",

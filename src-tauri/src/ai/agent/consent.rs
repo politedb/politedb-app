@@ -257,6 +257,7 @@ mod tests {
             indicator_color: None,
             created_at: Default::default(),
             updated_at: Default::default(),
+            revision: String::new(),
         }
     }
 

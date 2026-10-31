@@ -93,6 +93,7 @@ export async function executeMongoLoad(
       const rowsRes = await loadMongoRows({
         key,
         connId: ctx.connId,
+        isCurrent: ctx.isCurrent,
         schema: ctx.schema,
         tableName: ctx.tableName,
         limit: ctx.limit,

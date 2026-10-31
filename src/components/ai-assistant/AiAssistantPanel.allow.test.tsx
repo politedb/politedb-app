@@ -104,6 +104,7 @@ import { useLicenseStore } from "src/stores/license";
 import { useProUpgradeStore } from "src/stores/proUpgrade";
 import { AiAssistantPanel } from "./AiAssistantPanel";
 import { setAssistantMode } from "src/lib/ai-assistant/assistantMode";
+import { resetTabRuntimes, seedTabRuntime } from "src/test/fixtures/tabRuntime";
 
 function setPro(pro_access: boolean) {
   useLicenseStore.setState({ state: { pro_access } as LicenseState });
@@ -136,6 +137,7 @@ function panel(scope: string, mode: string) {
       tables={[]}
       columnsByTable={{}}
       runtimeConnectionId="conn-1"
+      tabId="tab-1"
       querySafetyMode={mode as any}
     />
   );
@@ -151,6 +153,8 @@ function pendingGrant() {
 }
 
 beforeEach(() => {
+  resetTabRuntimes();
+  seedTabRuntime({ tabId: "tab-1", runtimeId: "conn-1" });
   cleanup();
   vi.clearAllMocks();
   localStorage.clear();

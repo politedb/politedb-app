@@ -18,6 +18,11 @@ pub const MAX_ARG_CHARS: usize = 128;
 /// Whether the runtime connection still exists; checked before every call.
 pub type Alive = Arc<dyn Fn() -> bool + Send + Sync>;
 
+/// Whether the runtime connection may take new work (its profile was not
+/// saved again or removed since it was opened); checked before every call.
+/// `Err` ends the run with that code.
+pub use crate::engines::runtime::admission::RuntimeAdmission as Admission;
+
 /// What the tools may send besides names and types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MetadataPolicy {
@@ -29,20 +34,24 @@ pub struct MetadataPolicy {
 pub fn registry(
     executor: Arc<dyn CatalogExecutor>,
     alive: Alive,
+    admission: Admission,
     policy: MetadataPolicy,
 ) -> ToolRegistry {
     ToolRegistry::new(vec![
         Arc::new(ListSchemas {
             executor: executor.clone(),
             alive: alive.clone(),
+            admission: admission.clone(),
         }),
         Arc::new(ListTables {
             executor: executor.clone(),
             alive: alive.clone(),
+            admission: admission.clone(),
         }),
         Arc::new(DescribeTable {
             executor,
             alive,
+            admission,
             policy,
         }),
     ])
@@ -107,9 +116,15 @@ fn ensure_alive(alive: &Alive) -> Result<(), String> {
     }
 }
 
+/// A refused admission ends the run (not a model-visible tool error).
+pub fn ensure_admitted(admission: &Admission) -> Result<(), ToolError> {
+    admission().map_err(ToolError::Stop)
+}
+
 struct ListSchemas {
     executor: Arc<dyn CatalogExecutor>,
     alive: Alive,
+    admission: Admission,
 }
 
 #[async_trait]
@@ -128,6 +143,7 @@ impl AgentTool for ListSchemas {
     async fn run(&self, arguments: Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
         parse_args(&arguments, &[])?;
         ensure_alive(&self.alive)?;
+        ensure_admitted(&self.admission)?;
         let (schemas, truncated) = cap(self.executor.list_schemas(ctx).await?, MAX_SCHEMAS);
         Ok(json_output(
             json!({ "schemas": schemas, "truncated": truncated }),
@@ -139,6 +155,7 @@ impl AgentTool for ListSchemas {
 struct ListTables {
     executor: Arc<dyn CatalogExecutor>,
     alive: Alive,
+    admission: Admission,
 }
 
 #[async_trait]
@@ -163,6 +180,7 @@ impl AgentTool for ListTables {
     async fn run(&self, arguments: Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
         let args = parse_args(&arguments, &[("schema", false), ("name_contains", false)])?;
         ensure_alive(&self.alive)?;
+        ensure_admitted(&self.admission)?;
         let tables = self
             .executor
             .list_tables(
@@ -182,6 +200,7 @@ impl AgentTool for ListTables {
 struct DescribeTable {
     executor: Arc<dyn CatalogExecutor>,
     alive: Alive,
+    admission: Admission,
     policy: MetadataPolicy,
 }
 
@@ -208,6 +227,7 @@ impl AgentTool for DescribeTable {
     async fn run(&self, arguments: Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
         let args = parse_args(&arguments, &[("schema", true), ("table", true)])?;
         ensure_alive(&self.alive)?;
+        ensure_admitted(&self.admission)?;
         let mut description = self
             .executor
             .describe_table(&args["schema"], &args["table"], ctx)
@@ -317,9 +337,46 @@ mod tests {
         let registry = registry(
             catalog.clone(),
             Arc::new(move || flag.load(Ordering::SeqCst)),
+            Arc::new(|| Ok(())),
             policy,
         );
         (catalog, registry)
+    }
+
+    #[tokio::test]
+    async fn a_stale_connection_ends_the_run_before_any_read() {
+        let catalog = Arc::new(FakeCatalog::default());
+        let admitted = Arc::new(Mutex::new(Ok::<(), String>(())));
+        let registry = registry(
+            catalog.clone(),
+            Arc::new(|| true),
+            {
+                let admitted = admitted.clone();
+                Arc::new(move || admitted.lock().unwrap().clone())
+            },
+            DETAILS,
+        );
+        call(&registry, "list_schemas", json!({})).await.unwrap();
+        // The profile is saved again (or removed): the connection still
+        // exists, but no tool may touch it any more.
+        for code in ["RUNTIME_STALE", "RUNTIME_IDENTITY_MISSING"] {
+            *admitted.lock().unwrap() = Err(code.into());
+            for (tool, args) in [
+                ("list_schemas", json!({})),
+                ("list_tables", json!({})),
+                (
+                    "describe_table",
+                    json!({ "schema": "public", "table": "orders" }),
+                ),
+            ] {
+                let err = registry.find(tool).unwrap().run(args, &ctx()).await.err();
+                assert!(
+                    matches!(&err, Some(ToolError::Stop(c)) if c == code),
+                    "{tool}: a terminal {code}"
+                );
+            }
+        }
+        assert_eq!(*catalog.calls.lock().unwrap(), vec!["schemas".to_string()]);
     }
 
     fn tools(alive: bool) -> (Arc<FakeCatalog>, ToolRegistry) {

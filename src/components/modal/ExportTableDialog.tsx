@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
+import { checkTabTarget } from "src/lib/tabs/assertTabTarget";
 import { Checkbox } from "src/components/common/Checkbox";
 import {
   Dialog,
@@ -37,6 +38,8 @@ interface Props {
   open: boolean;
   handleClose: () => void;
   connectionId: string | null;
+  /** The connection tab exporting (D3: only through its own connection). */
+  tabId: string;
   schema: string;
   tableName: string;
   columns: ColumnMeta[];
@@ -54,6 +57,7 @@ export function ExportTableDialog({
   open,
   handleClose,
   connectionId,
+  tabId,
   schema,
   tableName,
   columns,
@@ -274,6 +278,11 @@ export function ExportTableDialog({
 
   const onExport = useCallback(async () => {
     setExportError(null);
+    const refusal = checkTabTarget(tabId, connectionId);
+    if (refusal) {
+      setExportError(refusal.message);
+      return;
+    }
     const exportConfig: ExportConfig = {
       connectionId,
       schema,
@@ -289,6 +298,7 @@ export function ExportTableDialog({
     await handleExport(tableName, totalRows, exportConfig);
   }, [
     tableName,
+    tabId,
     connectionId,
     schema,
     totalRows,

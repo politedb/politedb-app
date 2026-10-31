@@ -7,13 +7,22 @@ import {
   connectionTest,
   profileConnectTest,
   profileSave,
-  profileSaveAndConnect,
   SaveAndConnectAction,
   SaveAndConnectInput,
 } from "src/lib/tauri";
 
 import { XIcon } from "src/components/icons";
-import { ProfileTab, useScreenStore } from "src/stores/screen";
+import { ProfileTab, TabTarget, useScreenStore } from "src/stores/screen";
+import {
+  connectTabOnce,
+  PROFILE_TABS_HAVE_CHANGES,
+  profileTabsWithChanges,
+  tabLabelFor,
+} from "src/lib/runtimeConnection";
+import {
+  overrideMirror,
+  supportsDatabaseOverride,
+} from "src/lib/tabs/tabTarget";
 import { Button } from "src/components/common/Button";
 
 import { ConnectionBasicsSection } from "./ConnectionBasicsSection";
@@ -128,6 +137,11 @@ export function ConnectionFormDialog({
 
   const onSave = handleSubmit(async (v) => {
     const startedAt = Date.now();
+    // Settings change under no tab's unsaved changes (R21).
+    if (profileId && profileTabsWithChanges(profileId).length) {
+      setError(PROFILE_TABS_HAVE_CHANGES);
+      return;
+    }
     // Save profile only (no connect)
     setConnecting(); // reuse spinner state; or create setSaving() if you want distinct
     try {
@@ -169,6 +183,11 @@ export function ConnectionFormDialog({
 
   const onConnect = handleSubmit(async (v) => {
     const startedAt = Date.now();
+    // Settings change under no tab's unsaved changes (R21).
+    if (profileId && profileTabsWithChanges(profileId).length) {
+      setError(PROFILE_TABS_HAVE_CHANGES);
+      return;
+    }
     setConnecting();
     try {
       const connectionInput = buildConnectionInput(v);
@@ -177,7 +196,10 @@ export function ConnectionFormDialog({
         ? ({ mode: "update", profileId } as const)
         : ({ mode: "create" } as const);
 
-      const res = await profileSaveAndConnect({
+      // Save first (its own step), then connect the tab on what it was
+      // opened on (R6): never the profile's own database for a tab opened
+      // on another one.
+      const profile = await profileSave({
         ...action,
 
         // FE-only
@@ -188,43 +210,62 @@ export function ConnectionFormDialog({
         ...connectionInput,
       } as SaveAndConnectInput & SaveAndConnectAction);
 
-      setSuccess(`Connected ✅ ${res.profile.label}`);
-
+      const reused = reuseTabId
+        ? useScreenStore.getState().profileTabs.find((t) => t.id === reuseTabId)
+        : undefined;
+      // A tab keeps the database it was opened on while the engine can still
+      // open one; otherwise its target is unknown (R6).
+      let target: TabTarget = reused?.target ?? { kind: "default" };
+      if (
+        target.kind === "override" &&
+        !supportsDatabaseOverride(profile.engine)
+      ) {
+        target = { kind: "unknown" };
+      }
       const tabPatch: Partial<ProfileTab> = {
-        label:
-          res.profile.label || connectionInput.label || "Unnamed Connection",
+        label: tabLabelFor(
+          profile.label || connectionInput.label || "Unnamed Connection",
+          target
+        ),
         engine: connectionInput.engine,
-        runtimeConnectionId: res.connection.id,
-        profileId: res.profile.id,
+        profileId: profile.id,
+        target,
+        databaseOverride: overrideMirror(target),
       };
 
       let connectedTab: ProfileTab;
 
-      if (reuseTabId) {
-        updateTab(reuseTabId, tabPatch);
-        setActiveProfileScreen(reuseTabId);
+      if (reused) {
+        updateTab(reused.id, tabPatch);
+        setActiveProfileScreen(reused.id);
         connectedTab =
           useScreenStore
             .getState()
-            .profileTabs.find((t) => t.id === reuseTabId) ??
-          ({ id: reuseTabId, ...tabPatch } as ProfileTab);
+            .profileTabs.find((t) => t.id === reused.id) ??
+          ({ ...reused, ...tabPatch } as ProfileTab);
       } else {
         connectedTab = {
           id: `tab-${uuid()}`,
           ...tabPatch,
-          profileTags: res.profile.input?.tags ?? [],
+          profileTags: profile.input?.tags ?? [],
         } as ProfileTab;
 
         addTab(connectedTab);
         setActiveProfileScreen(connectedTab.id);
       }
 
+      // The saved profile is published before connecting, so a failed
+      // connect still leaves the new settings (and the stale connection
+      // blocked by the backend).
+      onSaved?.(profile);
+      await connectTabOnce(connectedTab.id, { force: true });
+      setSuccess(`Connected ✅ ${profile.label}`);
+
       void import("src/stores/connectionLog").then(
         ({ recordConnectionSessionOpened }) =>
           recordConnectionSessionOpened(connectedTab)
       );
 
-      onSaved?.(res.profile);
       onClose?.();
       trackEvent("connection_connect_success", {
         engine: connectionInput.engine,

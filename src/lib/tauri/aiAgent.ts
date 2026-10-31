@@ -1,4 +1,6 @@
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { Channel } from "@tauri-apps/api/core";
+import { invoke } from "./runtimeInvoke";
+import { noteRuntimeError } from "./runtimeAdmission";
 import { CMD } from "./commands";
 
 /** Events streamed by a backend agent run (`ai::agent::run::AgentEvent`). */
@@ -121,16 +123,21 @@ export type AiDataAccessStatus = {
   available: boolean;
   granted: boolean;
   label: string | null;
+  /** The connection itself was refused (`RUNTIME_STALE`, ...). */
+  reason?: string | null;
 };
 
 export async function aiAgentDataAccessStatus(
   connectionId: string,
   providerId: string
 ): Promise<AiDataAccessStatus> {
-  return invoke<AiDataAccessStatus>(CMD.aiAgentDataAccessStatus, {
+  const status = await invoke<AiDataAccessStatus>(CMD.aiAgentDataAccessStatus, {
     connectionId,
     providerId,
   });
+  // Unavailable because the connection is stale: the tab says so (R20).
+  if (status?.reason) noteRuntimeError(connectionId, status.reason);
+  return status;
 }
 
 /** Records the user's "Allow" for this connection's saved profile and provider. */

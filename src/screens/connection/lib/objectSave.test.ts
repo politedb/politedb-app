@@ -11,6 +11,7 @@ import {
   saveObjectDraftsForTab,
 } from "./objectSave";
 import type { ObjectMetadataRefresh } from "./objectWindows";
+import { seedTabRuntime } from "src/test/fixtures/tabRuntime";
 
 const mocks = vi.hoisted(() => ({
   runSqlQuery: vi.fn(),
@@ -90,6 +91,7 @@ beforeEach(() => {
     profileTabs: [],
     tabEpoch: {},
   });
+  seedTabRuntime({ tabId: TAB, runtimeId: "c1" });
 });
 
 describe("saveObjectDraftsForTab", () => {
@@ -135,6 +137,26 @@ describe("saveObjectDraftsForTab", () => {
     expect(draft(EDIT)!.baselineSql).toBe("submitted");
     expect(draft(EDIT)!.sql).toBe("typed while saving");
     expect(hasPendingWork(draft(EDIT)!)).toBe(true);
+  });
+
+  it("runs nothing through a connection the tab no longer uses (D3)", async () => {
+    seedCreate();
+    seedTabRuntime({ tabId: TAB, runtimeId: "c2" });
+    const setError = vi.fn();
+    await saveObjectDraftsForTab({
+      tabId: TAB,
+      engine: "postgres",
+      resolveConnectionId: async () => "c1",
+      refreshFallback: vi.fn(),
+      setError,
+    });
+    expect(mocks.runSqlQuery).not.toHaveBeenCalled();
+    expect(mocks.executeTransaction).not.toHaveBeenCalled();
+    expect(setError).toHaveBeenCalledWith(
+      expect.stringContaining("no longer uses this connection")
+    );
+    expect(draft(NEW)!.saving).toBe(false);
+    expect(isObjectSaveRunning(TAB)).toBe(false);
   });
 
   it("keeps every draft when the statements fail", async () => {
