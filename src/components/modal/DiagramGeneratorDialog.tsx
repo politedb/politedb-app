@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import { checkTabTarget } from "src/lib/tabs/assertTabTarget";
 import { useScreenStore } from "src/stores/screen";
 import { useRuntimeLifetime } from "src/hooks/useRuntimeLifetime";
 import { DiagramCanvas } from "src/components/diagram/DiagramCanvas";
@@ -17,6 +18,8 @@ type DiagramGeneratorDialogProps = {
   database?: string;
   schema: string;
   connectionId?: string;
+  /** The connection tab the diagram is drawn for (D3). */
+  tabId: string;
   metaKey: string;
   metadata: MetadataApi;
 };
@@ -29,6 +32,7 @@ export function DiagramGeneratorDialog(props: DiagramGeneratorDialogProps) {
     database,
     schema,
     connectionId,
+    tabId,
     metaKey,
     metadata,
   } = props;
@@ -65,6 +69,13 @@ export function DiagramGeneratorDialog(props: DiagramGeneratorDialogProps) {
       seqRef.current === seq &&
       connectionRef.current === connectionId &&
       epochOf() === epoch;
+    // D3: read only through the tab's own connection, on its target.
+    const tabRefusal = checkTabTarget(tabId, connectionId);
+    if (tabRefusal) {
+      setDiagram(null);
+      setError(tabRefusal.message);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -85,7 +96,7 @@ export function DiagramGeneratorDialog(props: DiagramGeneratorDialogProps) {
     } finally {
       if (seqRef.current === seq) setLoading(false);
     }
-  }, [connectionId, disabled, engine, metaKey, metadata, schema]);
+  }, [connectionId, tabId, disabled, engine, metaKey, metadata, schema]);
 
   useEffect(() => {
     if (open) void loadDiagram();

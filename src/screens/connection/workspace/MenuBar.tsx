@@ -191,6 +191,7 @@ export function MenuBar({
   });
   const health = useConnectionHealthCheck({
     runtimeConnectionId: rt.runtimeConnectionId,
+    tabId: rt.profileId,
     engine: rt.engine,
     // Only seed health from connection-level errors, not table/query failures.
     loadError: isConnectionError ? loadTableError : null,

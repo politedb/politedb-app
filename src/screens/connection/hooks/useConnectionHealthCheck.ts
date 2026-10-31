@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import { checkTabTarget } from "src/lib/tabs/assertTabTarget";
 import { runtimeWorkIsCurrent } from "src/lib/runtimeConnection";
 import { useRuntimeLifetime } from "src/hooks/useRuntimeLifetime";
 import { connectionVersion } from "src/lib/tauri";
@@ -18,10 +19,12 @@ function pingSql(engine?: DatabaseEngine): string | null {
 
 export function useConnectionHealthCheck(args: {
   runtimeConnectionId?: string;
+  /** The connection tab pinged for (D3). */
+  tabId?: string;
   engine?: DatabaseEngine;
   loadError?: string | null;
 }) {
-  const { runtimeConnectionId, engine, loadError } = args;
+  const { runtimeConnectionId, tabId, engine, loadError } = args;
   const [checking, setChecking] = useState(false);
   const [status, setStatus] = useState<HealthStatus>(
     loadError ? "degraded" : runtimeConnectionId ? "unknown" : "down"
@@ -42,6 +45,18 @@ export function useConnectionHealthCheck(args: {
       setStatus("down");
       setLatencyMs(null);
       setError("No active runtime connection.");
+      return;
+    }
+
+    // D3: only the tab's own connection, on its target, is pinged; any
+    // other is not healthy for this tab.
+    const tabRefusal = checkTabTarget(tabId, runtimeConnectionId);
+    if (tabRefusal) {
+      checkSeqRef.current += 1;
+      setChecking(false);
+      setStatus("down");
+      setLatencyMs(null);
+      setError(tabRefusal.message);
       return;
     }
 
@@ -73,7 +88,7 @@ export function useConnectionHealthCheck(args: {
     } finally {
       if (checkSeqRef.current === seq) setChecking(false);
     }
-  }, [runtimeConnectionId, engine]);
+  }, [runtimeConnectionId, tabId, engine]);
 
   useEffect(() => {
     setLatencyMs(null);

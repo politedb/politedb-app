@@ -1,4 +1,7 @@
 import { useCallback, useRef, useState } from "preact/hooks";
+import { metaKeyForTab } from "src/screens/connection/lib/objectWindows";
+import { checkTabTarget } from "src/lib/tabs/assertTabTarget";
+import { useScreenStore } from "src/stores/screen";
 import {
   objectListLoadStarted,
   objectListLoaded,
@@ -153,6 +156,22 @@ export function useDatabaseMetadata() {
 
       // Background schema refresh: keep sidebar + main pane visible while lists reload.
       const softForce = force && !!existing?.loaded && !columnsOnly;
+
+      // D3: a tab's metadata is read only through that tab's own
+      // connection, on its target (the key names the tab).
+      const originTab = useScreenStore
+        .getState()
+        .profileTabs.find((tab) => metaKeyForTab(tab) === metaKey);
+      const tabRefusal = checkTabTarget(originTab?.id, connectionId);
+      if (tabRefusal) {
+        const refused: DbMetadata = {
+          ...(existing ?? emptyMeta(engine)),
+          loading: false,
+          error: tabRefusal.message,
+        };
+        setCache(metaKey, { loading: false, error: tabRefusal.message });
+        return refused;
+      }
 
       // This load owns the key until clear() or a newer load (R5): an older
       // load's late results, errors and cleanup never land after that.

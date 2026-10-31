@@ -1169,6 +1169,7 @@ export function ConnectionScreen() {
           database={diagramDatabase}
           schema={activeSchema}
           connectionId={runtimeConnectionId}
+          tabId={activeProfileScreen}
           metaKey={metaKey}
           metadata={metadata}
         />

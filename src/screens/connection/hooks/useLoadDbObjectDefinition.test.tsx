@@ -5,6 +5,7 @@ import { editDraftKey } from "src/lib/objectDraftKey";
 import { canExecute, useObjectDraftStore } from "src/stores/objectDrafts";
 import { useScreenStore } from "src/stores/screen";
 import { useLoadDbObjectDefinition } from "./useLoadDbObjectDefinition";
+import { resetTabRuntimes, seedTabRuntime } from "src/test/fixtures/tabRuntime";
 
 const loadMock = vi.fn();
 
@@ -65,6 +66,7 @@ function setLiveTab(connectionId: string, epoch = 0) {
     profileTabs: [{ id: TAB, runtimeConnectionId: connectionId } as never],
     tabEpoch: { [TAB]: epoch },
   });
+  seedTabRuntime({ tabId: TAB, runtimeId: connectionId });
 }
 
 function ensureDraft(object: ReturnType<typeof item>) {
@@ -75,9 +77,25 @@ function ensureDraft(object: ReturnType<typeof item>) {
 
 describe("useLoadDbObjectDefinition", () => {
   beforeEach(() => {
+    resetTabRuntimes();
     setLiveTab("conn-1");
     loadMock.mockReset();
     useObjectDraftStore.getState().clearAll();
+  });
+
+  it("reads nothing through another tab's connection and keeps the draft (D3)", async () => {
+    seedTabRuntime({ tabId: "other", runtimeId: "conn-other" });
+    const first = item();
+    ensureDraft(first);
+    render(<Harness object={first} connectionId="conn-other" />);
+    await waitFor(() =>
+      expect(screen.getByTestId("error").textContent).toMatch(
+        /no longer uses this connection/
+      )
+    );
+    expect(loadMock).not.toHaveBeenCalled();
+    expect(draftOf(first)?.loaded).not.toBe(true);
+    expect(screen.getByTestId("loading").textContent).toBe("false");
   });
 
   it("loads a definition into the draft once across re-renders", async () => {

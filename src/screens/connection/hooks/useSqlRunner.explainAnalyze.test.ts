@@ -36,6 +36,8 @@ import { useLicenseStore } from "src/stores/license";
 import { useProUpgradeStore } from "src/stores/proUpgrade";
 import { clearSqlRunnerWindowState, useSqlRunner } from "./useSqlRunner";
 import { clearSqlStream } from "./useSqlStreamResult";
+import { resetTabRuntimes, seedTabRuntime } from "src/test/fixtures/tabRuntime";
+import { useScreenStore } from "src/stores/screen";
 
 const WIN = "scope:w1";
 
@@ -66,6 +68,7 @@ function setup(initial: Props = {}) {
     (props: Props) =>
       useSqlRunner({
         activeSqlWindowId: props.window ?? WIN,
+        tabId: "tab-1",
         runtimeConnectionId:
           "connectionId" in props ? props.connectionId : "conn-1",
         engine: props.engine ?? "postgres",
@@ -113,6 +116,10 @@ function runs(hook: Hook) {
 }
 
 beforeEach(() => {
+  resetTabRuntimes();
+  seedTabRuntime({ tabId: "tab-1", runtimeId: "conn-1" });
+  seedTabRuntime({ tabId: "tab-2", runtimeId: "conn-2" });
+  seedTabRuntime({ tabId: "tab-old", runtimeId: "conn-old" });
   vi.useFakeTimers();
   setPro(true);
   useProUpgradeStore.setState({ feature: null });
@@ -146,6 +153,29 @@ describe("startExplainAnalyze gates", () => {
     expect(mocks.confirmDialog).not.toHaveBeenCalled();
     expect(mocks.start).not.toHaveBeenCalled();
     expect(runs(hook)).toHaveLength(0);
+  });
+
+  it("asks nothing and starts nothing on another tab's connection (D3)", async () => {
+    const hook = setup({ connectionId: "conn-2" });
+    await act(() => analyze(hook));
+    expect(mocks.confirmDialog).not.toHaveBeenCalled();
+    expect(mocks.start).not.toHaveBeenCalled();
+    expect(runs(hook)[0]?.slots[0]?.error).toMatch(
+      /no longer uses this connection/
+    );
+  });
+
+  it("starts nothing when the tab's target changes during the dialog (D3)", async () => {
+    mocks.confirmDialog.mockImplementation(async () => {
+      useScreenStore
+        .getState()
+        .updateTab("tab-1", { target: { kind: "unknown" } });
+      return true;
+    });
+    const hook = setup();
+    await act(() => analyze(hook));
+    expect(mocks.confirmDialog).toHaveBeenCalledTimes(1);
+    expect(mocks.start).not.toHaveBeenCalled();
   });
 
   it("refuses other engines with a fixed message", async () => {

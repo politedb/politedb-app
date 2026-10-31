@@ -5,7 +5,11 @@ import {
   useRef,
   useState,
 } from "preact/hooks";
-import { isTabTargetError } from "src/lib/tabs/assertTabTarget";
+import {
+  assertTabTarget,
+  checkTabTarget,
+  isTabTargetError,
+} from "src/lib/tabs/assertTabTarget";
 import type { DatabaseEngine } from "src/types";
 import type { SqlResultRun, SqlResultSlot } from "src/lib/tauri";
 import {
@@ -268,6 +272,8 @@ function createErrorRun(args: {
 export function useSqlRunner(args: {
   activeSqlWindowId?: string;
   runtimeConnectionId?: string;
+  /** The connection tab the editor belongs to (D3). */
+  tabId?: string;
   engine: DatabaseEngine;
   isProfileLocked?: boolean;
   sqlSafetyMode?: QuerySafetyMode;
@@ -279,6 +285,7 @@ export function useSqlRunner(args: {
   const {
     activeSqlWindowId,
     runtimeConnectionId,
+    tabId,
     engine,
     isProfileLocked = false,
     sqlSafetyMode = "default",
@@ -416,6 +423,8 @@ export function useSqlRunner(args: {
     }) => {
       const winId = args.windowId;
       if (!runtimeConnectionId) return;
+      // The editor's tab, fixed for the whole run (D3).
+      const originTab = tabId;
 
       const runIndex =
         (stateByWindowId.get(winId)?.runs.length ?? sqlRuns.length) + 1;
@@ -468,6 +477,9 @@ export function useSqlRunner(args: {
         });
 
         try {
+          // D3: nothing, validation included, reaches a connection that is
+          // not the run's own tab's.
+          assertTabTarget(originTab, runtimeConnectionId);
           if (args.validateBeforeRun) {
             const validated = await untilRunEnds(
               resultRunId,
@@ -607,6 +619,7 @@ export function useSqlRunner(args: {
       currentRunId,
       onRunSql,
       runtimeConnectionId,
+      tabId,
       setSlot,
       sqlRuns.length,
       stopOnError,
@@ -834,6 +847,7 @@ export function useSqlRunner(args: {
         locked: isProfileLocked,
       };
       const historyTarget = captureHistoryTarget?.() ?? null;
+      const originTab = tabId;
       // Anything that changed since the click stops the attempt (step 6):
       // connection, engine, raw safety mode, lock, Pro, profile tab and its
       // connection, and the statement itself.
@@ -849,7 +863,9 @@ export function useSqlRunner(args: {
           hasProAccessNow() &&
           (tabNow?.tabId ?? null) === (historyTarget?.tabId ?? null) &&
           (historyTarget?.isCurrent() ?? true) &&
-          (payload.sourceUnchanged?.() ?? true)
+          (payload.sourceUnchanged?.() ?? true) &&
+          // D3: still the editor tab's own connection, on its target.
+          !checkTabTarget(originTab, connectionId)
         );
       };
 
@@ -874,6 +890,11 @@ export function useSqlRunner(args: {
             "Explain Analyze",
             "This plan came from an earlier connection. Run Explain again, then Explain Analyze."
           );
+          return;
+        }
+        const tabRefusal = checkTabTarget(originTab, connectionId);
+        if (tabRefusal) {
+          refuse("Explain Analyze", tabRefusal.message);
           return;
         }
         if (!requirePro("query-analyzer")) return;
@@ -1007,6 +1028,7 @@ export function useSqlRunner(args: {
       isProfileLocked,
       requirePro,
       runtimeConnectionId,
+      tabId,
       setSlot,
       sqlSafetyMode,
     ]

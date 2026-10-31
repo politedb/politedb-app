@@ -11,6 +11,7 @@ vi.mock("src/stores/persistentStore", () => ({
 
 import { useScreenStore } from "src/stores/screen";
 import { useConnectionHealthCheck } from "./useConnectionHealthCheck";
+import { resetTabRuntimes, seedTabRuntime } from "src/test/fixtures/tabRuntime";
 
 beforeEach(() => {
   useScreenStore.setState({
@@ -24,6 +25,10 @@ beforeEach(() => {
     ] as never,
     tabEpoch: {},
   });
+  resetTabRuntimes();
+  seedTabRuntime({ tabId: "t", runtimeId: "rt", profileId: "p" });
+  useScreenStore.setState({ tabEpoch: {} });
+  m.run.mockReset();
 });
 
 describe("a ping that lost authority (R5)", () => {
@@ -33,6 +38,7 @@ describe("a ping that lost authority (R5)", () => {
     const { result } = renderHook(() =>
       useConnectionHealthCheck({
         runtimeConnectionId: "rt",
+        tabId: "t",
         engine: "postgres",
       })
     );
@@ -43,5 +49,21 @@ describe("a ping that lost authority (R5)", () => {
     await act(async () => answer());
     expect(result.current.status).not.toBe("healthy");
     expect(result.current.latencyMs).toBeNull();
+  });
+
+  it("never pings, or reports healthy, another tab's connection (D3)", async () => {
+    seedTabRuntime({ tabId: "other", runtimeId: "rt-other" });
+    m.run.mockResolvedValue({});
+    const { result } = renderHook(() =>
+      useConnectionHealthCheck({
+        runtimeConnectionId: "rt-other",
+        tabId: "t",
+        engine: "postgres",
+      })
+    );
+    await act(async () => {});
+    expect(m.run).not.toHaveBeenCalled();
+    expect(result.current.status).toBe("down");
+    expect(result.current.checking).toBe(false);
   });
 });

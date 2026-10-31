@@ -48,6 +48,20 @@ function setTab(extra: object = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   useRuntimeTargetsStore.setState({ targets: {}, owners: {}, refused: {} });
+  // The tab's connections, each opened on its target by the tab (D3).
+  for (const id of ["rt-a", "rt-b"]) {
+    useRuntimeTargetsStore.getState().register(
+      id,
+      {
+        profile_id: "p1",
+        profile_revision: "r1",
+        database_override: null,
+        engine: "postgres",
+        display: "app",
+      },
+      "t"
+    );
+  }
   useConnectionStore.setState({
     tableDataMap: {},
     columnsCache: {},
@@ -104,6 +118,45 @@ describe("a load after a reconnect (R5)", () => {
     });
     expect(m.execute.mock.calls[0]![0].isCurrent()).toBe(false);
     expect(m.execute.mock.calls[1]![0].isCurrent()).toBe(true);
+  });
+});
+
+describe("a load through a connection the tab may not use (D3)", () => {
+  it.each([
+    ["another tab's connection", "rt-foreign", "other"],
+    ["a connection with no recorded identity", "rt-unknown", null],
+  ])("loads nothing through %s", async (_, runtimeId, owner) => {
+    if (owner) {
+      useRuntimeTargetsStore.getState().register(
+        runtimeId,
+        {
+          profile_id: "p1",
+          profile_revision: "r1",
+          database_override: null,
+          engine: "postgres",
+          display: "app",
+        },
+        owner
+      );
+    }
+    setTab({ runtimeConnectionId: runtimeId });
+    const { result } = renderHook(() => useLoadTableData());
+    await act(async () => {
+      await result.current.loadTableData("public", "items");
+    });
+    expect(m.execute).not.toHaveBeenCalled();
+    expect(useConnectionStore.getState().tableDataMap[KEY]?.error).toMatch(
+      /Reconnect/
+    );
+  });
+
+  it("loads nothing on a tab whose target is unknown", async () => {
+    setTab({ runtimeConnectionId: "rt-a", target: { kind: "unknown" } });
+    const { result } = renderHook(() => useLoadTableData());
+    await act(async () => {
+      await result.current.loadTableData("public", "items");
+    });
+    expect(m.execute).not.toHaveBeenCalled();
   });
 });
 
@@ -250,7 +303,6 @@ describe("a connect that fails late (R4/R5)", () => {
     await act(async () => {});
     // Meanwhile the tab got a connection and the table loaded on it.
     act(() => {
-      useRuntimeTargetsStore.getState().register("rt-b", null, "t");
       useScreenStore.getState().updateTab("t", { runtimeConnectionId: "rt-b" });
     });
     await act(async () => {

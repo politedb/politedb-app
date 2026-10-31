@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "preact/hooks";
+import { checkTabTarget } from "src/lib/tabs/assertTabTarget";
 import { loadDatabaseObjectDefinition } from "src/lib/databaseObjects";
 import { useRuntimeLifetime } from "src/hooks/useRuntimeLifetime";
 import type { DatabaseEngine, DatabaseObjectItem } from "src/types";
@@ -76,6 +77,13 @@ export function useLoadDbObjectDefinition(args: {
     }
 
     const seq = ++requestSeqRef.current;
+    // D3: read only through this tab's own connection; the draft stays.
+    const tabRefusal = checkTabTarget(tabId, connectionId);
+    if (tabRefusal) {
+      setLoading(false);
+      setLoadError(tabRefusal.message);
+      return;
+    }
     const epoch = useScreenStore.getState().tabEpoch[tabId] ?? 0;
     setLoading(true);
     setLoadError(null);

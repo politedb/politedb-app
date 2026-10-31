@@ -90,7 +90,7 @@ export function useDbHealthInspector(ctx: HealthInspectorContext) {
   const [, setBlockedVersion] = useState(0);
   const ctxRef = useRef(ctx);
   ctxRef.current = ctx;
-  const contextKey = `${ctx.profileId ?? ""}::${ctx.runtimeConnectionId ?? ""}::${ctx.engine ?? ""}`;
+  const contextKey = `${ctx.tabId ?? ""}::${ctx.profileId ?? ""}::${ctx.runtimeConnectionId ?? ""}::${ctx.engine ?? ""}`;
 
   const cancel = useCallback(() => {
     abortRef.current?.abort();
@@ -133,6 +133,17 @@ export function useDbHealthInspector(ctx: HealthInspectorContext) {
         );
         setSnapshot(null);
         setLoading(false);
+        return;
+      }
+      // D3: read only through the Inspector tab's own connection.
+      const tabRefusal = checkTabTarget(ctx.tabId, ctx.runtimeConnectionId);
+      if (tabRefusal) {
+        cancel();
+        generationRef.current += 1;
+        setError(tabRefusal.message);
+        setSnapshot(null);
+        setLoading(false);
+        setRefreshing(false);
         return;
       }
 
@@ -217,6 +228,7 @@ export function useDbHealthInspector(ctx: HealthInspectorContext) {
       ctx.open,
       ctx.profileId,
       ctx.runtimeConnectionId,
+      ctx.tabId,
     ]
   );
 

@@ -26,6 +26,7 @@ function snap(partial?: Record<string, unknown>) {
   return {
     runtimeConnectionId: "c1",
     profileId: "p1",
+    tabId: "tab-1",
     engine: "postgres",
     startedAt: 1,
     finishedAt: 2,
@@ -105,6 +106,7 @@ describe("useDbHealthInspector lifecycle", () => {
           open: true,
           runtimeConnectionId: "c1",
           profileId: "p1",
+          tabId: "tab-1",
           engine: "postgres" as const,
         },
       }
@@ -117,6 +119,7 @@ describe("useDbHealthInspector lifecycle", () => {
       open: false,
       runtimeConnectionId: "c1",
       profileId: "p1",
+      tabId: "tab-1",
       engine: "postgres",
     });
 
@@ -139,6 +142,7 @@ describe("useDbHealthInspector lifecycle", () => {
         open: true,
         runtimeConnectionId: "c1",
         profileId: "p1",
+        tabId: "tab-1",
         engine: "postgres",
       })
     );
@@ -161,6 +165,7 @@ describe("useDbHealthInspector lifecycle", () => {
           open: true,
           runtimeConnectionId: "c1",
           profileId: "p1",
+          tabId: "tab-1",
           engine: "postgres" as const,
         },
       }
@@ -169,10 +174,12 @@ describe("useDbHealthInspector lifecycle", () => {
     await waitFor(() => expect(result.current.snapshot).not.toBeNull());
 
     collectMock.mockResolvedValue(snap({ runtimeConnectionId: "c2" }));
+    seedTabRuntime({ tabId: "tab-1", runtimeId: "c2" });
     rerender({
       open: true,
       runtimeConnectionId: "c2",
       profileId: "p1",
+      tabId: "tab-1",
       engine: "postgres",
     });
 
@@ -181,12 +188,23 @@ describe("useDbHealthInspector lifecycle", () => {
     );
   });
 
+  it("collects nothing through a connection the tab may not use (D3)", async () => {
+    seedTabRuntime({ tabId: "tab-1", runtimeId: "c-other" });
+    const { result } = renderHook(() => useDbHealthInspector({ ...pgCtx }));
+    await waitFor(() =>
+      expect(result.current.error).toMatch(/no longer uses this connection/)
+    );
+    expect(collectMock).not.toHaveBeenCalled();
+    expect(result.current.snapshot).toBeNull();
+  });
+
   it("marks unsupported engines without querying", async () => {
     const { result } = renderHook(() =>
       useDbHealthInspector({
         open: true,
         runtimeConnectionId: "c1",
         profileId: "p1",
+        tabId: "tab-1",
         engine: "mysql",
       })
     );
@@ -208,6 +226,7 @@ describe("useDbHealthInspector lifecycle", () => {
         open: true,
         runtimeConnectionId: "c1",
         profileId: "p1",
+        tabId: "tab-1",
         engine: "postgres",
       })
     );

@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useRef } from "preact/hooks";
+import { checkTabTarget } from "src/lib/tabs/assertTabTarget";
 import {
   connectTabOnce,
   runtimeServesTab,
@@ -204,6 +205,18 @@ export function useLoadTableData() {
               .getState()
               .updateTab(tabId, { runtimeConnectionId: connId });
           } else if (liveTab.runtimeConnectionId !== connId) {
+            return;
+          }
+          // D3: this tab's own connection, on its target, or nothing runs.
+          const tabRefusal = checkTabTarget(tabId, connId);
+          if (tabRefusal) {
+            const claimed = pendingByKey.get(key);
+            if (claimed === undefined || claimed === request) {
+              patchMeta(setMeta, key, EMPTY_META, {
+                busy: false,
+                error: tabRefusal.message,
+              });
+            }
             return;
           }
 

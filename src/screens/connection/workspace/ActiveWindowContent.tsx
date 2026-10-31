@@ -225,6 +225,7 @@ export function ActiveWindowContent() {
         engine={rt.engine}
         activeSchema={rt.activeSchema}
         runtimeConnectionId={rt.runtimeConnectionId}
+        tabId={rt.profileId}
         isProfileLocked={isProfileLocked}
         sqlSafetyMode={rt.sqlSafetyMode}
         sqlScopeKey={rt.sqlScopeKey}

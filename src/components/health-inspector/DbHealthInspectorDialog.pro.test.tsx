@@ -3,6 +3,7 @@ import { act, render, screen, waitFor } from "@testing-library/preact";
 import { DbHealthInspectorDialog } from "./DbHealthInspectorDialog";
 import { useLicenseStore } from "src/stores/license";
 import type { LicenseState } from "src/lib/tauri/license";
+import { resetTabRuntimes, seedTabRuntime } from "src/test/fixtures/tabRuntime";
 
 // Real hook, mocked collector: covers that the dialog never queries without Pro.
 const collectMock = vi.fn();
@@ -51,6 +52,7 @@ function renderDialog() {
       engine="postgres"
       runtimeConnectionId="c1"
       profileId="p1"
+      tabId="tab-1"
     />
   );
 }
@@ -58,6 +60,8 @@ function renderDialog() {
 const LOCKED_TEXT = "The database health inspector is a Pro feature.";
 
 beforeEach(() => {
+  resetTabRuntimes();
+  seedTabRuntime({ tabId: "tab-1", runtimeId: "c1" });
   collectMock.mockReset();
   collectMock.mockResolvedValue(snap());
 });
