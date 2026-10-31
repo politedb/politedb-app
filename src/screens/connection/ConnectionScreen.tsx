@@ -1,5 +1,5 @@
 import { rememberAiChatOwner } from "src/components/ai-assistant/hooks/useAiChatSession";
-import { newTableDraftWindow } from "./lib/newTableDrafts";
+import { mergeSidebarTables } from "./lib/newTableDrafts";
 import {
   useMemo,
   useEffect,
@@ -12,7 +12,6 @@ import { tableKey, useLoadTableData } from "src/hooks/useLoadTableData";
 import { useScreenStore } from "src/stores/screen";
 import { useConnectionStore } from "src/stores/connection";
 import { getTablePagination } from "./lib/tablePagination";
-import { matchesSidebarSearch } from "./lib/sidebarSearch";
 
 import { MenuBar } from "./workspace/MenuBar";
 import { Box } from "src/components/common/Box";
@@ -429,68 +428,23 @@ export function ConnectionScreen() {
     void refreshSchemaAndTables();
   }, [runtimeConnectionId, refreshSchemaAndTables, setRuntimeConnectionError]);
 
-  const sidebarTables = useMemo(() => {
-    const base = [...filteredTables];
-    const draftTables = activeWindows
-      .filter(
-        (w): w is Extract<(typeof activeWindows)[number], { type: "table" }> =>
-          w.type === "table" && !!w.table?.new
-      )
-      .map((w) => w.table)
-      .filter((t) => !activeSchema || t.schema === activeSchema)
-      .filter((t) =>
-        matchesSidebarSearch(
-          t,
-          tableSearchQuery.trim().toLowerCase(),
-          activeSchema
-        )
-      );
-
-    // Drafts whose window is closed: listed under the name being typed, and
-    // reopened in their own window (never as a second draft).
-    const openWindowIds = new Set(activeWindows.map((w) => w.id));
-    const persistedDraftTables = Object.entries(newTableDrafts)
-      .map(([windowId, data]) => {
-        if (openWindowIds.has(windowId)) return null;
-        const rawName = data?.tableName?.trim() ?? "";
-        if (!rawName) return null;
-        const window = newTableDraftWindow(windowId, data);
-        // One whose schema cannot be told is still listed (so it can be
-        // discarded), under the schema being shown.
-        return {
-          schema: window?.table.schema ?? activeSchema,
-          name: rawName,
-          new: true,
-          draftWindowId: windowId,
-          ...(window ? {} : { unresolvedDraft: true }),
-        } as TableItem;
-      })
-      .filter((t): t is TableItem => !!t)
-      .filter((t) => !activeSchema || t.schema === activeSchema)
-      .filter((t) =>
-        matchesSidebarSearch(
-          t,
-          tableSearchQuery.trim().toLowerCase(),
-          activeSchema
-        )
-      );
-
-    for (const draft of [...draftTables, ...persistedDraftTables]) {
-      if (
-        !base.some((t) => t.schema === draft.schema && t.name === draft.name)
-      ) {
-        base.push(draft);
-      }
-    }
-
-    return base;
-  }, [
-    filteredTables,
-    activeWindows,
-    newTableDrafts,
-    activeSchema,
-    tableSearchQuery,
-  ]);
+  const sidebarTables = useMemo(
+    () =>
+      mergeSidebarTables({
+        tables: filteredTables,
+        windows: activeWindows,
+        drafts: newTableDrafts,
+        activeSchema,
+        search: tableSearchQuery,
+      }),
+    [
+      filteredTables,
+      activeWindows,
+      newTableDrafts,
+      activeSchema,
+      tableSearchQuery,
+    ]
+  );
 
   const loadError = useMemo(() => {
     const tableErr = activeTableWindow ? activeTableData.error : null;

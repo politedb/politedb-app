@@ -525,6 +525,8 @@ export function LeftNavItemsPane({
                 <div class="space-y-1 pl-3">
                   {visibleTables.map((table) => {
                     const key = `${table.schema}.${table.name}`;
+                    // A closed draft is its own item, whatever its name.
+                    const itemKey = table.draftWindowId ?? key;
                     const isActive = activeWindowId === `table:${key}`;
                     const hasChanges = windowHasPatchChanges(
                       dataPatchMap[profileId]?.[`table:${key}`]
@@ -539,7 +541,7 @@ export function LeftNavItemsPane({
                         data-sidebar-item
                         variant={useDefaultActive ? "default" : "ghost"}
                         active={useDefaultActive}
-                        key={key}
+                        key={itemKey}
                         onClick={() => void actions.selectTable(table)}
                         onContextMenu={(e: MouseEvent) => {
                           e.preventDefault();

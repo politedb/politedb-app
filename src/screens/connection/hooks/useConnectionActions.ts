@@ -2,7 +2,8 @@ import { useCallback, useRef } from "preact/hooks";
 
 import {
   newTableDraftWindow,
-  UNRESOLVED_DRAFT_REASON,
+  unresolvedNewTableDrafts,
+  unresolvedNewTableNotices,
 } from "../lib/newTableDrafts";
 import { assertTabTarget } from "src/lib/tabs/assertTabTarget";
 import type {
@@ -261,7 +262,7 @@ export function getNewTableDraftEntries(args: {
   const windowsById = new Map(windows.map((w) => [w.id, w]));
 
   const result: NewTableDraftEntry[] = [];
-  const unresolved: { windowId: string; name: string }[] = [];
+  const unresolved = unresolvedNewTableDrafts(drafts, windows);
 
   // Two drafts creating the same table: neither runs (no duplicate CREATE,
   // and no edits silently dropped); the user renames or discards one.
@@ -272,13 +273,7 @@ export function getNewTableDraftEntries(args: {
     // the schema it records; one whose identity cannot be told is not run.
     const window =
       windowsById.get(windowId) ?? newTableDraftWindow(windowId, draft);
-    if (!window) {
-      unresolved.push({
-        windowId,
-        name: draft?.tableName?.trim() || windowId,
-      });
-      continue;
-    }
+    if (!window) continue; // listed by unresolvedNewTableDrafts below
     if (window.type !== "table" || !window.table.new) continue;
 
     if (!isValidNewTable(draft)) {
@@ -556,19 +551,12 @@ export function useConnectionActions(
   const getObjectSaveNotices = useCallback((): ObjectSaveNotice[] => {
     if (!engine) return [];
     // New-table drafts this save cannot run are reported with the objects'.
-    const unresolvedTables: ObjectSaveNotice[] = getNewTableDraftEntries({
-      tabId: activeProfileScreen,
-      openWindows,
-      engine,
-    }).unresolved.map((draft) => ({
-      kind: "skipped",
-      key: draft.windowId,
-      name: draft.name,
-      reason: UNRESOLVED_DRAFT_REASON,
-    }));
     return [
       ...collectObjectSaveNotices({ tabId: activeProfileScreen, engine }),
-      ...unresolvedTables,
+      ...unresolvedNewTableNotices(
+        useConnectionStore.getState().newTableData[activeProfileScreen] ?? {},
+        openWindows[activeProfileScreen] ?? []
+      ),
     ];
   }, [engine, activeProfileScreen, openWindows]);
 
