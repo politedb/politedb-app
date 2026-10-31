@@ -1068,3 +1068,54 @@ Reviewed by Codex, 2026-11-01, branch `fix/tab-database-reconnect`, HEAD `e15895
 - Only this review append retained; pre-existing untracked `.claude/launch.json` preserved. `git diff --check` checked after append.
 
 **Verdict for the three follow-ups at `e15895c6`: CHANGES REQUIRED.** Fix FU-P1-1/2 before verification; address FU-P2-1/2 with focused lifecycle/error-classification regressions. Prior Phase 2 verification remains historical evidence, not approval of these follow-ups.
+
+
+## tab-database-reconnect — manual-feedback follow-ups re-review round 2 (PR #89)
+
+### Status
+
+CHANGES REQUIRED
+
+Reviewed by Codex, 2026-11-01, branch `fix/tab-database-reconnect`, HEAD `c8e20458`. Fix range: `git diff HEAD~1..HEAD` (`e15895c6..c8e20458`); prior follow-up context: `5ded5e80`, `5d3ff230`, `e15895c6` and the preceding FU report. Read workflow, RTK instructions, affected production paths and tests. No application source or committed tests changed.
+
+### Findings
+
+**P0:** None established.
+
+**P1:** None established in this fix.
+
+**FU-R2-P2-1 — Ambiguous legacy drafts become invisible and silently unsaveable.** `src/screens/connection/lib/newTableDrafts.ts:27-30` correctly refuses to guess a dotted identity, but `src/screens/connection/ConnectionScreen.tsx:452-458` removes that draft from the sidebar and `src/screens/connection/hooks/useConnectionActions.ts:264-266` silently skips it with no error. A valid legacy `table:tenant.eu.untitled` draft is collected while its structured window is present, then returns `{data: [], error: null}` when closed. A previously closed persisted draft has no sidebar entry through which to reopen, inspect, clone or discard it. Cmd+S can do nothing, or save other work without explaining the omitted draft. Data remains in the store; this is loss of access/save feedback, not proof of physical data loss. The committed legacy test explicitly expects this silent omission.
+
+**Required fix:** Preserve fail-closed SQL targeting, but expose an actionable unresolved-draft notice/recovery or discard path and report omitted work in save review. Recover structured identity from an authoritative open window when available; never infer an ambiguous closed identity. Add legacy open/closed regressions verifying no wrong-schema dispatch, visible explanation and accessible recovery/discard, including mixed valid and unresolved drafts.
+
+**FU-R2-P2-2 — Pending reconnect lifecycle remains incomplete.** `src/screens/connection/workspace/TabTargetBanner.tsx:68-93` invalidates the old callback on unmount but retains the global asked key until the old promise resolves. Remount before that resolution sees the key and skips its effect; resolving the old answer only deletes a nonreactive Set entry, so the mounted replacement never asks or reconnects. Because reconnectable problems return no banner (`:95`), it also has no banner recovery action. A real component/deferred-dialog probe confirms one confirmation, zero old/replacement callbacks after this sequence. Separately, the continuation tracks only problem text/runtime id (`:60-63,85-93`), not intended target or originating tab lifetime: changing the target while retaining a refused runtime leaves the same stale-message string and effect dependencies, and an old positive answer invokes the replacement callback. A second component probe confirms this target-change case. The latter establishes missing provenance at this component boundary; it does not establish an ordinary UI route that changes target during a native modal.
+
+**Required fix:** Track prompt ownership and originating tab/target lifetime explicitly. Let an eligible replacement reliably obtain a fresh prompt after obsolete work settles, without duplicate native dialogs; an obsolete answer must never authorize replacement work. Include target identity in continuation validation and invalidation. Add remount-before-answer, same-message target change, active-tab/navigation, and runtime-replacement deferred tests, keeping once-per-problem behavior after a live cancellation.
+
+### Round 1 disposition
+
+| Finding | Round 2 result |
+| --- | --- |
+| FU-P1-1 — wrong schema for closed dotted drafts | **Resolved for recorded identities.** `NewTablePane.tsx:72-77` records schema/window name; `newTableDrafts.ts:20-25` reconstructs from those fields; collector uses open structured windows or that helper. Dotted schema/window-name open-versus-closed tests pass. Ambiguous legacy SQL is safely withheld, but its silent disappearance requires FU-R2-P2-1. |
+| FU-P1-2 — reopened renamed draft creates stale alias | **Resolved for the reported close/sidebar-reopen path.** `ConnectionScreen.tsx:451-463` carries the original draft key, `useConnectionWindows.ts:193-210` reopens that same key, and the pane writes back under that key. No second draft is seeded from its display name. Collector also refuses duplicate SQL destinations with an explicit error rather than discarding edits (`useConnectionActions.ts:271-281`). Existing different-name stale aliases are not automatically merged or discarded. |
+| FU-P2-1 — reconnect after unmount | **Partially resolved.** Cleanup prevents the original post-unmount reconnect; committed test covers old-answer-before-remount. Remount-before-answer and same-message target replacement remain faulty: FU-R2-P2-2. |
+| FU-P2-2 — ordinary database errors suppressed | **Resolved for the reported token false positives.** Shared anchored `runtimeRefusalOf` accepts bare codes/one `Error:` prefix and rejects quoted identifiers or arbitrary suffix text. `isReconnectMessage` and AI formatting use it. Backend admission returns these bare string codes (`src-tauri/src/engines/runtime/admission.rs:25-34,47-55`); runtimeInvoke preserves/reports them and AI event handling converts the event code to Error.message (`src/lib/ai-assistant/agent.ts:178-190`). Review probes cover both codes through real runtimeInvoke/native rejection and real AI formatter. |
+
+### Compatibility and test quality
+
+- New-table create/save: structured identity is written alongside editor values; open windows remain authoritative for collection. Closed recorded drafts retain SQL schema regardless of current schema selection. Successful save still clears each original draft/window and opens the created table from the live window store. The committed same-name created-table control passes; no additional source regression established in that path.
+- Reopen: committed real-hook/store test verifies one original window/draft and one CREATE after reopening a renamed closed draft. It does not mount NewTablePane, edit again, execute save, or assert draft cleanup. Thus it is useful identity/collector evidence, not a full close/reopen/edit/save UI regression.
+- Sidebar clone/drop: `LeftNavItemsPane.tsx:41-48,198-214` now looks up/discards closed drafts by original key; clone reads that same source and creates an independent identity with copied columns (`:644-661`). Open-window items continue using their own names. No additional clone/drop source defect established for distinct destination names. No mounted sidebar clone/drop test was added or run; ambiguous legacy entries cannot reach those actions (finding above). Existing name-collision behavior and full database DDL execution are not newly verified.
+- Duplicate-destination test checks explicit rejection without discarding either edit, but does not cover aliases with differing edited names or sidebar visibility collisions. Dotted tests cover original window names; explicit edited destination names containing dots would strengthen SQL coverage.
+- Reconnect tests correctly add unmount and runtime replacement controls; the remount test resolves the old promise before remount, missing the remaining ordering. No target-change control exists. Unknown-target banner and once-per-live-cancel behavior remain intact.
+- Refusal tests add useful negative cases. Committed tests still lack consumer-level ordinary-error-dialog assertions and real-wrapper refusal reporting controls; the review probes add wrapper/formatter evidence only. No broad D3 caller-origin matrix or native backend run was repeated.
+
+### Verification
+
+- `npm run build`: **passed**, exit 0, TypeScript + Vite. Existing externalization/dynamic-import/chunk-size warnings. Log `/tmp/pdb-fu-r2-build.log`.
+- `npm run test:run -- --exclude '**/.claude/**'`: **291 files passed / 1 skipped; 2497 tests passed / 1 skipped**, exit 0. Log `/tmp/pdb-fu-r2-tests.log`.
+- Additional review probes: **5 passed**, exit 0. Two deferred component probes intentionally assert remaining lifecycle defects; one collector probe asserts legacy omission/open-window control; two real-wrapper/AI-formatter probes verify actual bare backend code rejection/reporting. Native I/O/dialog/persistence mocked. Log `/tmp/pdb-fu-r2-probes.log`; scratch source `/tmp/pdb-followup-probes/r2.test.tsx`. External-root execution twice failed before collection due Vite path resolution; ran a temporary repository scratch test successfully, then removed it. No source/test modifications retained.
+- Rust unchanged; not rerun. No native desktop, live database, restart, engine matrix, SSH or Touch ID verification. No Docker/container commands or secret retrieval. No commit/push/merge.
+- Only this report append retained; pre-existing `.claude/launch.json` preserved. `git diff --check` passed after append.
+
+**Verdict at `c8e20458`: CHANGES REQUIRED.** Wrong-schema SQL and reopened-draft alias findings are fixed for their reported modern-draft cases; resolve legacy draft accessibility and remaining reconnect lifecycle cases before verification.
