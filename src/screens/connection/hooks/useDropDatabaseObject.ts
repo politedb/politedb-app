@@ -11,6 +11,8 @@ import { showToast } from "src/stores/toast";
 import { hasPendingWork, useObjectDraftStore } from "src/stores/objectDrafts";
 import { editDraftKey, windowIdForDraftKey } from "src/lib/objectDraftKey";
 import { useConnectionRuntimeCtx } from "../workspace/ConnectionRuntimeContext";
+import { TabTargetError, assertTabTarget } from "src/lib/tabs/assertTabTarget";
+import { runtimeWorkIsCurrent } from "src/lib/runtimeConnection";
 
 /**
  * Objects being dropped, by profile and object id. Module-level so a second
@@ -69,7 +71,11 @@ export function useDropDatabaseObject(profileId: string) {
     if (isProfileLockedNow(profileId)) return;
     setDropping(key, true);
     const kind = objectKindSingular(item.kind);
+    // The drop's results belong to this tab's connection as it is now (R5).
+    const isCurrent = runtimeWorkIsCurrent(connectionId);
     try {
+      // D3: the tab's own connection, on its target, before asking...
+      assertTabTarget(profileId, connectionId);
       const pending =
         useObjectDraftStore.getState().drafts[profileId]?.[
           editDraftKey(item.id)
@@ -89,8 +95,11 @@ export function useDropDatabaseObject(profileId: string) {
       );
       // The profile may have been locked while the dialog was open.
       if (!ok || isProfileLockedNow(profileId)) return;
+      // ...and again after the answer: it may have reconnected meanwhile.
+      assertTabTarget(profileId, connectionId);
       const sql = buildDropDatabaseObjectSql({ engine: rt.engine, item });
       await runSqlQuery(connectionId, sql);
+      if (!isCurrent()) return;
       // The object is gone: so are its editor and draft.
       const draftKey = editDraftKey(item.id);
       useObjectDraftStore.getState().remove(profileId, draftKey);
@@ -102,8 +111,11 @@ export function useDropDatabaseObject(profileId: string) {
         screen.removeWindows(profileId, [windowId]);
       }
       await rt.refreshSchemaAndTables();
+      if (!isCurrent()) return;
       showToast(`Dropped ${kind} “${item.name}”.`, { tone: "success" });
     } catch (err) {
+      // A tab refusal is always shown; another failure only while current.
+      if (!isCurrent() && !(err instanceof TabTargetError)) return;
       showToast(err instanceof Error ? err.message : String(err ?? ""), {
         tone: "error",
       });

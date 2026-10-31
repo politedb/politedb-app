@@ -1,8 +1,18 @@
 import { profileConnect } from "src/lib/tauri/profile";
 import { connectionRemove } from "src/lib/tauri/connection";
 import { operationCancel } from "src/lib/tauri/operation";
-import { setRuntimeRefusalHandler } from "src/lib/tauri/runtimeAdmission";
-import { resolveTabTarget, targetMatches } from "src/lib/tabs/tabTarget";
+import {
+  setRuntimeDispatchGuard,
+  setRuntimeRefusalHandler,
+} from "src/lib/tauri/runtimeAdmission";
+import { resolveTabTarget } from "src/lib/tabs/tabTarget";
+import {
+  TAB_TARGET_UNKNOWN,
+  TabTargetError,
+  checkRuntimeDispatch,
+  resolveTabRuntimeConnectionId,
+  runtimeServesTab,
+} from "src/lib/tabs/assertTabTarget";
 import { useConnectionStore } from "src/stores/connection";
 import { useProfileStore } from "src/stores/profile";
 import { useRuntimeTargetsStore } from "src/stores/runtimeTargets";
@@ -16,10 +26,8 @@ import { connectionTabHasChanges } from "src/screens/connection/lib/tabDirty";
  * it.
  */
 
-type TableDataMapEntry = { connectionId?: string | null };
+export { TAB_TARGET_UNKNOWN, resolveTabRuntimeConnectionId, runtimeServesTab };
 
-export const TAB_TARGET_UNKNOWN =
-  "This tab's database could not be determined. Close it and open the database again.";
 export const TAB_HAS_UNSAVED_CHANGES =
   "This tab has unsaved changes made against the previous settings. Copy or discard them, then reconnect.";
 /** A connect that finished after its tab closed or changed target. */
@@ -34,40 +42,6 @@ function intendedOf(tabId: string) {
   if (!tab) return null;
   const profile = useProfileStore.getState().getProfileById(tab.profileId);
   return resolveTabTarget(tab, profile).intended;
-}
-
-/**
- * Whether `runtimeId` may serve `tabId`: opened on the tab's target and
- * acquired by this tab. Revision freshness is checked by the backend.
- */
-export function runtimeServesTab(tabId: string, runtimeId: string): boolean {
-  const { targets, owners } = useRuntimeTargetsStore.getState();
-  return (
-    owners[runtimeId] === tabId &&
-    targetMatches(intendedOf(tabId), targets[runtimeId])
-  );
-}
-
-/**
- * The tab's runtime connection: its own, else a table's connection that
- * this tab acquired on the same target (R4). A foreign or mismatched table
- * connection is never returned.
- */
-export function resolveTabRuntimeConnectionId(args: {
-  tabRuntimeConnectionId?: string;
-  activeProfileScreen: string;
-  tableDataMap: Record<string, TableDataMapEntry>;
-}): string | undefined {
-  const { tabRuntimeConnectionId, activeProfileScreen, tableDataMap } = args;
-  if (tabRuntimeConnectionId) return tabRuntimeConnectionId;
-
-  const prefix = `${activeProfileScreen}.`;
-  for (const [key, entry] of Object.entries(tableDataMap)) {
-    if (!key.startsWith(prefix)) continue;
-    const id = entry?.connectionId;
-    if (id && runtimeServesTab(activeProfileScreen, id)) return id;
-  }
-  return undefined;
 }
 
 /** Whether any tab or table entry still refers to `runtimeId`. */
@@ -357,4 +331,11 @@ useScreenStore.subscribe((state, previous) => {
   for (const [tabId, epoch] of Object.entries(state.tabEpoch)) {
     if (previous.tabEpoch[tabId] !== epoch) retireTabStreams(tabId);
   }
+});
+
+// D3: every command on a runtime connection is checked right before it is
+// sent, after whatever confirmation preceded it.
+setRuntimeDispatchGuard((cmd, runtimeId) => {
+  const refusal = checkRuntimeDispatch(cmd, runtimeId);
+  if (refusal) throw new TabTargetError(refusal);
 });

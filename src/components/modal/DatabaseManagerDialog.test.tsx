@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useProfileStore } from "src/stores/profile";
 import { useScreenStore } from "src/stores/screen";
 import { DatabaseManagerDialog } from "./DatabaseManagerDialog";
+import { seedTabRuntime } from "src/test/fixtures/tabRuntime";
 
 const m = vi.hoisted(() => ({
   runSqlQuery: vi.fn(),
@@ -66,14 +67,16 @@ beforeEach(() => {
       },
     ] as never,
   });
+  seedTabRuntime({ tabId: "home", runtimeId: "c1" });
+  seedTabRuntime({ tabId: "t1", runtimeId: "c2" });
 });
 
-function renderDialog(tabId: string) {
+function renderDialog(tabId: string, runtimeId = "c1") {
   render(
     <DatabaseManagerDialog
       open
       engine="postgres"
-      runtimeConnectionId="c1"
+      runtimeConnectionId={runtimeId}
       tabId={tabId}
       profileId="p1"
       onClose={vi.fn()}
@@ -111,7 +114,7 @@ describe("DatabaseManagerDialog drop", () => {
   });
 
   it("explains instead of dropping the database the tab is in", async () => {
-    renderDialog("t1");
+    renderDialog("t1", "c2");
     await askToDrop("test1");
     await waitFor(() => expect(m.showMessage).toHaveBeenCalled());
     expect(m.showMessage.mock.calls[0]![0]).toContain(

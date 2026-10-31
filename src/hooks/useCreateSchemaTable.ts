@@ -5,6 +5,7 @@ import { sqlForDisplay } from "src/lib/sql/sqlDialect";
 import { useScreenStore } from "src/stores/screen";
 import { useConnectionStore } from "src/stores/connection";
 import { connectTabOnce } from "src/lib/runtimeConnection";
+import { assertTabTarget } from "src/lib/tabs/assertTabTarget";
 import type { TableColumn } from "src/types";
 import { normalizeSqlError } from "src/lib/tauri/queryValidate";
 
@@ -50,6 +51,7 @@ export function useCreateSchemaTable() {
       try {
         const connId = await ensureRuntimeConnection();
         if (!connId) return;
+        assertTabTarget(activeTab.id, connId);
 
         const query = createSchemaQuery(schema);
         addQueryHistory(activeTab.id, sqlForDisplay(query, activeTab.engine));
@@ -88,6 +90,7 @@ export function useCreateSchemaTable() {
           setBusy(false);
           return;
         }
+        assertTabTarget(activeTab.id, connId);
 
         const { schema, tableName, columns, primaryKey } = payload;
         const query = createTableQuery(

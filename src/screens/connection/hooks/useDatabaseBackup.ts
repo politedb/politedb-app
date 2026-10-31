@@ -28,6 +28,7 @@ import {
 } from "src/components/editor/splitSqlStatements";
 import type { ConnectionCreateInput } from "src/lib/tauri";
 import { useConnectionRuntimeCtx } from "../workspace/ConnectionRuntimeContext";
+import { checkTabTarget } from "src/lib/tabs/assertTabTarget";
 import {
   formatSqlInsertChunk,
   POSTGRES_MONEY_ARRAY_AS_NUMERIC,
@@ -1553,6 +1554,17 @@ export function useDatabaseBackup() {
         });
         return;
       }
+      // D3: the tab's own connection, on its target.
+      const tabRefusal = () =>
+        checkTabTarget(rt.profileId, connectionId)?.message ?? null;
+      const refusedEarly = tabRefusal();
+      if (refusedEarly) {
+        void showMessage(refusedEarly, {
+          title: "Backup database",
+          kind: "warning",
+        });
+        return;
+      }
       const run: { snapshotId: string | null } = { snapshotId: null };
       backupSnapshots.set(connectionId, run);
 
@@ -1585,6 +1597,9 @@ export function useDatabaseBackup() {
           filters: [{ name: "PoliteDB dump", extensions: ["dumb"] }],
         });
         if (!path) return;
+        // Again after the file dialog: the tab may have reconnected.
+        const refusedNow = tabRefusal();
+        if (refusedNow) throw new Error(refusedNow);
 
         // PostgreSQL: every query of the backup reads one snapshot, so the
         // tables, their rows and sequences agree even while others write.
@@ -1783,7 +1798,7 @@ export function useDatabaseBackup() {
         setDbBackupRunning(false);
       }
     },
-    [rt.runtimeConnectionId, rt.metadata, rt.metaKey, rt.engine]
+    [rt.runtimeConnectionId, rt.profileId, rt.metadata, rt.metaKey, rt.engine]
   );
 
   const runSqlDumpImport = useCallback(
@@ -1809,6 +1824,15 @@ export function useDatabaseBackup() {
       const early = dumpRunGate(tabSafetyModeNow(tabId), action);
       if (early.kind === "blocked") {
         void showMessage(early.message, { title: errorTitle, kind: "warning" });
+        return;
+      }
+      // D3: the tab's own connection, on its target, before anything else…
+      const connectionId = rt.runtimeConnectionId;
+      const tabRefusal = () =>
+        checkTabTarget(tabId, connectionId)?.message ?? null;
+      const refusedEarly = tabRefusal();
+      if (refusedEarly) {
+        void showMessage(refusedEarly, { title: errorTitle, kind: "warning" });
         return;
       }
 
@@ -1931,7 +1955,9 @@ export function useDatabaseBackup() {
                 ? "The statement before it already ran and stays in the database."
                 : `The ${applied} statements before it already ran and stay in the database.`;
 
-        const refused = await ensureAllowed();
+        // …and again after the confirmation and Touch ID, before the first
+        // statement (each later one is checked when it is sent).
+        const refused = (await ensureAllowed()) ?? tabRefusal();
         if (refused) {
           void showMessage(refused, { title: errorTitle, kind: "warning" });
           return;

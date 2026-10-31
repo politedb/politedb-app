@@ -36,6 +36,7 @@ vi.mock("../workspace/ConnectionRuntimeContext", () => ({
 }));
 
 import { useDatabaseBackup } from "./useDatabaseBackup";
+import { seedTabRuntime } from "src/test/fixtures/tabRuntime";
 
 function setPro(pro_access: boolean) {
   useLicenseStore.setState({ state: { pro_access } as LicenseState });
@@ -51,6 +52,7 @@ beforeEach(() => {
   useScreenStore.setState({
     profileTabs: [{ id: "t1", profileId: "p1", label: "db" } as never],
   });
+  seedTabRuntime({ tabId: "t1", runtimeId: "conn_1" });
 });
 
 describe("useDatabaseBackup is free", () => {

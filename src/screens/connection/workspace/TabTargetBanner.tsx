@@ -1,11 +1,12 @@
 import { useMemo } from "preact/hooks";
 import { Button } from "src/components/common/Button";
-import { TAB_TARGET_UNKNOWN } from "src/lib/runtimeConnection";
+import {
+  RUNTIME_STALE_MESSAGE,
+  RUNTIME_UNCONFIRMED_MESSAGE,
+  TAB_TARGET_UNKNOWN,
+} from "src/lib/tabs/assertTabTarget";
 import { targetMatches, type ResolvedTabTarget } from "src/lib/tabs/tabTarget";
 import { useRuntimeTargetsStore } from "src/stores/runtimeTargets";
-
-export const RUNTIME_STALE_MESSAGE =
-  "The connection settings changed. Reconnect this tab.";
 
 /**
  * Why this tab cannot be used as it is, or null (plan
@@ -26,7 +27,7 @@ export function tabTargetProblem(
   // Not recorded in this session: the backend still checks every use.
   if (runtime === undefined) return null;
   if (runtime === null) {
-    return "This tab's connection could not be confirmed. Reconnect the tab.";
+    return RUNTIME_UNCONFIRMED_MESSAGE;
   }
   if (!targetMatches(target.intended, runtime)) {
     return `This tab shows ${target.display || "its database"} but is connected to ${runtime.display || "another database"}. Reconnect the tab.`;

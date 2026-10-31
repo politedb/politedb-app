@@ -62,6 +62,7 @@ vi.mock("src/stores/persistentStore", () => ({
 }));
 
 import { useDatabaseBackup } from "./useDatabaseBackup";
+import { seedTabRuntime } from "src/test/fixtures/tabRuntime";
 
 const S = (v: string) => ({ t: "Str", v });
 
@@ -99,6 +100,7 @@ beforeEach(() => {
   useScreenStore.setState({
     profileTabs: [{ id: "t1", profileId: "p1", label: "db" } as never],
   });
+  seedTabRuntime({ tabId: "t1", runtimeId: "conn_1" });
 });
 
 describe("database backup file", () => {
@@ -172,6 +174,29 @@ describe("database backup file", () => {
     await act(() => result.current.onBackupDatabase("db"));
     expect(m.writeFile).not.toHaveBeenCalled();
     expect(m.showMessage.mock.calls[0]![0]).toMatch(/could not be read/);
+  });
+
+  it("reads nothing on another tab's connection (D3)", async () => {
+    seedTabRuntime({ tabId: "t1", runtimeId: "conn_other" });
+    const { result } = renderHook(() => useDatabaseBackup());
+    await act(() => result.current.onBackupDatabase("db"));
+    expect(m.saveDialog).not.toHaveBeenCalled();
+    expect(m.sessionBegin).not.toHaveBeenCalled();
+    expect(m.showMessage.mock.calls[0]![0]).toContain(
+      "no longer uses this connection"
+    );
+  });
+
+  it("reads nothing when the tab reconnects during the file dialog (D3)", async () => {
+    m.saveDialog.mockImplementation(async () => {
+      seedTabRuntime({ tabId: "t1", runtimeId: "conn_2" });
+      return "/tmp/out.dumb";
+    });
+    const { result } = renderHook(() => useDatabaseBackup());
+    await act(() => result.current.onBackupDatabase("db"));
+    expect(m.sessionBegin).not.toHaveBeenCalled();
+    expect(m.startSqlQueryStream).not.toHaveBeenCalled();
+    expect(m.writeFile).not.toHaveBeenCalled();
   });
 
   it("runs one backup of a connection at a time", async () => {

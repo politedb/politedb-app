@@ -7,6 +7,7 @@ import {
 } from "preact/hooks";
 import { runtimeWorkIsCurrent } from "src/lib/runtimeConnection";
 import { useRuntimeLifetime } from "src/hooks/useRuntimeLifetime";
+import { checkTabTarget } from "src/lib/tabs/assertTabTarget";
 import { runSqlQuery } from "src/lib/tauri/query";
 import type { DatabaseEngine } from "src/types";
 import {
@@ -41,6 +42,8 @@ interface UseDatabasesParams {
   open: boolean;
   engine?: DatabaseEngine;
   runtimeConnectionId?: string;
+  /** The connection tab this runs in (D3: its own connection only). */
+  tabId?: string;
   onOpenDatabase?: (dbName: string) => Promise<void>;
   /** Checks around creating, renaming or dropping a database. */
   beforeChange?: (change: DatabaseChange) => DatabaseChangeCheck;
@@ -66,6 +69,7 @@ export function useDatabases({
   open,
   engine,
   runtimeConnectionId,
+  tabId,
   onOpenDatabase,
   beforeChange,
 }: UseDatabasesParams) {
@@ -99,6 +103,11 @@ export function useDatabases({
     setBusy(true);
     setError("");
     try {
+      const refusal = checkTabTarget(tabId, runtimeConnectionId);
+      if (refusal) {
+        if (mine()) setError(refusal.message);
+        return;
+      }
       let list = [];
 
       if (engine === "mongo") {
@@ -121,7 +130,7 @@ export function useDatabases({
       if (loadSeqRef.current === seq) setBusy(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runtimeConnectionId, engine, selectedDb]);
+  }, [tabId, runtimeConnectionId, engine, selectedDb]);
 
   useEffect(() => {
     if (!open) return;
@@ -141,9 +150,21 @@ export function useDatabases({
       setBusy(true);
       setError("");
       try {
+        // D3: the tab's own connection, on its target, before the checks'
+        // waits and again with nothing awaited before the SQL.
+        const tabCheck = () =>
+          checkTabTarget(tabId, runtimeConnectionId)?.message ?? null;
+        const early = tabCheck();
+        if (early) {
+          setError(early);
+          return false;
+        }
         const check = beforeChange?.(change);
         const refused =
-          (check ? await check.prepare() : null) ?? check?.checkNow() ?? null;
+          (check ? await check.prepare() : null) ??
+          tabCheck() ??
+          check?.checkNow() ??
+          null;
         if (refused) {
           setError(refused);
           return false;
@@ -162,7 +183,7 @@ export function useDatabases({
         setBusy(false);
       }
     },
-    [runtimeConnectionId, loadDatabases, beforeChange]
+    [tabId, runtimeConnectionId, loadDatabases, beforeChange]
   );
 
   const onCreateDb = useCallback(() => {

@@ -71,6 +71,7 @@ import {
   restoreStatementLabel,
   useDatabaseBackup,
 } from "./useDatabaseBackup";
+import { seedTabRuntime } from "src/test/fixtures/tabRuntime";
 
 const DUMP =
   "CREATE TABLE a (id int);\nINSERT INTO a VALUES (1);\nINSERT INTO a VALUES (2);";
@@ -81,6 +82,7 @@ function setMode(mode: string) {
       { id: "t1", profileId: "p1", label: "shop", querySafetyMode: mode },
     ] as never,
   });
+  seedTabRuntime({ tabId: "t1", runtimeId: "conn_1" });
 }
 
 async function restore(onRefresh?: () => void) {
@@ -143,6 +145,43 @@ describe("restoring a dump", () => {
     await restore();
     expect(m.runSqlQuery).not.toHaveBeenCalled();
     expect(m.showMessage.mock.calls[0]![0]).toContain("Production mode");
+  });
+
+  it("opens nothing on a tab whose target is unknown (D3)", async () => {
+    useScreenStore.getState().updateTab("t1", { target: { kind: "unknown" } });
+    await restore();
+    expect(m.openDialog).not.toHaveBeenCalled();
+    expect(m.runSqlQuery).not.toHaveBeenCalled();
+    expect(m.showMessage.mock.calls[0]![0]).toContain(
+      "could not be determined"
+    );
+  });
+
+  it("runs nothing when the tab reconnects during the confirmation (D3)", async () => {
+    m.confirmDialog.mockImplementation(async () => {
+      seedTabRuntime({ tabId: "t1", runtimeId: "conn_2" });
+      return true;
+    });
+    await restore();
+    expect(m.sessionBegin).not.toHaveBeenCalled();
+    expect(m.runSqlQuery).not.toHaveBeenCalled();
+    expect(m.showMessage.mock.calls[0]![0]).toContain(
+      "no longer uses this connection"
+    );
+  });
+
+  it("runs nothing when the tab is switched to another database during Touch ID (D3)", async () => {
+    setMode("safe");
+    m.touchId.mockImplementation(async () => {
+      useScreenStore.getState().updateTab("t1", {
+        target: { kind: "override", database: "elsewhere" },
+      });
+      return true;
+    });
+    await restore();
+    expect(m.sessionBegin).not.toHaveBeenCalled();
+    expect(m.runSqlQuery).not.toHaveBeenCalled();
+    expect(m.showMessage.mock.calls[0]![0]).toContain("but is connected to");
   });
 
   it("asks for Touch ID in Safe mode and runs nothing without it", async () => {

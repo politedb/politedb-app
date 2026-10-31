@@ -17,6 +17,22 @@ export function setRuntimeRefusalHandler(next: RefusalHandler | null): void {
   handler = next;
 }
 
+type DispatchGuard = (cmd: string, runtimeId: string) => void;
+
+let dispatchGuard: DispatchGuard | null = null;
+
+/**
+ * The check every command on a runtime connection passes right before it is
+ * sent (plan tab-database-reconnect D3); it throws to refuse.
+ */
+export function setRuntimeDispatchGuard(next: DispatchGuard | null): void {
+  dispatchGuard = next;
+}
+
+export function guardRuntimeDispatch(cmd: string, runtimeId: string): void {
+  dispatchGuard?.(cmd, runtimeId);
+}
+
 /** Reports `err` when it is a refusal of `runtimeId`; returns it unchanged. */
 export function noteRuntimeError(runtimeId: string | undefined, err: unknown) {
   const reason = runtimeRefusalOf(err);

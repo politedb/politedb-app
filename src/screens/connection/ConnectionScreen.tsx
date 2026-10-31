@@ -664,6 +664,7 @@ export function ConnectionScreen() {
     closeTruncate,
     confirmTruncate,
   } = useTableDestructiveActions({
+    tabId: activeProfileScreen,
     isProfileLocked,
     engine,
     connectionId: runtimeConnectionId,

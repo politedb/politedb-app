@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useRef } from "preact/hooks";
+import { isTabTargetError } from "src/lib/tabs/assertTabTarget";
 import type { Dispatch, StateUpdater } from "preact/hooks";
 import {
   chatReply,
@@ -53,6 +54,10 @@ export function formatAssistantRequestError(args: {
   const raw =
     args.error instanceof Error ? args.error.message : String(args.error ?? "");
   const vi = args.lang.code === "vie";
+
+  // The tab may not use this connection (plan tab-database-reconnect D3):
+  // nothing was sent.
+  if (isTabTargetError(args.error)) return args.error.message;
 
   // The connection's settings changed or it is unknown (plan
   // tab-database-reconnect R20): nothing was read.

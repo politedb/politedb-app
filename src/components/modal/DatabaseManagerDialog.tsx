@@ -82,6 +82,7 @@ export function DatabaseManagerDialog({
     open,
     engine,
     runtimeConnectionId,
+    tabId,
     onOpenDatabase,
     beforeChange: useCallback(
       (change: DatabaseChange): DatabaseChangeCheck =>

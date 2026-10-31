@@ -14,6 +14,7 @@ import {
   newObjectDraftInit,
   openCreatedObject,
 } from "./objectWindows";
+import { seedTabRuntime } from "src/test/fixtures/tabRuntime";
 
 /**
  * The draft lifecycle on the other engines with object editors: MySQL and
@@ -116,6 +117,7 @@ beforeEach(() => {
     ],
     tabEpoch: {},
   });
+  seedTabRuntime({ tabId: TAB, runtimeId: "c1" });
 });
 
 describe.each(["mysql", "mariadb"] as const)("%s object drafts", (engine) => {

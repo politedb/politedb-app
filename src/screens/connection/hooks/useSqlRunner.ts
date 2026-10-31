@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
 } from "preact/hooks";
+import { isTabTargetError } from "src/lib/tabs/assertTabTarget";
 import type { DatabaseEngine } from "src/types";
 import type { SqlResultRun, SqlResultSlot } from "src/lib/tauri";
 import {
@@ -570,7 +571,9 @@ export function useSqlRunner(args: {
             finishedAt: Date.now(),
           });
 
-          if (stopOnError) bumpRunId(winId);
+          // A connection the tab may not use (D3) refuses every statement:
+          // the rest of the run stops too.
+          if (stopOnError || isTabTargetError(err)) bumpRunId(winId);
         }
       };
 

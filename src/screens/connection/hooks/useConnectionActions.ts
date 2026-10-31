@@ -1,5 +1,6 @@
 import { useCallback, useRef } from "preact/hooks";
 
+import { assertTabTarget } from "src/lib/tabs/assertTabTarget";
 import type {
   DatabaseEngine,
   OpenWindow,
@@ -546,6 +547,8 @@ export function useConnectionActions(
     }
 
     try {
+      // D3: changes go only through the tab's own connection, on its target.
+      assertTabTarget(activeProfileScreen, connectionId);
       const changedEntries = Object.values(
         patchMap as unknown as Record<string, PatchMapEntry>
       );
@@ -634,6 +637,8 @@ export function useConnectionActions(
         setError("An error occurred while applying patches.");
         return;
       }
+      // Again after the loads above.
+      assertTabTarget(activeProfileScreen, connectionId);
 
       await runSqlTransaction({
         engine: engine ?? "postgres",

@@ -8,6 +8,8 @@ const dialogs = vi.hoisted(() => ({
 }));
 vi.mock("src/lib/system-dialog", () => dialogs);
 
+import { resetTabRuntimes, seedTabRuntime } from "src/test/fixtures/tabRuntime";
+import { useScreenStore } from "src/stores/screen";
 import {
   confirmDropTable,
   tableIdentity,
@@ -36,6 +38,7 @@ function setup(
   };
   const hook = renderHook(() =>
     useTableDestructiveActions({
+      tabId: "tab-1",
       isProfileLocked: overrides.isProfileLocked ?? false,
       engine: "postgres",
       connectionId:
@@ -48,6 +51,8 @@ function setup(
 }
 
 beforeEach(() => {
+  resetTabRuntimes();
+  seedTabRuntime();
   dialogs.confirmDialog.mockReset().mockResolvedValue(true);
   dialogs.showMessage.mockReset().mockResolvedValue(undefined);
 });
@@ -192,6 +197,55 @@ describe("truncate", () => {
       })
     ).rejects.toThrow("locked by another session");
     expect(markTableStale).not.toHaveBeenCalled();
+  });
+});
+
+describe("drop and truncate on the tab's own connection (D3)", () => {
+  it("asks nothing and drops nothing on a connection the tab no longer uses", async () => {
+    seedTabRuntime({ runtimeId: "conn-2" });
+    const { hook, runSqlWithHistory } = setup();
+    await act(() => hook.result.current.dropTable(orders));
+    expect(dialogs.confirmDialog).not.toHaveBeenCalled();
+    expect(runSqlWithHistory).not.toHaveBeenCalled();
+    expect(dialogs.showMessage.mock.calls[0]![0]).toContain(
+      "no longer uses this connection"
+    );
+  });
+
+  it("drops nothing when the tab reconnects during the confirmation", async () => {
+    dialogs.confirmDialog.mockImplementation(async () => {
+      seedTabRuntime({ runtimeId: "conn-2" });
+      return true;
+    });
+    const { hook, runSqlWithHistory, closeWindow } = setup();
+    await act(() => hook.result.current.dropTable(orders));
+    expect(runSqlWithHistory).not.toHaveBeenCalled();
+    expect(closeWindow).not.toHaveBeenCalled();
+  });
+
+  it("truncates nothing when the tab's target changed after the dialog opened", async () => {
+    const { hook, runSqlWithHistory, markTableStale } = setup();
+    act(() => hook.result.current.openTruncate(orders));
+    useScreenStore.getState().updateTab("tab-1", {
+      target: { kind: "override", database: "other" },
+    });
+    await expect(
+      hook.result.current.confirmTruncate({
+        restartIdentity: false,
+        cascade: false,
+      })
+    ).rejects.toThrow("but is connected to");
+    expect(runSqlWithHistory).not.toHaveBeenCalled();
+    expect(markTableStale).not.toHaveBeenCalled();
+  });
+
+  it("does not open the truncate dialog on a tab whose target is unknown", () => {
+    useScreenStore.getState().updateTab("tab-1", {
+      target: { kind: "unknown" },
+    });
+    const { hook } = setup();
+    act(() => hook.result.current.openTruncate(orders));
+    expect(hook.result.current.truncateTarget).toBeNull();
   });
 });
 
