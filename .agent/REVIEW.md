@@ -969,3 +969,54 @@ The same unguarded caller-boundary pattern remains in covered object-definition 
 - Only this review append retained; existing untracked `.claude/launch.json` preserved. `git diff --check` passed after append.
 
 **Verdict for Phase 2 at `2f802d92`: CHANGES REQUIRED.** Close remaining D3-P1-2 caller-origin gaps with boundary regressions, then re-review. D3-P1-1 and D3-P2-1 reported cases are closed. Both phases remain one release unit; the workflow's second security review remains required before shipping.
+
+
+## tab-database-reconnect — Phase 2 review round 3
+
+### Status
+
+VERIFIED WITH LIMITATIONS
+
+Reviewed by Codex, 2026-10-31, HEAD `40154c65` on `fix/tab-database-reconnect`; round 2 fix diff `HEAD~1..HEAD` (`2f802d92..40154c65`), full Phase 2 `bb1f856f..40154c65`. Read workflow, approved D3 scope and preceding findings; reviewed changes and adjacent caller/transport paths. No application source or committed tests changed.
+
+### Findings
+
+**P0:** None established.
+
+**P1:** None established. **D3-R2-P1-1 resolved** for the reviewed operation matrix.
+
+**P2:** None established. Test-run limitation recorded below; no source regression established from it.
+
+### Round 2 disposition and origin audit
+
+| Operation | Evidence / result |
+| --- | --- |
+| SQL validation and statements | `src/screens/connection/hooks/useSqlRunner.ts:427,482` captures editor origin per run and checks before each statement's validation/dispatch; real screen supplies it through `workspace/ActiveWindowContent.tsx:228` and `sql/SqlWindowPane.tsx:106`. History checks explicit origin again at `hooks/useSqlHistoryRunner.ts:62`, after validation; transport checks subsequent sends. Refusal stops remaining statements. |
+| Explain Analyze | `src/screens/connection/hooks/useSqlRunner.ts:850,868,895` captures origin, refuses before dialogs and includes it in `stillAllowed` after Touch ID/confirmation and during operation startup. Committed tests cover foreign runtime and target change during dialog. |
+| Health Inspector snapshots | `src/hooks/useDbHealthInspector.ts:139` checks `ctx.tabId` before collector invocation, cancels obsolete collection and clears snapshot/pending state on refusal. Context identity now includes tab at `:93`. Temporary real-hook/collector/registered-guard/native-spy tests confirm same-target foreign, different-target foreign, unknown, missing identity and mismatch cause zero native calls; valid context reaches native operation wrapper. Native stub rejects immediately: valid control proves dispatch only. |
+| Object definitions | `src/screens/connection/hooks/useLoadDbObjectDefinition.ts:81` checks explicit draft tab before loading. Refusal preserves draft; existing request/epoch/generation/revision completion fences remain. |
+| Database metadata | `src/hooks/useDatabaseMetadata.ts:162-165` resolves tab from its tab-scoped metadata key and checks before version lookup and every engine branch, including column enrichment/Mongo sampling. Loaded-cache/in-flight fast paths perform no new dispatch. Cache clear/token ownership remain intact. |
+| Diagrams | `src/components/modal/DiagramGeneratorDialog.tsx:73` checks explicit origin before `loadDiagramState`; `ConnectionScreen.tsx:1172` supplies screen tab. Existing completion/lifetime fencing remains. |
+| Health ping | `src/screens/connection/hooks/useConnectionHealthCheck.ts:53` checks caller tab before SQL/version work, records down on refusal; `workspace/MenuBar.tsx:194` supplies screen tab. Existing stale-result fencing remains. |
+| Table loads | `src/hooks/useLoadTableData.ts:211` checks key's tab after acquisition, before engine work; existing runtime/epoch in-flight ownership, coalescing, guarded publications and pending retirement remain. |
+
+No covered D3 operation still lacking an originating-tab boundary was found. Rechecked remaining full-Phase-2 routes: database list/change, backup/restore/SQL import, object/table drop and truncate, row patch apply, object save, schema/table creation, history, table import/export (including standalone metadata), AI submit/grant and Inspector signals retain explicit origin checks. `src/lib/tabs/assertTabTarget.ts:184` plus immutable ownership in `src/stores/runtimeTargets.ts:56` carries a successful caller check to subsequent runtime dispatches; `src/lib/tauri/runtimeInvoke.ts:36` checks immediately before native invoke. This does not substitute owner identity for the initial caller check. Configuration-based connect/test/create and admitted operation/session identifiers retain their intended treatment.
+
+### Compatibility and regression assessment
+
+- **SQL scripts across active-tab switches:** temporary real `useSqlRunner`/stream-store probe starts a two-statement script in A, switches active tab to B and rerenders while A's first stream runs, then completes both streams. Both statements dispatch through A's callback/runtime and finish. Existing sequential/cancel/late-start/refusal tests also pass. No active-tab lookup was added to ordinary run continuation.
+- **Admitted-session cleanup:** temporary registered-guard/real-wrapper/native-spy probe makes A unknown: new session begin is refused with zero native calls, while existing session execute, rollback/end and operation cancellation still reach native transport. `src/lib/tauri/sqlSession.ts:26-38` and operation cancellation carry admitted IDs, not runtime IDs; backup/restore cleanup remains usable. Native transaction semantics were not exercised.
+- **Health Inspector:** snapshot origin check closes the round 2 reproduction; existing signal entitlement, confirmation, refusal classification, action reconciliation and lifecycle tests remain passing. Adding tab to context identity clears old state when origin changes without changing profile/runtime.
+- **Metadata after reconnect:** temporary real metadata-hook probe first receives origin refusal, installs a new owned runtime for the same tab, clears the tab cache, then calls `refreshWithOutcome`; refresh succeeds and SQL calls use only the new runtime. Native version and SQL I/O mocked. Screen epoch clear at `src/screens/connection/ConnectionScreen.tsx:310-323` and metadata `clear` token invalidation at `src/hooks/useDatabaseMetadata.ts:795-801` remain unchanged. Existing reconnect/table acquisition regressions pass. This is hook-level evidence, not a mounted desktop reconnect scenario.
+- Committed new boundary tests mostly mock the downstream query/collector/loader. Shared helper tests cover refusal predicates; review probes add native transport evidence for Inspector. This is not an end-to-end native-spy matrix for every operation/engine.
+
+### Verification
+
+- `npm run build`: **passed**, exit 0 (TypeScript + Vite); existing externalization/dynamic-import/chunk warnings. Log `/tmp/pdb-d3-r3-build.log`.
+- First `npm run test:run -- --exclude '**/.claude/**'`: **289 files passed / 1 skipped; 2481 tests passed / 1 skipped**, but **exit 1** for an unhandled `EnvironmentTeardownError` importing `src/lib/connection/connection.ts` through `tabTarget.ts`/persistence after `src/components/AppHeader.test.tsx` teardown. Do not count this as a clean suite pass. Log `/tmp/pdb-d3-r3-tests.log`.
+- Full-suite rerun with the same command, after removing scratch suites: **289 files passed / 1 skipped; 2481 tests passed / 1 skipped**, **exit 0**, no unhandled error. First-run teardown anomaly did not reproduce. Log `/tmp/pdb-d3-r3-tests-rerun.log`.
+- Additional review probes: **28 passed**, exit 0 across three scratch suites (includes copied existing controls). Native snapshot refusal matrix/valid dispatch, admitted-session cleanup, script switch/rerender and reconnect metadata controls described above. Native transport/event bus/persistence or focused I/O mocked. First metadata probe lacked a version mock and failed; supplied mock, then all probes passed. Scratch suites moved out of repo to `/tmp/pdb-d3-r3-probes/`; final log `/tmp/pdb-d3-r3-probes.log`.
+- Rust unchanged in Phase 2; not rerun. No native desktop, live database, restart, SSH, Touch ID or engine integration exercised. No Docker/container commands or secret retrieval. No commit/push/merge.
+- Only this report append retained; pre-existing untracked `.claude/launch.json` preserved. `git diff --check` passed after append.
+
+**Verdict for Phase 2 at `40154c65`: VERIFIED WITH LIMITATIONS.** D3-R2-P1-1 closed; no further P0/P1/P2 source finding established. Limitations: native/live scenario and complete per-engine operation matrix unverified; test teardown anomaly documented above. Both phases remain one release unit; workflow's second security review remains required before shipping. D5 follow-ups remain separate.
